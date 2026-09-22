@@ -1,3 +1,5 @@
+import { translations, type TranslationKey } from '../i18n/translations';
+
 export type ModelComponent = {
   id: string;
   kind: string;
@@ -48,3 +50,9 @@ export const completeCustomComponentIds = (components: ModelComponent[], selecte
 
 export const selectedComponentBytes = (components: ModelComponent[], ids: string[] | null) =>
   ids?.reduce((total, id) => total + (components.find((component) => component.id === id)?.bytes || 0), 0) || 0;
+
+/** The set's name in the UI language; a set the studio has no name for keeps the server's. */
+export function profileLabel(t: (key: TranslationKey) => string, profile: { id: string; label: string }): string {
+  const key = `profile_${profile.id}`;
+  return key in translations.en ? t(key as TranslationKey) : profile.label;
+}

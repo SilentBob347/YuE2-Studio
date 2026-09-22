@@ -121,6 +121,10 @@ const en = {
   assistantOptionalPurpose: "Writes the style and lyrics from an idea, and edits the score",
   caption: "Style",
   captionStyle: "Style",
+  "profile_light": "Light - Q5_K_M backbone (6 GB cards)",
+  "profile_balanced": "Balanced - Q6_K backbone",
+  "profile_quality-q8": "Quality - Q8_0 backbone, near lossless",
+  "profile_native": "Full native - BF16 backbone, original weights",
 } as const;
 
 export type Yue2Strings = { readonly [K in keyof typeof en]: string };
@@ -242,6 +246,10 @@ const ru: Yue2Strings = {
   assistantOptionalPurpose: "Пишет стиль и текст по идее, правит партитуру",
   caption: "Стиль",
   captionStyle: "Стиль",
+  "profile_light": "Лёгкий - бэкбон Q5_K_M (карты на 6 ГБ)",
+  "profile_balanced": "Сбалансированный - бэкбон Q6_K",
+  "profile_quality-q8": "Качество - бэкбон Q8_0, почти без потерь",
+  "profile_native": "Полный оригинал - бэкбон BF16, исходные веса",
 };
 
 const zh: Yue2Strings = {
@@ -361,6 +369,10 @@ const zh: Yue2Strings = {
   assistantOptionalPurpose: "根据想法撰写风格和歌词，并编辑乐谱",
   caption: "风格",
   captionStyle: "风格",
+  "profile_light": "轻量 - Q5_K_M 主干（6 GB 显卡）",
+  "profile_balanced": "均衡 - Q6_K 主干",
+  "profile_quality-q8": "高质量 - Q8_0 主干，接近无损",
+  "profile_native": "完整原生 - BF16 主干，原始权重",
 };
 
 const ja: Yue2Strings = {
@@ -480,6 +492,10 @@ const ja: Yue2Strings = {
   assistantOptionalPurpose: "アイデアからスタイルと歌詞を書き、楽譜を編集します",
   caption: "スタイル",
   captionStyle: "スタイル",
+  "profile_light": "ライト - Q5_K_M バックボーン（6 GB カード）",
+  "profile_balanced": "バランス - Q6_K バックボーン",
+  "profile_quality-q8": "高品質 - Q8_0 バックボーン、ほぼロスレス",
+  "profile_native": "フルネイティブ - BF16 バックボーン、オリジナル重み",
 };
 
 const ko: Yue2Strings = {
@@ -599,6 +615,10 @@ const ko: Yue2Strings = {
   assistantOptionalPurpose: "아이디어로 스타일과 가사를 쓰고 악보를 편집합니다",
   caption: "스타일",
   captionStyle: "스타일",
+  "profile_light": "라이트 - Q5_K_M 백본 (6 GB 카드)",
+  "profile_balanced": "균형 - Q6_K 백본",
+  "profile_quality-q8": "고품질 - Q8_0 백본, 거의 무손실",
+  "profile_native": "풀 네이티브 - BF16 백본, 원본 가중치",
 };
 
 export const yue2 = { en, ru, zh, ja, ko };

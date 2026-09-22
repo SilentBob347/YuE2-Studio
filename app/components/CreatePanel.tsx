@@ -9,6 +9,7 @@ import { useI18n } from '../context/I18nContext';
 import { EXAMPLES, randomExample } from '../services/examples';
 import { ScoreView } from './ScoreView';
 import { transcribe } from '../services/transcription';
+import { profileLabel as setLabel } from '../services/modelCatalog';
 
 /**
  * The YuE2 request form.
@@ -41,7 +42,7 @@ type SetupStatus = {
   selected_profile_id?: string | null;
   selected_component_ids?: string[] | null;
   effective_max_batch?: number;
-  hardware?: { reason?: string };
+  hardware?: { gpuName?: string; totalVramGb?: number; recommended?: string };
 };
 
 type EngineCatalog = {
@@ -1161,7 +1162,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             </button>
             {catalog?.version && <span className="font-mono text-[10px] text-zinc-400">yue2.cpp {catalog.version.split(' ')[0]}</span>}
           </div>
-          {setup?.hardware?.reason && <p className="px-1 text-[10px] text-zinc-400">{setup.hardware.reason}</p>}
+          {setup?.hardware?.recommended && (
+            <p className="px-1 text-[10px] text-zinc-400">
+              {setup.hardware.gpuName}{setup.hardware.totalVramGb ? `, ${setup.hardware.totalVramGb.toFixed(1)} GB` : ''} · {t('recommendedForMachine')}{' '}
+              {setLabel(t, { id: setup.hardware.recommended, label: PROFILE_LABEL[setup.hardware.recommended] ?? setup.hardware.recommended })}
+            </p>
+          )}
           {error && <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs leading-5 text-red-700 dark:text-red-200">{error}</div>}
         </div>
       </div>
