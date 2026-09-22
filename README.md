@@ -26,7 +26,7 @@ score before it sings. Describe a style, write the lyrics, and the model compose
 with chords as sheet music, then performs it as a full song with vocals. The score comes
 back with the track: read it, edit it, and render the same composition again with a
 different sound. Windows installer with auto-update or a portable folder, runs offline on
-a GPU with 6 GB of VRAM or more — NVIDIA through CUDA, AMD and Intel through Vulkan.
+an NVIDIA card with 6 GB of VRAM or more; AMD and Intel cards through Vulkan are experimental.
 
 It is built on [yue2.cpp](https://github.com/ServeurpersoCom/yue2.cpp), the native C++/CUDA
 port of YuE2. The studio around it is Rust and React in a Tauri window — nothing in the
@@ -83,9 +83,10 @@ The same screens in the language you read: [Русский](https://timoncool.gi
 - A GPU with **6 GB of VRAM** or more:
   - **NVIDIA**, GTX 16 / RTX 20 generation or newer (Turing through Blackwell), runs on
     CUDA — the fastest path. Pascal and older are not supported by the CUDA 13 toolkit.
-  - **AMD or Intel** runs on Vulkan through the card's own driver, nothing extra to
-    install. Checked on AMD Radeon integrated graphics; discrete AMD and Intel cards have
-    not been tested yet.
+  - **AMD or Intel — experimental.** The engine runs on Vulkan through the card's own
+    driver. The Vulkan path itself is verified on NVIDIA (the same words heard as on
+    CUDA), but on AMD Radeon integrated graphics the song came out with unintelligible
+    vocals, and discrete AMD and Intel cards are untested. Reports from owners are welcome.
   - Without a GPU the engine falls back to the processor, which works but is many times
     slower.
 - 4–10 GB of disk for one model set.
@@ -162,8 +163,8 @@ yue-server.exe → ggml.dll, ggml-base.dll            shipped inside the app
 yue2.cpp commit with all backends, live in `resources\yue2-cpp\` beside the main
 executable. Settings → Local engine chooses the compute device: Auto (CUDA on NVIDIA,
 Vulkan on AMD and Intel, the processor without a GPU), or CUDA, Vulkan or the processor
-explicitly. On Vulkan the studio turns on the engine's FP16 clamp: without it an AMD Radeon
-renders silence.
+explicitly. On Vulkan the studio turns on the engine's FP16 clamp: without it AMD Radeon
+integrated graphics rendered pure silence and the engine crashed encoding it.
 
 **Downloaded once, on the first engine start — on NVIDIA only.**
 
