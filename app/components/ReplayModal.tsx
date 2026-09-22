@@ -30,7 +30,10 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, onClose, onQueue
 
   const [steps, setSteps] = useState<number>(numberOr('steps', 32));
   const [variations, setVariations] = useState<number>(1);
-  const [seed, setSeed] = useState<string>(typeof settings.seed === 'number' ? String(settings.seed) : '');
+  // Empty keeps the track's own sound seed exactly as the service stored it:
+  // the engine draws 64-bit seeds, which a JavaScript number cannot hold.
+  const [seed, setSeed] = useState<string>('');
+  const originalSeed = settings.seed === undefined || settings.seed === null ? '' : String(settings.seed);
   const [bitrate, setBitrate] = useState<number>(numberOr('mp3_bitrate', 320));
   const [format, setFormat] = useState<'mp3' | 'wav16' | 'wav24' | 'wav32'>(
     typeof settings.output_format === 'string' ? (settings.output_format as 'mp3') : 'mp3',
@@ -43,7 +46,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, onClose, onQueue
     setError(null);
     try {
       const parsedSeed = seed.trim() === '' ? undefined : Number(seed);
-      if (parsedSeed !== undefined && (!Number.isInteger(parsedSeed) || parsedSeed < 0)) {
+      if (parsedSeed !== undefined && (!Number.isSafeInteger(parsedSeed) || parsedSeed < 0)) {
         throw new Error('Seed must be a non-negative integer.');
       }
       const response = await fetch('/v1/music/replay', {
@@ -96,7 +99,7 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, onClose, onQueue
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               <span className="mb-1.5 block">{t('noiseSeed')}</span>
-              <input inputMode="numeric" value={seed} placeholder="-1" onChange={event => setSeed(event.target.value)} className={CONTROL} />
+              <input inputMode="numeric" value={seed} placeholder={originalSeed || '-1'} onChange={event => setSeed(event.target.value)} className={CONTROL} />
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               <span className="mb-1.5 block">{t('outputFormat')}</span>

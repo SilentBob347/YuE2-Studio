@@ -1620,4 +1620,17 @@ mod live_recognition {
         }
         assert!(!words.is_empty(), "nothing was recognised");
     }
+
+    /// The same against Parakeet: what the recogniser actually heard, printed
+    /// whole, so a generated song can be checked against its own lyrics.
+    #[test]
+    fn parakeet_hears_a_real_track() {
+        let (Some(root), Some(track)) = (std::env::var_os("YUE_DATA_ROOT"), std::env::var_os("YUE_TEST_TRACK")) else { return };
+        let sync = LyricsSync::new(std::path::Path::new(&root));
+        assert!(sync.parakeet_ready(), "Parakeet is not installed");
+        let words = sync.parakeet_words(std::path::Path::new(&track)).expect("recognition");
+        let heard: Vec<&str> = words.iter().map(|(_, word)| word.as_str()).collect();
+        eprintln!("heard {} words: {}", words.len(), heard.join(" "));
+        assert!(!words.is_empty(), "nothing was recognised");
+    }
 }

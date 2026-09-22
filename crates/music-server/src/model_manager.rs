@@ -8,10 +8,9 @@ use std::{
 };
 
 use anyhow::{bail, Context, Result};
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::{io::AsyncWriteExt, sync::RwLock};
+use tokio::sync::RwLock;
 
 pub const ENGINE_ID: &str = "yue2-cpp";
 const REPOSITORY: &str = "Serveurperso/YuE2-GGUF";
@@ -632,10 +631,10 @@ fn part_path(path: &Path) -> PathBuf {
 
 fn profiles() -> Vec<Profile> {
     vec![
-        profile("light", "Light - Q5_K_M backbone (6 GB cards)", false, &["backbone-q5", "vae-f32", "transcriber-q5"]),
-        profile("balanced", "Balanced - Q6_K backbone", false, &["backbone-q6", "vae-f32", "transcriber-q6"]),
-        profile("quality-q8", "Quality - Q8_0 backbone, near lossless", true, &["backbone-q8", "vae-f32", "transcriber-q8"]),
-        profile("native", "Full native - BF16 backbone, original weights", false, &["backbone-bf16", "vae-f32", "transcriber-f32"]),
+        profile("light", "Light - Q5_K_M backbone (6 GB cards)", &["backbone-q5", "vae-f32", "transcriber-q5"]),
+        profile("balanced", "Balanced - Q6_K backbone", &["backbone-q6", "vae-f32", "transcriber-q6"]),
+        profile("quality-q8", "Quality - Q8_0 backbone, near lossless", &["backbone-q8", "vae-f32", "transcriber-q8"]),
+        profile("native", "Full native - BF16 backbone, original weights", &["backbone-bf16", "vae-f32", "transcriber-f32"]),
     ]
 }
 
@@ -643,8 +642,10 @@ pub fn profile_exists(id: &str) -> bool {
     profiles().iter().any(|profile| profile.id == id && profile.installable && profile.backend == ENGINE_ID)
 }
 
-fn profile(id: &'static str, label: &'static str, recommended: bool, ids: &[&'static str]) -> Profile {
+fn profile(id: &'static str, label: &'static str, ids: &[&'static str]) -> Profile {
     let all = components();
+    // The badge follows the machine, the same answer the first-run banner gives.
+    let recommended = id == recommended_profile();
     Profile { id, label, backend: ENGINE_ID, installable: true, recommended, components: ids.to_vec(), total_bytes: ids.iter().filter_map(|id| all.iter().find(|component| component.id == *id)).map(|component| component.bytes).sum() }
 }
 

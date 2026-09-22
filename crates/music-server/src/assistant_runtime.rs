@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
-use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 

@@ -128,8 +128,12 @@ foreach ($target in $shippedTargets) {
 }
 Get-ChildItem -Path $binDirectory -Filter '*.dll' -File | Copy-Item -Destination $resolvedOutputDirectory -Force
 
-[pscustomobject]@{
+# What was staged, so a release can tell whether it must rebuild.
+$stamp = [pscustomobject]@{
+    commit = $engineSource.commit
     backend = $backend
     cuda_architecture = $CudaArchitecture
     runtime = Join-Path $resolvedOutputDirectory 'yue-server.exe'
-} | ConvertTo-Json -Compress
+}
+[System.IO.File]::WriteAllText((Join-Path $resolvedOutputDirectory 'runtime.json'), ($stamp | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+$stamp | ConvertTo-Json -Compress

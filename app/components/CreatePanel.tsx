@@ -189,14 +189,15 @@ const Stage: React.FC<{ title: string; hint: string; children: React.ReactNode }
   </section>
 );
 
-const AutoTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement> & { minRows?: number }> = ({ minRows = 3, value, ...rest }) => {
+/** Grows with its content up to `maxRows`, then scrolls inside itself. */
+const AutoTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement> & { minRows?: number; maxRows?: number }> = ({ minRows = 3, maxRows = 24, value, ...rest }) => {
   const node = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     const element = node.current;
     if (!element) return;
     element.style.height = 'auto';
-    element.style.height = `${Math.max(element.scrollHeight, minRows * 20)}px`;
-  }, [value, minRows]);
+    element.style.height = `${Math.min(Math.max(element.scrollHeight, minRows * 20), maxRows * 20)}px`;
+  }, [value, minRows, maxRows]);
   return <textarea ref={node} value={value} rows={minRows} {...rest} />;
 };
 
@@ -370,8 +371,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setSynthBatch('');
     setSteps(asText(request.steps));
     setCfgScale(typeof request.cfg_scale === 'number' && request.cfg_scale >= 0 ? String(request.cfg_scale) : '');
-    const storedLmSeed = asText(request.lm_seed);
-    const storedSeed = asText(request.seed);
+    const safeSeed = (value: unknown) => (typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : '');
+    const storedLmSeed = safeSeed(request.lm_seed);
+    const storedSeed = safeSeed(request.seed);
     setLmSeed(storedLmSeed === '-1' ? '' : storedLmSeed);
     setSeed(storedSeed === '-1' ? '' : storedSeed);
     setRandomizeSeed(!(storedLmSeed && storedLmSeed !== '-1'));
@@ -462,12 +464,14 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     if (stepsValue !== undefined) request.steps = stepsValue;
     const cfgValue = numberOrUndefined(cfgScale);
     if (cfgValue !== undefined) request.cfg_scale = cfgValue;
-    if (!randomizeSeed) {
-      const lmSeedValue = numberOrUndefined(lmSeed);
-      const seedValue = numberOrUndefined(seed);
-      if (lmSeedValue !== undefined) request.lm_seed = lmSeedValue;
-      if (seedValue !== undefined) request.seed = seedValue;
-    }
+    // Seeds are drawn here, within 32 bits, so the stored request replays the
+    // exact track: the engine's own random draw is 64-bit and does not survive
+    // a JavaScript number.
+    const randomSeed = () => Math.floor(Math.random() * 0x100000000);
+    const lmSeedValue = randomizeSeed ? undefined : numberOrUndefined(lmSeed);
+    const seedValue = randomizeSeed ? undefined : numberOrUndefined(seed);
+    request.lm_seed = lmSeedValue !== undefined && lmSeedValue >= 0 ? lmSeedValue : randomSeed();
+    request.seed = seedValue !== undefined && seedValue >= 0 ? seedValue : randomSeed();
     if (semanticTokens.trim()) request.semantic_tokens = semanticTokens.trim();
     const abcPreset = samplingFrom(abcSampling);
     if (abcPreset) request.abc_sampling = abcPreset;
@@ -872,10 +876,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             <AutoTextarea
               value={style}
               minRows={3}
+              maxRows={8}
               onChange={event => setStyle(event.target.value)}
               placeholder={tt('stylePlaceholder')}
               aria-label={tt('styleCardTitle')}
-              className={`${CONTROL} mt-3 resize-none leading-5`}
+              className={`${CONTROL} mt-3 resize-none overflow-y-auto leading-5 custom-scrollbar`}
             />
             <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('styleHint')}</p>
           </Card>
@@ -904,12 +909,13 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             <AutoTextarea
               value={lyrics}
               minRows={10}
+              maxRows={22}
               onChange={event => setLyrics(event.target.value)}
               onFocus={event => { lyricsBox.current = event.currentTarget; }}
               disabled={instrumental}
               placeholder={'[Verse 1]\n…\n\n[Chorus]\n…'}
               aria-label={t('lyrics')}
-              className={`${CONTROL} resize-none font-mono text-xs leading-5`}
+              className={`${CONTROL} resize-none overflow-y-auto font-mono text-xs leading-5 custom-scrollbar`}
             />
             <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('lyricsHintYue')}</p>
           </Card>
@@ -962,11 +968,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                 <AutoTextarea
                   value={abc}
                   minRows={5}
+                  maxRows={14}
                   onChange={event => setAbc(event.target.value)}
                   placeholder={tt('scorePlaceholder')}
                   aria-label={tt('scoreCardTitle')}
                   spellCheck={false}
-                  className={`${CONTROL} mt-3 resize-none font-mono text-[11px] leading-4`}
+                  className={`${CONTROL} mt-3 resize-none overflow-y-auto font-mono text-[11px] leading-4 custom-scrollbar`}
                 />
                 <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('scoreHint')}</p>
                 {melodyWithChords && (
