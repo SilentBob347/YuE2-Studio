@@ -83,6 +83,10 @@ struct AppState {
 struct EngineClient {
     base_url: String,
     http: reqwest::Client,
+    /// The last health answer and when it was taken. Every status poll asks,
+    /// and on Windows a refused loopback connect takes about two seconds, so
+    /// with the engine down the polls queued up behind each other.
+    health_cache: Arc<std::sync::Mutex<Option<(std::time::Instant, bool)>>>,
 }
 
 /// One autoregressive stage's sampling preset. Every knob is optional: an
@@ -4332,17 +4336,26 @@ impl EngineClient {
             .unwrap_or_else(|_| format!("http://127.0.0.1:{}", music_engine::yue_server::DEFAULT_PORT))
             .trim_end_matches('/')
             .to_owned();
-        Self { base_url, http: reqwest::Client::new() }
+        Self { base_url, http: reqwest::Client::new(), health_cache: Arc::new(std::sync::Mutex::new(None)) }
     }
 
     async fn health(&self) -> bool {
-        self.http
+        const FRESH: std::time::Duration = std::time::Duration::from_millis(1500);
+        if let Some((at, up)) = *self.health_cache.lock().expect("health cache") {
+            if at.elapsed() < FRESH {
+                return up;
+            }
+        }
+        let up = self
+            .http
             .get(self.url("/health"))
-            .timeout(std::time::Duration::from_secs(2))
+            .timeout(std::time::Duration::from_millis(500))
             .send()
             .await
             .map(|response| response.status().is_success())
-            .unwrap_or(false)
+            .unwrap_or(false);
+        *self.health_cache.lock().expect("health cache") = Some((std::time::Instant::now(), up));
+        up
     }
 
     async fn props(&self) -> anyhow::Result<Value> {

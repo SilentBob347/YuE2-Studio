@@ -116,6 +116,11 @@ const en = {
   vaeCoreHint: "Latent frames per decode tile, 512 by default. Smaller lowers the decode peak on small cards; the speed stays the same.",
   vaeHaloLabel: "VAE halo (--vae-halo)",
   vaeHaloHint: "Overlap frames on each side of a tile, 16 by default; the crop is exact, so there are no seams.",
+  writeEverything: "Write the style and lyrics",
+  studioModeHint: "You write the style and lyrics yourself. This is how the model is normally used; no text model is needed.",
+  assistantOptionalPurpose: "Writes the style and lyrics from an idea, and edits the score",
+  caption: "Style",
+  captionStyle: "Style",
 } as const;
 
 export type Yue2Strings = { readonly [K in keyof typeof en]: string };
@@ -232,6 +237,11 @@ const ru: Yue2Strings = {
   vaeCoreHint: "Кадров латента на тайл декодирования, по умолчанию 512. Меньше — ниже пик на слабых картах; скорость та же.",
   vaeHaloLabel: "Поля VAE (--vae-halo)",
   vaeHaloHint: "Кадров перекрытия с каждой стороны тайла, по умолчанию 16; обрезка точная, швов нет.",
+  writeEverything: "Написать стиль и текст",
+  studioModeHint: "Стиль и текст пишете сами. Это обычный режим модели, текстовая модель не нужна.",
+  assistantOptionalPurpose: "Пишет стиль и текст по идее, правит партитуру",
+  caption: "Стиль",
+  captionStyle: "Стиль",
 };
 
 const zh: Yue2Strings = {
@@ -346,6 +356,11 @@ const zh: Yue2Strings = {
   vaeCoreHint: "每个解码分块的潜在帧数，默认 512。调小可降低小显存上的解码峰值，速度不变。",
   vaeHaloLabel: "VAE 边缘（--vae-halo）",
   vaeHaloHint: "分块两侧的重叠帧数，默认 16；裁剪是精确的，不会产生接缝。",
+  writeEverything: "撰写风格和歌词",
+  studioModeHint: "由你亲自撰写风格和歌词。这是模型的常规用法，无需文本模型。",
+  assistantOptionalPurpose: "根据想法撰写风格和歌词，并编辑乐谱",
+  caption: "风格",
+  captionStyle: "风格",
 };
 
 const ja: Yue2Strings = {
@@ -460,6 +475,11 @@ const ja: Yue2Strings = {
   vaeCoreHint: "デコードタイルあたりの潜在フレーム数（既定 512）。小さくすると小容量カードでのピークが下がり、速度は変わりません。",
   vaeHaloLabel: "VAE ハロー（--vae-halo）",
   vaeHaloHint: "タイル両側の重なりフレーム数（既定 16）。切り出しは正確なので継ぎ目は出ません。",
+  writeEverything: "スタイルと歌詞を書く",
+  studioModeHint: "スタイルと歌詞は自分で書きます。モデルの通常の使い方で、テキストモデルは不要です。",
+  assistantOptionalPurpose: "アイデアからスタイルと歌詞を書き、楽譜を編集します",
+  caption: "スタイル",
+  captionStyle: "スタイル",
 };
 
 const ko: Yue2Strings = {
@@ -574,6 +594,11 @@ const ko: Yue2Strings = {
   vaeCoreHint: "디코딩 타일당 잠재 프레임 수, 기본 512. 줄이면 작은 카드에서 최대치가 낮아지고 속도는 같습니다.",
   vaeHaloLabel: "VAE 헤일로 (--vae-halo)",
   vaeHaloHint: "타일 양쪽의 겹침 프레임 수, 기본 16. 잘라내기가 정확해 이음새가 없습니다.",
+  writeEverything: "스타일과 가사 쓰기",
+  studioModeHint: "스타일과 가사를 직접 씁니다. 모델의 기본 사용법이며 텍스트 모델은 필요 없습니다.",
+  assistantOptionalPurpose: "아이디어로 스타일과 가사를 쓰고 악보를 편집합니다",
+  caption: "스타일",
+  captionStyle: "스타일",
 };
 
 export const yue2 = { en, ru, zh, ja, ko };
