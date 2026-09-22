@@ -1,6 +1,6 @@
 //! ID3 tags on the MP3s the studio writes.
 //!
-//! mm-server returns bare audio: no title, no artist, no cover, no lyrics. A
+//! yue-server returns bare audio: no title, no artist, no cover, no lyrics. A
 //! file like that lands in a player as "instrumental-04" with a blank square,
 //! which is the wrong answer for a track that has all of those things stored
 //! next to it. ACE-Step Studio tagged its exports, and so does this one.
@@ -68,19 +68,23 @@ pub fn write_mp3_tags(path: &Path, tags: &TrackTags) -> anyhow::Result<()> {
 
 /// The genre field takes a phrase, and only a phrase.
 ///
-/// A one-line prompt starts with one - "Darkwave, Synth-pop. …" - so its first
-/// piece is the genre. A structured Music3 caption names its genre a few
-/// phrases in, behind the heading and a row of measurements, so the phrases are
-/// walked until one can stand as a genre. Nothing plausible means the field is
-/// left empty, which every player handles and a wrong genre does not.
+/// A style prompt usually starts with one - "Darkwave, Synth-pop, ..." - but
+/// YuE2's often open with the vocal language ("English, warm piano pop"), so
+/// the descriptors are walked until one can stand as a genre. Nothing plausible
+/// leaves the field empty, which every player handles and a wrong genre does not.
 pub fn genre_from_caption(caption: &str) -> Option<String> {
     caption
-        .split(['.', '\n'])
-        .filter_map(|piece| piece.split(',').next())
+        .split(['.', '\n', ','])
         .map(str::trim)
         .find(|phrase| plausible_genre(phrase))
         .map(str::to_string)
 }
+
+/// Vocal languages a style names; a language is not a genre.
+const LANGUAGES: &[&str] = &[
+    "english", "mandarin", "chinese", "cantonese", "russian", "japanese", "korean", "spanish",
+    "french", "german", "portuguese", "italian", "turkish", "arabic", "hindi", "ukrainian",
+];
 
 /// Whether a phrase can stand as a genre.
 fn plausible_genre(phrase: &str) -> bool {
@@ -91,15 +95,17 @@ fn plausible_genre(phrase: &str) -> bool {
     let is_label = crate::auto_title::LABELS.iter().any(|label| lowered.starts_with(label));
     // "key is D", "scale is minor", "bpm is 180" - a stated measurement, not a name.
     let is_measurement = lowered.contains(" is ");
+    let is_language = LANGUAGES.iter().any(|language| lowered == *language || lowered.starts_with(&format!("{language} ")));
     !phrase.is_empty()
         && phrase.chars().count() < 40
         && !phrase.contains(':')
         && !is_label
         && !is_measurement
+        && !is_language
         && !phrase.chars().any(|character| character.is_ascii_digit())
 }
 
-/// The tempo, written either as `bpm is 96` the way Music3 captions state it,
+/// The tempo, written either as `bpm is 96` the way structured captions state it,
 /// or as `124 BPM` the way a person writing a one-line prompt does.
 pub fn bpm_from_caption(caption: &str) -> Option<u32> {
     let lowered = caption.to_lowercase();
@@ -144,12 +150,12 @@ mod tests {
 
     #[test]
     fn a_written_tag_reads_back() {
-        let path = std::env::temp_dir().join(format!("mm3-tag-{}.mp3", uuid::Uuid::now_v7()));
+        let path = std::env::temp_dir().join(format!("yue2-tag-{}.mp3", uuid::Uuid::now_v7()));
         std::fs::write(&path, sample_mp3()).unwrap();
 
         let tags = TrackTags {
             title: "Неон".into(),
-            album: "MiniMax Music3 Studio".into(),
+            album: "YuE2 Studio".into(),
             artist: "Local Studio".into(),
             genre: Some("Synth-pop".into()),
             lyrics: Some("Неон дрожит над мокрым городом".into()),
@@ -160,7 +166,7 @@ mod tests {
 
         let read = Tag::read_from_path(&path).unwrap();
         assert_eq!(read.title(), Some("Неон"));
-        assert_eq!(read.album(), Some("MiniMax Music3 Studio"));
+        assert_eq!(read.album(), Some("YuE2 Studio"));
         assert_eq!(read.artist(), Some("Local Studio"));
         assert_eq!(read.genre(), Some("Synth-pop"));
         assert_eq!(read.get("TBPM").and_then(|frame| frame.content().text()), Some("96"));
@@ -172,7 +178,7 @@ mod tests {
 
     #[test]
     fn rewriting_replaces_rather_than_stacks() {
-        let path = std::env::temp_dir().join(format!("mm3-tag-{}.mp3", uuid::Uuid::now_v7()));
+        let path = std::env::temp_dir().join(format!("yue2-tag-{}.mp3", uuid::Uuid::now_v7()));
         std::fs::write(&path, sample_mp3()).unwrap();
 
         write_mp3_tags(&path, &TrackTags { title: "First".into(), ..TrackTags::default() }).unwrap();
@@ -212,5 +218,11 @@ mod tests {
     #[test]
     fn a_caption_of_pure_measurements_names_no_genre() {
         assert_eq!(genre_from_caption(concat!("Global Metadata\n", "Basic Attributes: bpm is 96. key is A")), None);
+    }
+
+    #[test]
+    fn a_yue2_style_names_its_genre_after_the_language() {
+        assert_eq!(genre_from_caption("English, warm piano pop, expressive female voice, 88 BPM").as_deref(), Some("warm piano pop"));
+        assert_eq!(bpm_from_caption("English, warm piano pop, 88 BPM"), Some(88));
     }
 }

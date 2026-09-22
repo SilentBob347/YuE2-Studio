@@ -1,6 +1,6 @@
 //! The CUDA libraries the music engine is linked against.
 //!
-//! `mm-server.exe` imports `ggml.dll`, which imports `ggml-cuda.dll`, which
+//! `yue-server.exe` imports `ggml.dll`, which imports `ggml-cuda.dll`, which
 //! imports `cublas64_13.dll`, which imports `cublasLt64_13.dll`. Every one of
 //! those is a static import, so Windows resolves the whole chain before the
 //! engine's own code runs: a missing cuBLAS is not a backend that falls back to
@@ -48,7 +48,7 @@ pub const ASSETS: &[Asset] = &[Asset {
     url: "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-13.5.1.27-archive.zip",
     relative_path: "cuda-cublas.zip",
     bytes: 391_055_517,
-    // No sub-directory: the libraries go straight in beside mm-server.exe,
+    // No sub-directory: the libraries go straight in beside yue-server.exe,
     // which is where the Windows loader looks first and what NVIDIA's own
     // deployment guide recommends.
     unzip_into: None,
@@ -64,7 +64,7 @@ pub struct EngineRuntime {
 }
 
 impl EngineRuntime {
-    /// Takes the directory `mm-server.exe` lives in: the libraries belong
+    /// Takes the directory `yue-server.exe` lives in: the libraries belong
     /// beside the binary that imports them, not in a folder of their own.
     pub fn new(bundle_root: &Path) -> Self {
         Self { downloader: Downloader::new(bundle_root.to_path_buf()) }
@@ -267,7 +267,7 @@ fn is_provided_by_the_system(name: &str) -> bool {
 
 /// What a binary needs that is neither beside it nor supplied by Windows.
 ///
-/// Follows the chain: `mm-server.exe` imports `ggml.dll`, which imports
+/// Follows the chain: `yue-server.exe` imports `ggml.dll`, which imports
 /// `ggml-cuda.dll`, which is where cuBLAS actually comes in. Checking only the
 /// executable's own imports would have found nothing wrong with the release
 /// that could not start.
@@ -334,17 +334,17 @@ mod tests {
     #[cfg(windows)]
     fn the_staged_engine_bundle_can_actually_be_loaded() {
         let bundle = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../desktop/src-tauri/resources/minimaxmusic-cpp")
+            .join("../../desktop/src-tauri/resources/yue2-cpp")
             .canonicalize();
         let Ok(bundle) = bundle else {
             // No engine has been built into the bundle on this machine, which
             // is the normal state of a checkout that only touches the service.
             return;
         };
-        if !bundle.join("mm-server.exe").is_file() {
+        if !bundle.join("yue-server.exe").is_file() {
             return;
         }
-        let missing = unresolved_dependencies(&bundle, "mm-server.exe").expect("read the bundle's import tables");
+        let missing = unresolved_dependencies(&bundle, "yue-server.exe").expect("read the bundle's import tables");
         let handled: Vec<&str> = REQUIRED_LIBRARIES.iter().chain(VC_RUNTIME_LIBRARIES.iter()).copied().collect();
         let unexpected: Vec<&String> = missing
             .iter()
@@ -353,7 +353,7 @@ mod tests {
         assert!(
             unexpected.is_empty(),
             "the engine bundle imports libraries that are neither shipped nor installed on first start: {unexpected:?}. \
-             Ship them next to mm-server.exe, or add them to this module so the studio fetches them."
+             Ship them next to yue-server.exe, or add them to this module so the studio fetches them."
         );
     }
 

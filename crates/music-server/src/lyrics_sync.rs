@@ -1,6 +1,6 @@
 //! Karaoke timings for a finished track.
 //!
-//! The words are already known - Music3 sang the lyrics it was given - but the
+//! The words are already known - YuE2 sang the lyrics it was given - but the
 //! *timings* are not, and the video studio's karaoke layer and the player both
 //! need them. This module produces an LRC file for a track using whichever
 //! recogniser the user picked; like every optional extra here it is off by

@@ -18,7 +18,8 @@ mod separation;
 mod sizes;
 mod skill;
 mod library;
-mod mm_result;
+mod engine_result;
+mod progress;
 mod openrouter_stream;
 
 use std::{collections::HashMap, env, fs, net::SocketAddr, path::PathBuf, sync::Arc};
@@ -39,13 +40,13 @@ use serde_json::Value;
 use tokio::sync::RwLock;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 
-const PRIMARY_MUSIC_ENGINE_ID: &str = "minimaxmusic-cpp";
+const PRIMARY_MUSIC_ENGINE_ID: &str = model_manager::ENGINE_ID;
 
 #[derive(Clone)]
 struct AppState {
     configuration: Arc<RwLock<StudioConfiguration>>,
     jobs: Arc<RwLock<HashMap<String, MusicJob>>>,
-    music_server: MmServerClient,
+    music_server: EngineClient,
     model_manager: ModelManager,
     selected_profile_id: Arc<RwLock<Option<String>>>,
     selected_component_ids: Arc<RwLock<Option<Vec<String>>>>,
@@ -53,7 +54,7 @@ struct AppState {
     openrouter_catalog: Arc<RwLock<OpenRouterCatalogState>>,
     library: library::Library,
     /// Owned local engine process, when this service started one.
-    engine: Arc<tokio::sync::Mutex<Option<music_engine::mm_server::MmServerSupervisor>>>,
+    engine: Arc<tokio::sync::Mutex<Option<music_engine::yue_server::YueServerSupervisor>>>,
     engine_options: Arc<RwLock<EngineOptions>>,
     /// The CUDA libraries the engine binary imports. They are downloaded, not
     /// installed, so the engine cannot start until they are on disk.
@@ -79,38 +80,103 @@ struct AppState {
 }
 
 #[derive(Clone)]
-struct MmServerClient {
+struct EngineClient {
     base_url: String,
     http: reqwest::Client,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+/// One autoregressive stage's sampling preset. Every knob is optional: an
+/// absent one is the checkpoint value the engine applies.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+struct SamplingPreset {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    repetition_penalty: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    penalty_window: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+}
+
+impl SamplingPreset {
+    fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The protocol bounds yue-server enforces, checked here so the user is
+    /// told which knob is wrong instead of reading a bare 400.
+    fn validate(&self, label: &str) -> Result<(), String> {
+        if self.temperature.is_some_and(|value| !(0.0..=5.0).contains(&value)) {
+            return Err(format!("{label}: temperature must be between 0 and 5"));
+        }
+        if self.top_p.is_some_and(|value| !(value > 0.0 && value <= 1.0)) {
+            return Err(format!("{label}: top_p must be above 0 and at most 1"));
+        }
+        if self.top_k.is_some_and(|value| value < 1) {
+            return Err(format!("{label}: top_k must be at least 1"));
+        }
+        if self.repetition_penalty.is_some_and(|value| !(value > 0.0 && value.is_finite())) {
+            return Err(format!("{label}: repetition_penalty must be positive"));
+        }
+        if self.penalty_window.is_some_and(|value| !(1..=100).contains(&value)) {
+            return Err(format!("{label}: penalty_window must be between 1 and 100"));
+        }
+        if self.max_tokens.is_some_and(|value| value < 1) {
+            return Err(format!("{label}: max_tokens must be at least 1"));
+        }
+        if let (Some(min), Some(max)) = (self.min_tokens, self.max_tokens) {
+            if min > max {
+                return Err(format!("{label}: min_tokens cannot exceed max_tokens"));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A YuE2 generation request, in the engine's own vocabulary. Fields left
+/// out are the engine's protocol defaults.
+#[derive(Debug, Clone, Default, Deserialize)]
 struct CreateMusicJobRequest {
-    caption: String,
+    /// Comma-separated style tags, verbatim under `[Tags]`.
+    #[serde(default)]
+    style: String,
+    /// Lyrics with their structural tags, verbatim under `[Lyrics]`.
+    #[serde(default)]
     lyrics: String,
-    duration_seconds: f64,
-    steps: Option<u32>,
-    seed: Option<i64>,
+    /// ABC score to realise; empty lets the model write one.
+    abc: Option<String>,
+    /// Chain-of-thought mode: `full`, `melody` or `off`.
+    cot: Option<String>,
+    /// Target length in seconds; the model may end the song earlier.
+    duration_seconds: Option<f64>,
     lm_seed: Option<i64>,
-    lm_cfg: Option<f64>,
-    lm_top_k: Option<u32>,
+    seed: Option<i64>,
+    steps: Option<u32>,
     lm_batch_size: Option<u32>,
     synth_batch_size: Option<u32>,
-    dit_cfg: Option<f64>,
+    cfg_scale: Option<f64>,
+    /// Comma-separated semantic codes; present means the AR stage is skipped.
+    semantic_tokens: Option<String>,
+    abc_sampling: Option<SamplingPreset>,
+    semantic_sampling: Option<SamplingPreset>,
     peak_clip: Option<i32>,
     output_format: Option<String>,
     mp3_bitrate: Option<u32>,
-    models: Option<Mm3ModelSelection>,
-    /// Library title only. It is never sent to mm-server, which has no title
-    /// field, so it must not become part of the replayable request.
+    /// Library title only, never sent to the engine.
     title: Option<String>,
-    /// What the cover should show, when the assistant already described it.
-    /// Also library-only, for the same reason.
+    /// What the cover should show, when the assistant described it.
     cover_prompt: Option<String>,
 }
 
-/// The name this request goes into the library under: the user's, or one taken
-/// from the song when they left the field empty.
+/// The name this request goes into the library under: the user's, or one
+/// taken from the song when they left the field empty.
 fn titled(request: &CreateMusicJobRequest) -> String {
     request
         .title
@@ -118,16 +184,7 @@ fn titled(request: &CreateMusicJobRequest) -> String {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
-        .unwrap_or_else(|| auto_title::auto_title(&request.caption, &request.lyrics, request.lyrics.trim().is_empty()))
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-struct Mm3ModelSelection {
-    lm_model: Option<String>,
-    depth_model: Option<String>,
-    cond_model: Option<String>,
-    dit_model: Option<String>,
-    vae_model: Option<String>,
+        .unwrap_or_else(|| auto_title::auto_title(&request.style, &request.lyrics, request.lyrics.trim().is_empty()))
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -171,7 +228,7 @@ struct MusicJob {
     status: MusicJobStatus,
     dispatch: MusicJobDispatch,
     phase: MusicJobPhase,
-    caption: String,
+    style: String,
     lyrics: String,
     duration_seconds: f64,
     generation_settings: Value,
@@ -206,16 +263,16 @@ struct ApiError {
 }
 
 #[derive(Debug, Deserialize)]
-struct MmServerSubmitResponse {
+struct EngineSubmitResponse {
     id: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct MmServerJobResponse {
+struct EngineJobResponse {
     status: String,
 }
 
-struct MmServerResultResponse {
+struct EngineResultResponse {
     content_type: String,
     body: Vec<u8>,
 }
@@ -250,9 +307,12 @@ struct ReplayMusicJobRequest {
     replay_request: Option<Value>,
     steps: Option<u32>,
     seed: Option<i64>,
-    dit_cfg: Option<f64>,
+    synth_batch_size: Option<u32>,
     output_format: Option<String>,
-    models: Option<Mm3ModelSelection>,
+    peak_clip: Option<i32>,
+    mp3_bitrate: Option<u32>,
+    /// A title for the re-render; the source track's own name otherwise.
+    title: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -291,46 +351,35 @@ struct OpenRouterTranscriptionRequest {
     language: Option<String>,
 }
 
-/// Launch flags for the local engine process. They are a property of the
-/// running engine, so changing one restarts it; upstream has no way to apply
-/// them to a live server.
+/// Launch flags for the local engine process. They belong to the running
+/// engine, so changing one restarts it.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 struct EngineOptions {
     keep_loaded: bool,
     max_batch: Option<u32>,
     max_seq: Option<u32>,
+    vae_core: Option<u32>,
+    vae_halo: Option<u32>,
     disable_flash_attention: bool,
-    split_cfg_forwards: bool,
     clamp_fp16: bool,
 }
 
 impl EngineOptions {
-    /// How many songs one request may render, and the `--max-batch` the engine
-    /// is started with - `lm_batch_size` may not exceed it.
-    ///
-    /// One, like the engine's own default. The flag reserves KV cache for the
-    /// full batch when the weights load, whether or not anyone asks for it, so
-    /// a studio that quietly asked for four made every single-song generation
-    /// pay for three it would never render. Whoever wants more sets it, and the
-    /// engine restarts with the memory that choice costs.
+    /// Songs one request may draw, and the `--max-batch` the engine starts
+    /// with. Each song reserves a KV set, so nothing is reserved unasked.
     fn effective_max_batch(&self) -> u32 {
         self.max_batch.unwrap_or(1).max(1)
     }
 
-    fn to_engine(self) -> music_engine::mm_server::MmServerOptions {
-        music_engine::mm_server::MmServerOptions {
+    fn to_engine(self) -> music_engine::yue_server::YueServerOptions {
+        music_engine::yue_server::YueServerOptions {
             keep_loaded: self.keep_loaded,
-            // The ceiling the studio offers, given to the engine that has to
-            // honour it. `--max-batch` sizes the language model's KV sets when
-            // the weights are loaded, and the engine refuses any request above
-            // it: leaving the flag off meant it loaded with the upstream
-            // default of one while the panel offered four, so asking for two
-            // songs failed before it started.
             max_batch: Some(self.effective_max_batch()),
             max_seq: self.max_seq,
+            vae_core: self.vae_core,
+            vae_halo: self.vae_halo,
             disable_flash_attention: self.disable_flash_attention,
-            split_cfg_forwards: self.split_cfg_forwards,
             clamp_fp16: self.clamp_fp16,
         }
     }
@@ -450,7 +499,7 @@ pub async fn serve() -> anyhow::Result<()> {
             persisted.as_ref().map(|settings| settings.configuration.clone()).unwrap_or_else(initial_configuration),
         ))),
         jobs: Arc::new(RwLock::new(HashMap::new())),
-        music_server: MmServerClient::from_environment(),
+        music_server: EngineClient::from_environment(),
         model_manager,
         cover_templates: Arc::new(RwLock::new(
             persisted
@@ -559,6 +608,8 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/local-models/music", get(local_music_model_catalog))
         .route("/v1/music/jobs", post(create_music_job))
         .route("/v1/music/replay", post(replay_music_job))
+        .route("/v1/transcriptions", post(create_transcription))
+        .route("/v1/transcriptions/{job_id}", get(transcription_status).post(cancel_transcription))
         .route(
             "/v1/music/jobs/{job_id}",
             get(music_job_status).post(cancel_music_job),
@@ -601,7 +652,7 @@ pub async fn serve() -> anyhow::Result<()> {
                         // It was answering and now it is not: the one line that
                         // explains a log which suddenly starts again from
                         // "Listening on". Written once, not once a cycle.
-                        music_engine::mm_server::note_in_log("the engine stopped answering; restarting it");
+                        music_engine::yue_server::note_in_log("the engine stopped answering; restarting it");
                     }
                     match restart_engine(&state).await {
                         Ok(()) => complained = false,
@@ -1523,94 +1574,6 @@ async fn draw_cover(state: &AppState, song_id: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-async fn draw_cover_unused(state: AppState, song_id: String) {
-    let Ok(Some(song)) = state.library.get_song(&song_id) else { return };
-    if song.metadata.get("cover_filename").is_some() {
-        return;
-    }
-
-    let model = {
-        let configuration = state.configuration.read().await;
-        configuration
-            .selections
-            .iter()
-            .find(|selection| selection.capability == Capability::CoverArt)
-            .filter(|selection| selection.mode == ExecutionMode::OpenRouter)
-            .and_then(|selection| selection.cloud_model.clone())
-    };
-    let model = match model {
-        Some(model) if !model.trim().is_empty() => model,
-        _ => match catalog_for(&state).await.ok().and_then(|catalog| {
-            providers::openrouter::suggested_model(&catalog, Capability::CoverArt)
-        }) {
-            Some(model) => model,
-            None => return,
-        },
-    };
-
-    let template = {
-        let templates = state.cover_templates.read().await;
-        let default_id = state.cover_template_default.read().await.clone();
-        templates
-            .iter()
-            .find(|entry| Some(&entry.id) == default_id.as_ref())
-            .or_else(|| templates.first())
-            .map(|entry| entry.template.clone())
-    };
-    let Some(template) = template else { return };
-
-    let facts = cover_prompt::TrackFacts {
-        title: song.title.clone(),
-        style: song.caption.clone(),
-        lyrics: song.lyrics.clone(),
-        duration_seconds: song.metadata.get("duration_seconds").and_then(Value::as_f64).unwrap_or(0.0),
-    };
-    // What the assistant wrote for this track beats the generic template: it
-    // was written with the lyrics in front of it.
-    let prompt = match song.metadata.get("cover_prompt").and_then(Value::as_str).map(str::trim).filter(|value| !value.is_empty()) {
-        Some(written) => written.to_string(),
-        None => cover_prompt::render(&template, &facts),
-    };
-
-    let catalog = match catalog_for(&state).await {
-        Ok(catalog) => catalog,
-        Err(_) => return,
-    };
-    let request = match providers::openrouter::request_for(&catalog, Capability::CoverArt, &model, &prompt) {
-        Ok(request) => request,
-        Err(error) => {
-            eprintln!("no cover for {song_id}: {error}");
-            return;
-        }
-    };
-    let answered = match execute_openrouter_json(request).await {
-        Ok(answered) => answered,
-        Err(error) => {
-            eprintln!("no cover for {song_id}: {error}");
-            return;
-        }
-    };
-    let image = answered
-        .body
-        .get("data")
-        .and_then(|data| data.get(0))
-        .and_then(|first| first.get("b64_json"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let Some(image) = image else {
-        eprintln!("no cover for {song_id}: the model returned no image");
-        return;
-    };
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    let Ok(bytes) = STANDARD.decode(image.trim()) else { return };
-    if let Err(error) = state.library.store_song_cover(&song_id, &bytes, "image/png") {
-        eprintln!("could not store the cover for {song_id}: {error}");
-        return;
-    }
-    tag_stored_song(&state, &song_id).await;
-}
-
 async fn read_cover_templates(State(state): State<AppState>) -> Json<Value> {
     Json(serde_json::json!({
         "auto": *state.cover_auto.read().await,
@@ -1706,9 +1669,9 @@ async fn tag_stored_song(state: &AppState, song_id: &str) {
         .and_then(|(path, media_type)| std::fs::read(path).ok().map(|bytes| (media_type.to_string(), bytes)));
     let tags = tagging::TrackTags {
         title: song.title.clone(),
-        album: "MiniMax Music3 Studio".to_string(),
+        album: "YuE2 Studio".to_string(),
         // The engine is the performer here; the studio is the label.
-        artist: "MiniMax Music 3".to_string(),
+        artist: "YuE2".to_string(),
         genre: tagging::genre_from_caption(&song.caption),
         lyrics: Some(song.lyrics.clone()).filter(|value| !value.trim().is_empty()),
         bpm: tagging::bpm_from_caption(&song.caption),
@@ -1882,8 +1845,14 @@ async fn update_engine_options(
     if request.max_batch.is_some_and(|value| value == 0 || value > 8) {
         return Err(api_error(StatusCode::BAD_REQUEST, "max_batch must be between 1 and 8".into()));
     }
-    if request.max_seq.is_some_and(|value| value < 512) {
-        return Err(api_error(StatusCode::BAD_REQUEST, "max_seq must be at least 512".into()));
+    if request.max_seq.is_some_and(|value| !(4096..=24576).contains(&value)) {
+        return Err(api_error(StatusCode::BAD_REQUEST, "max_seq must be between 4096 and 24576".into()));
+    }
+    if request.vae_core.is_some_and(|value| !(64..=4096).contains(&value)) {
+        return Err(api_error(StatusCode::BAD_REQUEST, "vae_core must be between 64 and 4096".into()));
+    }
+    if request.vae_halo.is_some_and(|value| value > 256) {
+        return Err(api_error(StatusCode::BAD_REQUEST, "vae_halo must be at most 256".into()));
     }
     let changed = {
         let mut options = state.engine_options.write().await;
@@ -1943,45 +1912,82 @@ async fn restart_engine(state: &AppState) -> Result<(), String> {
     // the writing assistant is still holding the card, it does not finish.
     free_the_card_for_the_engine(state).await;
     let options = *state.engine_options.read().await;
+    let models = selected_engine_models(state).await?;
     let config = engine_location(options)
-        .resolve()
+        .resolve(models)
         .map_err(|error| format!("the local engine runtime was not found: {error}"))?;
-    let mut engine = music_engine::mm_server::MmServerSupervisor::new(config).map_err(|error| error.to_string())?;
+    let mut engine = music_engine::yue_server::YueServerSupervisor::new(config).map_err(|error| error.to_string())?;
     tokio::task::block_in_place(|| engine.ensure_started(std::time::Duration::from_secs(60)))
         .map_err(|error| format!("the local engine did not start: {error}"))?;
     *supervisor = Some(engine);
     Ok(())
 }
 
-/// Where the packaged or developer-built `mm-server` lives. Every value is an
-/// explicit override or a documented default; nothing is downloaded here.
+/// Where the packaged or developer-built `yue-server` lives. Every value is
+/// an explicit override or a documented default; nothing is downloaded here.
 fn engine_bundle_root() -> PathBuf {
     env::var_os("YUE_ENGINE_ROOT")
         .map(PathBuf::from)
         .or_else(|| env::var_os("YUE_ENGINE_BIN").map(PathBuf::from).and_then(|path| path.parent().map(std::path::Path::to_path_buf)))
-        .or_else(|| std::env::current_exe().ok().and_then(|path| path.parent().map(|parent| parent.join("resources").join("minimaxmusic-cpp"))))
-        .unwrap_or_else(|| PathBuf::from("resources/minimaxmusic-cpp"))
+        .or_else(|| std::env::current_exe().ok().and_then(|path| path.parent().map(|parent| parent.join("resources").join("yue2-cpp"))))
+        .unwrap_or_else(|| PathBuf::from("resources/yue2-cpp"))
 }
 
-fn engine_location(options: EngineOptions) -> music_engine::mm_server::MmServerLocation {
-    let configured_executable = env::var_os("YUE_ENGINE_BIN").map(PathBuf::from);
-    let bundle_root = engine_bundle_root();
-    music_engine::mm_server::MmServerLocation {
-        bundle_root,
-        configured_executable,
-        // The GGUFs live where the model manager put them, which is not
-        // inside the engine bundle: pointing the service at a developer build
-        // of mm-server used to leave it looking for models next to the binary
-        // and failing with "models root is not a directory".
-        configured_models_root: env::var_os("YUE_MODELS_ROOT")
-            .map(PathBuf::from)
-            .or_else(|| {
-                let managed = studio_data_root()?.join("models").join(model_manager::ENGINE_ID);
-                managed.is_dir().then_some(managed)
-            }),
+fn engine_location(options: EngineOptions) -> music_engine::yue_server::YueServerLocation {
+    music_engine::yue_server::YueServerLocation {
+        bundle_root: engine_bundle_root(),
+        configured_executable: env::var_os("YUE_ENGINE_BIN").map(PathBuf::from),
         host: env::var("YUE_ENGINE_HOST").ok(),
         port: env::var("YUE_ENGINE_PORT").ok().and_then(|value| value.parse().ok()),
         options: options.to_engine(),
+    }
+}
+
+/// The weights the selected set resolves to, as paths the engine can open.
+async fn selected_engine_models(state: &AppState) -> Result<music_engine::yue_server::YueModelFiles, String> {
+    let selected_component_ids = state.selected_component_ids.read().await.clone();
+    let selected_profile_id = state.selected_profile_id.read().await.clone();
+    let files = match (selected_component_ids, selected_profile_id) {
+        (Some(ids), _) => state.model_manager.installed_component_files(&ids),
+        (None, Some(profile_id)) => state.model_manager.installed_profile_files(&profile_id),
+        (None, None) => return Err("no model set is selected; choose one in Settings - Models".into()),
+    }
+    .map_err(|error| error.to_string())?;
+    let root = state.model_manager.models_directory();
+    Ok(music_engine::yue_server::YueModelFiles {
+        backbone: root.join(&files.backbone),
+        vae: root.join(&files.vae),
+        transcriber: files.transcriber.map(|name| root.join(name)),
+    })
+}
+
+/// yue-server takes its weights at launch, so a different selection only takes
+/// effect through a restart. A running engine this studio owns is restarted
+/// when the files it serves are not the ones now selected; an engine that is
+/// not running is left to the supervisor loop.
+async fn reload_engine_if_models_changed(state: &AppState) {
+    let Ok(wanted) = selected_engine_models(state).await else { return };
+    let current = {
+        let supervisor = state.engine.lock().await;
+        supervisor.as_ref().map(|engine| engine.config().models.clone())
+    };
+    let Some(current) = current else { return };
+    let same = |a: &std::path::Path, b: &std::path::Path| {
+        fs::canonicalize(a).ok().zip(fs::canonicalize(b).ok()).is_some_and(|(a, b)| a == b)
+    };
+    let unchanged = same(&current.backbone, &wanted.backbone)
+        && same(&current.vae, &wanted.vae)
+        && match (&current.transcriber, &wanted.transcriber) {
+            (Some(a), Some(b)) => same(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+    if unchanged {
+        return;
+    }
+    music_engine::yue_server::note_in_log("the selected model set changed; restarting the engine on it");
+    if let Err(error) = restart_engine(state).await {
+        eprintln!("the engine did not restart on the new model set: {error}");
     }
 }
 
@@ -2301,7 +2307,7 @@ fn studio_settings_path() -> PathBuf {
 
 fn default_studio_settings_path() -> PathBuf {
     studio_data_root()
-        .unwrap_or_else(|| env::temp_dir().join("minimax-music3-studio"))
+        .unwrap_or_else(|| env::temp_dir().join("yue2-studio"))
         .join("studio-settings.json")
 }
 
@@ -2315,17 +2321,17 @@ pub fn studio_data_root() -> Option<PathBuf> {
     #[cfg(windows)]
     {
         if let Some(root) = env::var_os("LOCALAPPDATA").or_else(|| env::var_os("APPDATA")) {
-            return Some(PathBuf::from(root).join("MiniMax Music3 Studio"));
+            return Some(PathBuf::from(root).join("YuE2 Studio"));
         }
     }
 
     #[cfg(not(windows))]
     {
         if let Some(root) = env::var_os("XDG_DATA_HOME") {
-            return Some(PathBuf::from(root).join("minimax-music3-studio"));
+            return Some(PathBuf::from(root).join("yue2-studio"));
         }
         if let Some(home) = env::var_os("HOME") {
-            return Some(PathBuf::from(home).join(".local/share/minimax-music3-studio"));
+            return Some(PathBuf::from(home).join(".local/share/yue2-studio"));
         }
     }
 
@@ -2436,22 +2442,19 @@ fn is_portable_installation() -> bool {
         .is_some_and(|marker| marker.is_file())
 }
 
-/// Recent native engine output. This is the only progress detail upstream
-/// exposes: `/job` reports a phase, and everything finer lives in the log ring.
+/// Recent native engine output: `/job` reports a phase, everything finer lives
+/// in the log. While the engine is starting it has no HTTP log yet, so the file
+/// it writes from its first line is what gets shown.
 async fn engine_logs(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
-    // While the engine is starting it has no HTTP log yet, so the file it
-    // writes from its first line is the only thing that can be shown - and it
-    // is exactly what the first-run screen needs.
-    match state.music_server.logs_snapshot(std::time::Duration::from_millis(700)).await {
-        Ok(lines) => Ok(Json(serde_json::json!({ "engine_id": PRIMARY_MUSIC_ENGINE_ID, "lines": lines }))),
-        Err(error) => {
-            let lines = music_engine::mm_server::startup_log_tail(60);
-            if lines.is_empty() {
-                return Err(api_error(StatusCode::SERVICE_UNAVAILABLE, format!("mm-server logs are unavailable: {error}")));
-            }
-            Ok(Json(serde_json::json!({ "engine_id": PRIMARY_MUSIC_ENGINE_ID, "lines": lines, "source": "startup" })))
-        }
+    let (lines, source) = match state.music_server.logs_snapshot(std::time::Duration::from_millis(700)).await {
+        Ok(lines) => (lines, "engine"),
+        Err(_) => (music_engine::yue_server::startup_log_tail(120), "startup"),
+    };
+    if lines.is_empty() {
+        return Err(api_error(StatusCode::SERVICE_UNAVAILABLE, "the engine log is empty: the engine has not started yet".into()));
     }
+    let progress = progress::from_log(&lines);
+    Ok(Json(serde_json::json!({ "engine_id": PRIMARY_MUSIC_ENGINE_ID, "lines": lines, "source": source, "progress": progress })))
 }
 
 /// Live machine resources. ACE Studio's resource readout is kept, but every
@@ -2727,10 +2730,9 @@ async fn assistant_runtime_install(
 
 /// How much room the local model gets.
 ///
-/// The prompt alone is around 3200 tokens - the caption contract plus the three
-/// reference captions the MiniMax skill selects - and a full answer is another
-/// 700 to 1200. Eight thousand left almost no headroom for a long lyric, and a
-/// model that runs out mid-JSON produces an answer nothing can parse.
+/// A score edit sends the whole ABC score and gets the whole revision back,
+/// two or three thousand tokens each way; a model that runs out mid-JSON
+/// produces an answer nothing can parse.
 const ASSISTANT_CONTEXT: u32 = 16384;
 
 async fn assistant_runtime_start(
@@ -3201,8 +3203,8 @@ async fn assistant_write_stream(
         if let Some(key) = key {
             outgoing = outgoing
                 .header(reqwest::header::AUTHORIZATION, format!("Bearer {key}"))
-                .header("HTTP-Referer", "https://github.com/timoncool/MiniMax-Music3-Studio")
-                .header("X-Title", "MiniMax Music3 Studio");
+                .header("HTTP-Referer", "https://github.com/timoncool/YuE2-Studio")
+                .header("X-Title", "YuE2 Studio");
         }
 
         let response = match outgoing.send().await {
@@ -3410,7 +3412,7 @@ async fn assistant_write(
 ///
 /// "Keep models in VRAM between jobs" is off by default, and it means what it
 /// says: nothing stays loaded. The assistant was the exception nobody chose -
-/// it wrote a caption, kept the card, and Music3 then died trying to load its
+/// it wrote a draft, kept the card, and the engine then had too little to load its
 /// own weights. With the setting on, it stays, because that is what the
 /// setting is for. Either way the next request starts it again.
 async fn release_assistant_unless_kept(state: &AppState) {
@@ -3494,8 +3496,8 @@ async fn setup_remove(
 
 /// Takes models the user already has instead of downloading them again.
 ///
-/// Anyone who has run Music3 through ComfyUI or another build already has these
-/// weights on disk, and they are gigabytes each. This opens a folder picker,
+/// Anyone who has run yue2.cpp by hand already has these weights on disk, and
+/// they are gigabytes each. This opens a folder picker,
 /// looks for the files the catalogue names - by name, then by matching size -
 /// and hard-links or copies them into the studio's own model directory.
 async fn setup_adopt(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
@@ -3504,7 +3506,7 @@ async fn setup_adopt(State(state): State<AppState>) -> Result<Json<Value>, (Stat
     };
     let catalog = state.model_manager.catalog();
     let picked = tokio::task::spawn_blocking(move || {
-        rfd::FileDialog::new().set_title("Folder with Music3 models").pick_folder()
+        rfd::FileDialog::new().set_title("Folder with YuE2 models").pick_folder()
     })
     .await
     .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
@@ -3609,6 +3611,7 @@ async fn persist_completed_download_profile(state: AppState, job_id: String) {
                     *state.selected_component_ids.write().await = Some(job.component_ids);
                 }
                 let _ = persist_studio_settings(&state).await;
+                reload_engine_if_models_changed(&state).await;
                 return;
             }
             model_manager::DownloadStatus::Cancelled | model_manager::DownloadStatus::Failed => return,
@@ -3647,6 +3650,7 @@ async fn setup_select(
         *state.selected_component_ids.write().await = Some(ids);
     }
     let _ = persist_studio_settings(&state).await;
+    reload_engine_if_models_changed(&state).await;
     let target = effective_install_target(&state).await;
     let manager_status = state.model_manager.status(target).await;
     Ok(Json(serde_json::to_value(compose_setup_status(&state, manager_status).await).unwrap_or(Value::Null)))
@@ -3703,7 +3707,7 @@ fn capability_engines_with(
     vec![
         EngineDescriptor {
             id: PRIMARY_MUSIC_ENGINE_ID.into(),
-            display_name: "MiniMax Music3 C++ Server".into(),
+            display_name: "YuE2 (yue2.cpp)".into(),
             capabilities: vec![Capability::MusicGeneration],
             execution_mode: ExecutionMode::Local,
             installed: primary_installed,
@@ -3743,9 +3747,8 @@ fn capability_engines_with(
 
 /// Gets the writing assistant off the graphics card before the engine needs it.
 ///
-/// There is one card, and both models want all of it: Gemma holds five
-/// gigabytes from the moment it writes a caption, and Music3 then asks for
-/// eleven more and dies. The assistant starts itself on the next request it
+/// There is one card: Gemma holds five gigabytes from the moment it writes
+/// a draft, and YuE2 needs its own few on top. The assistant starts itself on the next request it
 /// receives, so stopping it here costs a reload later and nothing else.
 async fn free_the_card_for_the_engine(state: &AppState) {
     if state.assistant_runtime.base_url().await.is_some() {
@@ -3759,7 +3762,7 @@ async fn free_the_card_for_the_engine(state: &AppState) {
 /// gone; the studio saw only a refused connection, and told the user to
 /// download models that were already on disk.
 fn engine_failure_reason() -> Option<String> {
-    let tail = music_engine::mm_server::startup_log_tail(80).join("\n").to_lowercase();
+    let tail = music_engine::yue_server::startup_log_tail(80).join("\n").to_lowercase();
     describes_exhausted_memory(&tail)
         .then(|| "The graphics card ran out of memory while the engine was loading the models. Choose a smaller quantisation in the model manager, or close whatever else is using the card - the writing assistant holds several gigabytes of its own.".to_string())
 }
@@ -3794,13 +3797,12 @@ async fn create_music_job(
         return (StatusCode::ACCEPTED, Json(job));
     }
 
-    let selected_profile_id = state.selected_profile_id.read().await.clone();
-    let selected_component_ids = state.selected_component_ids.read().await.clone();
-    let mm_request = match mm_request_from(&request, selected_profile_id.as_deref(), selected_component_ids.as_deref(), Some(&state.model_manager)) {
+    let max_batch = state.engine_options.read().await.effective_max_batch();
+    let body = match yue_request_from(&request, max_batch) {
         Ok(value) => value,
         Err(error) => return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, error))),
     };
-    match state.music_server.submit(mm_request.clone()).await {
+    match state.music_server.submit(body.clone()).await {
         Ok(remote) => {
             let job = MusicJob {
                 id: remote.id,
@@ -3810,36 +3812,34 @@ async fn create_music_job(
                 status: MusicJobStatus::Queued,
                 dispatch: MusicJobDispatch::Local,
                 phase: MusicJobPhase::Queued,
-                caption: request.caption,
+                style: request.style,
                 lyrics: request.lyrics,
-                duration_seconds: request.duration_seconds,
-                generation_settings: mm_request.clone(),
+                duration_seconds: request.duration_seconds.unwrap_or_default(),
+                generation_settings: body,
                 song: None,
                 songs: vec![],
-                message: "Submitted to mm-server. Progress is phase-only: queued, running, completed, failed, or cancelled.".into(),
+                message: "Submitted to yue-server.".into(),
             };
             state.jobs.write().await.insert(job.id.clone(), job.clone());
             (StatusCode::ACCEPTED, Json(job))
         }
         Err(error) => {
-            let job = queued_not_configured_job(request, engine_id);
-            let job = MusicJob {
-                cover_prompt: None,
-                message: error.to_string(),
-                ..job
-            };
+            let job = failed_request_job(request, engine_id, format!("the engine refused the job: {error}"));
             state.jobs.write().await.insert(job.id.clone(), job.clone());
-            (StatusCode::ACCEPTED, Json(job))
+            (StatusCode::SERVICE_UNAVAILABLE, Json(job))
         }
     }
 }
 
+/// Re-renders a track from its semantic stream: the prefix and the codes
+/// prefill in one forward, so only the flow-matching side (steps, noise seed,
+/// variations, output encoding) can change while the music stays the same.
 async fn replay_music_job(
     State(state): State<AppState>,
     Json(request): Json<ReplayMusicJobRequest>,
 ) -> Result<(StatusCode, Json<MusicJob>), (StatusCode, Json<ApiError>)> {
     if selected_local_music_engine(&*state.configuration.read().await).as_deref() != Some(PRIMARY_MUSIC_ENGINE_ID) {
-        return Err(api_error(StatusCode::CONFLICT, "Replay synthesis requires the local minimaxmusic-cpp engine.".into()));
+        return Err(api_error(StatusCode::CONFLICT, "Re-rendering requires the local YuE2 engine.".into()));
     }
     let mut source_title = None;
     let replay = match (&request.song_id, &request.replay_request) {
@@ -3848,25 +3848,35 @@ async fn replay_music_job(
             let song = state.library.get_song(song_id).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
                 .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found.".into()))?;
             source_title = Some(song.title.clone());
-            song.replay_request.ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "This song has no MiniMax Music3 replay request.".into()))?
+            song.replay_request.ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "This track has no replay request: it was not generated by YuE2.".into()))?
         }
         (None, Some(replay)) => replay.clone(),
         (None, None) => return Err(api_error(StatusCode::BAD_REQUEST, "Provide song_id or replay_request.".into())),
     };
-    let synth_request = prepare_replay_synthesis(replay, &request).map_err(|error| api_error(StatusCode::BAD_REQUEST, error))?;
-    let caption = synth_request.get("caption").and_then(Value::as_str).unwrap_or_default().to_owned();
-    let lyrics = synth_request.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let body = prepare_replay_synthesis(replay, &request).map_err(|error| api_error(StatusCode::BAD_REQUEST, error))?;
+    let style = body.get("style").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let lyrics = body.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_owned();
     let remote = state
         .music_server
-        .submit(synth_request.clone())
+        .submit(body.clone())
         .await
         .map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine refused the job: {error}")))?;
+    let title = request.title.clone().filter(|value| !value.trim().is_empty()).or(source_title);
     let job = MusicJob {
         cover_prompt: None,
-        id: remote.id, engine_id: PRIMARY_MUSIC_ENGINE_ID.into(), title: source_title, status: MusicJobStatus::Queued,
-        dispatch: MusicJobDispatch::Local, phase: MusicJobPhase::Queued, caption, lyrics,
-        duration_seconds: synth_request.get("duration").and_then(Value::as_f64).unwrap_or_default(), generation_settings: synth_request,
-        song: None, songs: vec![], message: "Submitted replay synthesis to mm-server. audio_codes are present, so the autoregressive LM stage is skipped.".into(),
+        id: remote.id,
+        engine_id: PRIMARY_MUSIC_ENGINE_ID.into(),
+        title,
+        status: MusicJobStatus::Queued,
+        dispatch: MusicJobDispatch::Local,
+        phase: MusicJobPhase::Queued,
+        style,
+        lyrics,
+        duration_seconds: body.get("duration").and_then(Value::as_f64).unwrap_or_default(),
+        generation_settings: body,
+        song: None,
+        songs: vec![],
+        message: "Submitted a re-render: the semantic stream is present, so the autoregressive stage is skipped.".into(),
     };
     state.jobs.write().await.insert(job.id.clone(), job.clone());
     Ok((StatusCode::ACCEPTED, Json(job)))
@@ -3874,24 +3884,35 @@ async fn replay_music_job(
 
 fn prepare_replay_synthesis(mut replay: Value, overrides: &ReplayMusicJobRequest) -> Result<Value, String> {
     let object = replay.as_object_mut().ok_or("replay_request must be a JSON object")?;
-    for required in ["caption", "lyrics"] {
-        if !object.get(required).and_then(Value::as_str).is_some_and(|value| !value.trim().is_empty()) { return Err(format!("replay_request has no {required}")); }
+    let tokens = object.get("semantic_tokens").and_then(Value::as_str).unwrap_or_default();
+    validate_semantic_tokens(tokens)?;
+    if tokens.trim().is_empty() {
+        return Err("replay_request has no semantic_tokens; it cannot skip the autoregressive stage".into());
     }
-    if !object.get("audio_codes").and_then(Value::as_str).is_some_and(|value| !value.trim().is_empty()) {
-        return Err("replay_request has no audio_codes; it cannot skip the autoregressive LM stage".into());
+    if let Some(steps) = overrides.steps {
+        if steps < 1 { return Err("steps must be at least 1".into()); }
+        object.insert("steps".into(), Value::from(steps));
     }
-    if let Some(steps) = overrides.steps { if steps < 2 { return Err("steps must be at least 2".into()); } object.insert("steps".into(), Value::from(steps)); }
     if let Some(seed) = overrides.seed { object.insert("seed".into(), Value::from(seed)); }
-    if let Some(dit_cfg) = overrides.dit_cfg { if !dit_cfg.is_finite() { return Err("dit_cfg must be finite".into()); } object.insert("dit_cfg".into(), Value::from(dit_cfg)); }
+    if let Some(variations) = overrides.synth_batch_size {
+        if !(1..=9).contains(&variations) { return Err("synth_batch_size must be between 1 and 9".into()); }
+        object.insert("synth_batch_size".into(), Value::from(variations));
+    }
     if let Some(format) = &overrides.output_format {
-        if !matches!(format.as_str(), "mp3" | "wav16" | "wav24" | "wav32") { return Err("output_format must be mp3, wav16, wav24, or wav32".into()); }
+        validate_output_format(format)?;
         object.insert("output_format".into(), Value::String(format.clone()));
     }
-    if let Some(models) = &overrides.models {
-        for (key, value) in [("lm_model", &models.lm_model), ("depth_model", &models.depth_model), ("cond_model", &models.cond_model), ("dit_model", &models.dit_model), ("vae_model", &models.vae_model)] {
-            if let Some(value) = value { if value.trim().is_empty() { return Err(format!("{key} cannot be empty")); } object.insert(key.into(), Value::String(value.clone())); }
-        }
+    if let Some(peak_clip) = overrides.peak_clip {
+        if peak_clip < 0 { return Err("peak_clip cannot be negative".into()); }
+        object.insert("peak_clip".into(), Value::from(peak_clip));
     }
+    if let Some(bitrate) = overrides.mp3_bitrate {
+        validate_mp3_bitrate(bitrate)?;
+        object.insert("mp3_bitrate".into(), Value::from(bitrate));
+    }
+    // A replay is one song by construction; the engine ignores the counter
+    // but the stored provenance should not claim a batch.
+    object.insert("lm_batch_size".into(), Value::from(1));
     Ok(replay)
 }
 
@@ -3912,8 +3933,8 @@ async fn create_openrouter_music_job(state: AppState, request: CreateMusicJobReq
     };
     let job = MusicJob {
         id: format!("openrouter-{}", uuid_suffix()), engine_id: engine_id.clone(), cover_prompt: request.cover_prompt.clone(), title: Some(titled(&request)), status: MusicJobStatus::Running,
-        dispatch: MusicJobDispatch::OpenRouter, phase: MusicJobPhase::Running, caption: request.caption, lyrics: request.lyrics,
-        duration_seconds: request.duration_seconds, generation_settings: stream_request.request.body.clone(), song: None, songs: vec![],
+        dispatch: MusicJobDispatch::OpenRouter, phase: MusicJobPhase::Running, style: request.style, lyrics: request.lyrics,
+        duration_seconds: request.duration_seconds.unwrap_or_default(), generation_settings: stream_request.request.body.clone(), song: None, songs: vec![],
         message: "OpenRouter music stream started; the completed audio will be imported into the studio library.".into(),
     };
     state.jobs.write().await.insert(job.id.clone(), job.clone());
@@ -3923,7 +3944,7 @@ async fn create_openrouter_music_job(state: AppState, request: CreateMusicJobReq
 }
 
 fn openrouter_music_prompt(request: &CreateMusicJobRequest) -> String {
-    format!("Structured music caption:\n{}\n\nLyrics:\n{}", request.caption.trim(), request.lyrics.trim())
+    format!("Style:\n{}\n\nLyrics:\n{}", request.style.trim(), request.lyrics.trim())
 }
 
 async fn run_openrouter_music_generation(state: AppState, job_id: String, stream_request: providers::openrouter::OpenRouterMusicStreamRequest) {
@@ -3942,20 +3963,12 @@ async fn run_openrouter_music_generation(state: AppState, job_id: String, stream
         let imported_song = state.library.import_generated_song(library::GeneratedSongInput {
             title: job.title.clone(),
             metadata: serde_json::json!({ "duration_seconds": job.duration_seconds, "cover_prompt": job.cover_prompt.clone() }),
-            caption: job.caption.clone(), lyrics: job.lyrics.clone(), generation_settings: job.generation_settings.clone(),
+            caption: job.style.clone(), lyrics: job.lyrics.clone(), generation_settings: job.generation_settings.clone(),
             replay_request: None, audio_codes: None, engine_id: "openrouter".into(), profile_id: None,
             source: "openrouter_generation".into(), audio_extension: "wav", audio,
         })?;
-        // A track goes into the library carrying its own name, style and words.
         tag_stored_song(&state, &imported_song.song.id).await;
-        {
-            let state = state.clone();
-            let song_id = imported_song.song.id.clone();
-            let timing_state = state.clone();
-            let timing_song = song_id.clone();
-            tokio::spawn(async move { draw_cover_for(state, song_id).await });
-            tokio::spawn(async move { time_lyrics_for(timing_state, timing_song).await });
-        }
+        after_import(&state, &imported_song.song.id);
         Ok::<CompletedSong, anyhow::Error>(CompletedSong { id: imported_song.song.id.clone(), audio_url: format!("/v1/library/media/{}", imported_song.song.id), song: imported_song.song })
     }.await;
     let mut jobs = state.jobs.write().await;
@@ -3964,6 +3977,14 @@ async fn run_openrouter_music_generation(state: AppState, job_id: String, stream
         Ok(song) => { job.status = MusicJobStatus::Completed; job.phase = MusicJobPhase::Completed; job.song = Some(song.clone()); job.songs = vec![song]; job.message = "OpenRouter music stream completed and its audio was imported into the studio library.".into(); }
         Err(error) => { job.status = MusicJobStatus::Failed; job.phase = MusicJobPhase::Failed; job.message = format!("OpenRouter music generation failed: {error}"); }
     }
+}
+
+/// Covers and karaoke timings follow every finished track, local or cloud.
+fn after_import(state: &AppState, song_id: &str) {
+    let (cover_state, cover_song) = (state.clone(), song_id.to_owned());
+    let (timing_state, timing_song) = (state.clone(), song_id.to_owned());
+    tokio::spawn(async move { draw_cover_for(cover_state, cover_song).await });
+    tokio::spawn(async move { time_lyrics_for(timing_state, timing_song).await });
 }
 
 async fn music_job_status(
@@ -3978,18 +3999,15 @@ async fn music_job_status(
         .cloned()
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Music job was not found.".into()))?;
     if existing.engine_id != PRIMARY_MUSIC_ENGINE_ID
-        || matches!(existing.status, MusicJobStatus::Cancelled | MusicJobStatus::Failed)
+        || matches!(existing.status, MusicJobStatus::Cancelled | MusicJobStatus::Failed | MusicJobStatus::Completed)
     {
         return Ok(Json(existing));
     }
     let remote = state.music_server.job(&job_id).await.map_err(|error| {
-        api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("mm-server status is unavailable: {error}"),
-        )
+        api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine status is unavailable: {error}"))
     })?;
     let imported = if remote.status == "done" {
-        Some(import_completed_mm_result(&state, &existing, &job_id).await)
+        Some(import_completed_result(&state, &existing, &job_id).await)
     } else { None };
     let mut jobs = state.jobs.write().await;
     let job = jobs
@@ -4002,12 +4020,12 @@ async fn music_job_status(
                 job.phase = MusicJobPhase::Completed;
                 job.song = songs.first().cloned();
                 job.songs = songs;
-                job.message = "mm-server completed this job and its result was imported into the studio library.".into();
+                job.message = "The engine finished this job and its tracks were imported into the library.".into();
             }
             Err(error) => {
                 job.status = MusicJobStatus::Failed;
                 job.phase = MusicJobPhase::Failed;
-                job.message = format!("mm-server completed the job, but the studio could not safely import its result: {error}");
+                job.message = format!("The engine finished the job, but the studio could not import its result: {error}");
             }
         }
     } else {
@@ -4016,21 +4034,24 @@ async fn music_job_status(
     Ok(Json(job.clone()))
 }
 
-async fn import_completed_mm_result(state: &AppState, job: &MusicJob, job_id: &str) -> anyhow::Result<Vec<CompletedSong>> {
+async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str) -> anyhow::Result<Vec<CompletedSong>> {
     let result = state.music_server.result(job_id).await?;
-    let tracks = mm_result::parse_multipart_result(&result.content_type, &result.body)?;
+    let tracks = engine_result::parse_multipart_result(&result.content_type, &result.body)?;
     let profile_id = state.selected_profile_id.read().await.clone();
-    let mut imported = Vec::with_capacity(tracks.len());
-    for track in tracks {
+    let count = tracks.len();
+    let mut imported = Vec::with_capacity(count);
+    for (index, track) in tracks.into_iter().enumerate() {
         let replay = track.replay_request;
-        let caption = replay.get("caption").and_then(Value::as_str).filter(|value| !value.is_empty()).context("replay request has no caption")?.to_owned();
-        let lyrics = replay.get("lyrics").and_then(Value::as_str).context("replay request has no lyrics")?.to_owned();
-        let audio_codes = replay.get("audio_codes").filter(|value| value.as_str().is_some_and(|value| !value.is_empty())).context("replay request has no audio_codes")?.clone();
-        // The replay request upstream returns is sparse: any field still at its
-        // default is omitted, so a 60-second render carried no "duration" key
-        // at all and the stored provenance looked half empty. Start from what
-        // was actually submitted and let the per-song values - the seeds it
-        // rolled, the model files it used - win over it.
+        let style = replay.get("style").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let lyrics = replay.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let semantic_tokens = replay
+            .get("semantic_tokens")
+            .filter(|value| value.as_str().is_some_and(|value| !value.is_empty()))
+            .context("the engine returned a track without its semantic stream")?
+            .clone();
+        // The replay request is sparse: fields at their default are omitted.
+        // Start from what was submitted and let the per-track values - the
+        // seeds it consumed, the score it wrote - win over it.
         let mut generation_settings = job.generation_settings.clone();
         match (generation_settings.as_object_mut(), replay.as_object()) {
             (Some(target), Some(source)) => {
@@ -4040,14 +4061,11 @@ async fn import_completed_mm_result(state: &AppState, job: &MusicJob, job_id: &s
             }
             _ => generation_settings = replay.clone(),
         }
-        generation_settings.as_object_mut().context("generation settings are not a JSON object")?.remove("audio_codes");
-        // The engine returns audio, not metadata. Duration and the identifying
-        // seeds come from the replay request, so the library row can show a real
-        // length instead of "unknown" and the track can be traced back.
-        // The replay request is sparse: upstream omits any field that still
-        // holds its default, so a 60-second track has no "duration" key at all.
-        // Take the length from the job that was actually submitted.
-        let extension = mm_result::audio_extension(&track.audio_content_type)?;
+        let settings = generation_settings.as_object_mut().context("generation settings are not a JSON object")?;
+        settings.remove("semantic_tokens");
+        settings.insert("lm_batch_size".into(), Value::from(1));
+        settings.insert("synth_batch_size".into(), Value::from(1));
+        let extension = engine_result::audio_extension(&track.audio_content_type)?;
         let metadata = serde_json::json!({
             "duration_seconds": library::audio_duration_seconds(
                 &track.audio,
@@ -4056,28 +4074,33 @@ async fn import_completed_mm_result(state: &AppState, job: &MusicJob, job_id: &s
             ),
             "seed": replay.get("seed"),
             "lm_seed": replay.get("lm_seed"),
+            "cot": replay.get("cot"),
             "output_format": replay.get("output_format"),
             "cover_prompt": job.cover_prompt.clone(),
         });
+        // Several tracks from one request share its name; number them so the
+        // library can tell the takes apart.
+        let title = match (&job.title, count) {
+            (Some(title), count) if count > 1 => Some(format!("{title} ({})", index + 1)),
+            (title, _) => title.clone(),
+        };
         let imported_song = state.library.import_generated_song(library::GeneratedSongInput {
-            title: job.title.clone(), metadata, caption, lyrics, generation_settings, replay_request: Some(replay), audio_codes: Some(audio_codes),
-            engine_id: job.engine_id.clone(), profile_id: profile_id.clone(),
+            title,
+            metadata,
+            caption: style,
+            lyrics,
+            generation_settings,
+            replay_request: Some(replay),
+            audio_codes: Some(semantic_tokens),
+            engine_id: job.engine_id.clone(),
+            profile_id: profile_id.clone(),
             source: "local_generation".into(),
-            audio_extension: extension, audio: track.audio,
+            audio_extension: extension,
+            audio: track.audio,
         })?;
         let audio_url = format!("/v1/library/media/{}", imported_song.song.id);
-        tag_stored_song(&state, &imported_song.song.id).await;
-        {
-            // Locally generated tracks get a cover too: this call was lost in an
-            // edit and only the cloud path kept it, which is why covers appeared
-            // for one kind of track and not the other.
-            let state = state.clone();
-            let song_id = imported_song.song.id.clone();
-            let timing_state = state.clone();
-            let timing_song = song_id.clone();
-            tokio::spawn(async move { draw_cover_for(state, song_id).await });
-            tokio::spawn(async move { time_lyrics_for(timing_state, timing_song).await });
-        }
+        tag_stored_song(state, &imported_song.song.id).await;
+        after_import(state, &imported_song.song.id);
         imported.push(CompletedSong { id: imported_song.song.id.clone(), song: imported_song.song, audio_url });
     }
     Ok(imported)
@@ -4097,14 +4120,11 @@ async fn cancel_music_job(
     if existing.engine_id != PRIMARY_MUSIC_ENGINE_ID {
         return Err(api_error(
             StatusCode::NOT_IMPLEMENTED,
-            format!("The selected engine '{}' has no installed cancel adapter.", existing.engine_id),
+            format!("The selected engine '{}' has no cancel adapter.", existing.engine_id),
         ));
     }
     let remote = state.music_server.cancel(&job_id).await.map_err(|error| {
-        api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("mm-server cancel is unavailable: {error}"),
-        )
+        api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine did not accept the cancel: {error}"))
     })?;
     let mut jobs = state.jobs.write().await;
     let job = jobs
@@ -4114,45 +4134,137 @@ async fn cancel_music_job(
     Ok(Json(job.clone()))
 }
 
+/// The engine's own defaults, version and the weights it serves: the source
+/// of truth for every placeholder in the request form.
 async fn local_music_model_catalog(
     State(state): State<AppState>,
 ) -> Result<Json<LocalMusicModelCatalog>, (StatusCode, Json<ApiError>)> {
     let engine_id = selected_local_music_engine(&*state.configuration.read().await).ok_or_else(|| {
-        api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "No local music engine is selected in the capability configuration.".into(),
-        )
+        api_error(StatusCode::SERVICE_UNAVAILABLE, "No local music engine is selected in the capability configuration.".into())
     })?;
     if engine_id != PRIMARY_MUSIC_ENGINE_ID {
-        return Err(api_error(
-            StatusCode::NOT_IMPLEMENTED,
-            format!("The selected engine '{engine_id}' has no installed server catalog adapter."),
-        ));
+        return Err(api_error(StatusCode::NOT_IMPLEMENTED, format!("The selected engine '{engine_id}' has no catalog adapter.")));
     }
-    let catalog = state.music_server.props().await.map_err(|error| {
-        api_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("mm-server model catalog is unavailable: {error}"),
-        )
+    let mut catalog = state.music_server.props().await.map_err(|error| {
+        api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine catalog is unavailable: {error}"))
     })?;
+    let transcriber = {
+        let supervisor = state.engine.lock().await;
+        supervisor.as_ref().and_then(|engine| engine.config().models.transcriber.clone())
+    };
+    if let Value::Object(fields) = &mut catalog {
+        fields.insert("transcriber".into(), transcriber.map(|path| Value::String(path.display().to_string())).unwrap_or(Value::Null));
+        fields.insert("max_batch".into(), Value::from(state.engine_options.read().await.effective_max_batch()));
+    }
     Ok(Json(LocalMusicModelCatalog { engine_id, catalog }))
 }
 
-impl MmServerClient {
+#[derive(Debug, Serialize)]
+struct TranscriptionJob {
+    id: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    abc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+/// Reads a recording into the ABC score a cover takes as its `abc`. The audio
+/// is either uploaded (`audio` part) or a library track (`song_id` field);
+/// `melody_only` drops the chord symbols, which is what the `melody` mode wants.
+async fn create_transcription(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<TranscriptionJob>), (StatusCode, Json<ApiError>)> {
+    let transcriber_loaded = {
+        let supervisor = state.engine.lock().await;
+        supervisor.as_ref().map(|engine| engine.config().models.transcriber.is_some())
+    };
+    if transcriber_loaded == Some(false) {
+        return Err(api_error(
+            StatusCode::CONFLICT,
+            "The running engine has no SheetSage2 transcriber. Add one to the model set in Settings - Models.".into(),
+        ));
+    }
+    let mut audio: Option<(Vec<u8>, String)> = None;
+    let mut melody_only = false;
+    while let Some(field) = multipart.next_field().await.map_err(|error| api_error(StatusCode::BAD_REQUEST, error.to_string()))? {
+        match field.name().unwrap_or_default() {
+            "audio" => {
+                let name = field.file_name().unwrap_or("input.audio").to_owned();
+                let bytes = field.bytes().await.map_err(|error| api_error(StatusCode::BAD_REQUEST, error.to_string()))?;
+                audio = Some((bytes.to_vec(), name));
+            }
+            "song_id" => {
+                let song_id = field.text().await.map_err(|error| api_error(StatusCode::BAD_REQUEST, error.to_string()))?;
+                let song = state.library.get_song(song_id.trim()).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+                    .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found.".into()))?;
+                let path = state.library.media_path_for_song(&song).ok_or_else(|| api_error(StatusCode::NOT_FOUND, "The track's audio is not in the library.".into()))?;
+                let bytes = tokio::fs::read(&path).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("read {}: {error}", path.display())))?;
+                let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| "input.audio".into());
+                audio = Some((bytes, name));
+            }
+            "melody_only" => {
+                let value = field.text().await.unwrap_or_default();
+                melody_only = matches!(value.trim(), "1" | "true" | "yes");
+            }
+            _ => {}
+        }
+    }
+    let (bytes, name) = audio.ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "Send an audio part or a song_id.".into()))?;
+    if bytes.is_empty() {
+        return Err(api_error(StatusCode::BAD_REQUEST, "The audio is empty.".into()));
+    }
+    let remote = state
+        .music_server
+        .transcribe(bytes, name, melody_only)
+        .await
+        .map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine refused the transcription: {error}")))?;
+    Ok((StatusCode::ACCEPTED, Json(TranscriptionJob { id: remote.id, status: "running".into(), abc: None, error: None })))
+}
+
+async fn transcription_status(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<Json<TranscriptionJob>, (StatusCode, Json<ApiError>)> {
+    let remote = state.music_server.job(&job_id).await.map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
+    let mut job = TranscriptionJob { id: job_id.clone(), status: remote.status.clone(), abc: None, error: None };
+    match remote.status.as_str() {
+        "done" => {
+            let result = state.music_server.result(&job_id).await.map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
+            let body: Value = serde_json::from_slice(&result.body)
+                .map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("the transcription result is not JSON: {error}")))?;
+            let abc = body.get("abc").and_then(Value::as_str).filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| api_error(StatusCode::BAD_GATEWAY, "the transcription produced no score".into()))?;
+            job.abc = Some(abc.to_owned());
+        }
+        "failed" => job.error = Some(engine_failure_reason().unwrap_or_else(|| "The engine could not transcribe this recording.".into())),
+        _ => {}
+    }
+    Ok(Json(job))
+}
+
+async fn cancel_transcription(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<Json<TranscriptionJob>, (StatusCode, Json<ApiError>)> {
+    let remote = state.music_server.cancel(&job_id).await.map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
+    Ok(Json(TranscriptionJob { id: job_id, status: remote.status, abc: None, error: None }))
+}
+
+impl EngineClient {
     fn from_environment() -> Self {
         let base_url = env::var("YUE_ENGINE_BASE_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:18087".into())
+            .unwrap_or_else(|_| format!("http://127.0.0.1:{}", music_engine::yue_server::DEFAULT_PORT))
             .trim_end_matches('/')
             .to_owned();
-        Self {
-            base_url,
-            http: reqwest::Client::new(),
-        }
+        Self { base_url, http: reqwest::Client::new() }
     }
 
     async fn health(&self) -> bool {
         self.http
             .get(self.url("/health"))
+            .timeout(std::time::Duration::from_secs(2))
             .send()
             .await
             .map(|response| response.status().is_success())
@@ -4163,19 +4275,16 @@ impl MmServerClient {
         self.json_response(self.http.get(self.url("/props")).send().await?).await
     }
 
-    /// Upstream `GET /logs` is an endless SSE stream: it replays the server's
-    /// log ring immediately and then blocks waiting for new lines. Studio wants
-    /// the ring, not a permanent connection, so the stream is consumed until it
-    /// goes quiet and then dropped.
+    /// Upstream `GET /logs` is an endless SSE stream that replays its ring and
+    /// then waits; the ring is read until the stream goes quiet.
     async fn logs_snapshot(&self, quiet_period: std::time::Duration) -> anyhow::Result<Vec<String>> {
         let response = self.http.get(self.url("/logs")).send().await?;
         let status = response.status();
         if !status.is_success() {
-            anyhow::bail!("mm-server returned {status} for /logs");
+            anyhow::bail!("yue-server returned {status} for /logs");
         }
         let mut stream = response.bytes_stream();
         let mut buffer = Vec::new();
-        // Hard ceiling so a chatty engine cannot hold the request open.
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -4195,34 +4304,45 @@ impl MmServerClient {
             .collect())
     }
 
-    async fn submit(&self, request: Value) -> anyhow::Result<MmServerSubmitResponse> {
-        self.json_response(self.http.post(self.url("/synth")).json(&request).send().await?)
-            .await
+    async fn submit(&self, request: Value) -> anyhow::Result<EngineSubmitResponse> {
+        self.json_response(self.http.post(self.url("/synth")).json(&request).send().await?).await
     }
 
-    async fn job(&self, job_id: &str) -> anyhow::Result<MmServerJobResponse> {
-        self.json_response(self.http.get(self.url("/job")).query(&[("id", job_id)]).send().await?)
-            .await
+    async fn transcribe(&self, audio: Vec<u8>, filename: String, melody_only: bool) -> anyhow::Result<EngineSubmitResponse> {
+        let mut form = reqwest::multipart::Form::new().part("audio", reqwest::multipart::Part::bytes(audio).file_name(filename));
+        if melody_only {
+            form = form.text("melody_only", "1");
+        }
+        self.json_response(self.http.post(self.url("/transcribe")).multipart(form).send().await?).await
     }
 
-    async fn cancel(&self, job_id: &str) -> anyhow::Result<MmServerJobResponse> {
-        self.json_response(self.http.post(self.url("/job")).query(&[("id", job_id), ("cancel", "1")]).send().await?)
-            .await
+    async fn job(&self, job_id: &str) -> anyhow::Result<EngineJobResponse> {
+        self.json_response(self.http.get(self.url("/job")).query(&[("id", job_id)]).send().await?).await
     }
 
-    async fn result(&self, job_id: &str) -> anyhow::Result<MmServerResultResponse> {
+    async fn cancel(&self, job_id: &str) -> anyhow::Result<EngineJobResponse> {
+        self.json_response(self.http.post(self.url("/job")).query(&[("id", job_id), ("cancel", "1")]).send().await?).await
+    }
+
+    async fn result(&self, job_id: &str) -> anyhow::Result<EngineResultResponse> {
         let response = self.http.get(self.url("/job")).query(&[("id", job_id), ("result", "1")]).send().await?;
         let status = response.status();
-        if !status.is_success() { anyhow::bail!("mm-server returned {status}: {}", response.text().await?); }
+        if !status.is_success() {
+            anyhow::bail!("yue-server returned {status}: {}", response.text().await?);
+        }
         let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("").to_owned();
-        Ok(MmServerResultResponse { content_type, body: response.bytes().await?.to_vec() })
+        Ok(EngineResultResponse { content_type, body: response.bytes().await?.to_vec() })
     }
 
     async fn json_response<T: serde::de::DeserializeOwned>(&self, response: reqwest::Response) -> anyhow::Result<T> {
         let status = response.status();
         let body = response.text().await?;
         if !status.is_success() {
-            anyhow::bail!("mm-server returned {status}: {body}");
+            let message = serde_json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|value| value.get("error").and_then(Value::as_str).map(str::to_owned))
+                .unwrap_or(body);
+            anyhow::bail!("yue-server returned {status}: {message}");
         }
         Ok(serde_json::from_str(&body)?)
     }
@@ -4246,11 +4366,9 @@ fn initial_configuration() -> StudioConfiguration {
     configuration
 }
 
-/// Settings written by an earlier build may still name local engines this
-/// build does not ship (an ASR or LLM engine, for example). Keeping them would
-/// make the UI offer a provider the engine registry cannot serve, so any local
-/// engine that is not declared by `capability_engines` is dropped and the
-/// capability falls back to a mode that actually has an implementation.
+/// Settings may name local engines this build does not ship; any local engine
+/// not declared by `capability_engines` is dropped so the interface never
+/// offers a provider nobody can serve.
 fn sanitize_persisted_configuration(mut configuration: StudioConfiguration) -> StudioConfiguration {
     let declared = capability_engines(None, false);
     for selection in &mut configuration.selections {
@@ -4276,98 +4394,111 @@ fn selected_local_music_engine(configuration: &StudioConfiguration) -> Option<St
     configuration
         .selections
         .iter()
-        .find(|selection| {
-            selection.capability == Capability::MusicGeneration
-                && selection.mode == ExecutionMode::Local
-        })
+        .find(|selection| selection.capability == Capability::MusicGeneration && selection.mode == ExecutionMode::Local)
         .and_then(|selection| selection.local_engine.clone())
 }
 
-fn mm_request_from(request: &CreateMusicJobRequest, selected_profile_id: Option<&str>, selected_component_ids: Option<&[String]>, manager: Option<&ModelManager>) -> Result<Value, String> {
-    if request.caption.trim().is_empty() || request.lyrics.trim().is_empty() {
-        return Err("caption and lyrics are required by mm-server".into());
+fn validate_output_format(format: &str) -> Result<(), String> {
+    if matches!(format, "mp3" | "wav16" | "wav24" | "wav32") {
+        Ok(())
+    } else {
+        Err("output_format must be one of: mp3, wav16, wav24, wav32".into())
     }
-    if !request.duration_seconds.is_finite() || request.duration_seconds <= 0.0 {
-        return Err("duration_seconds must be greater than zero".into());
+}
+
+fn validate_mp3_bitrate(bitrate: u32) -> Result<(), String> {
+    if (32..=320).contains(&bitrate) {
+        Ok(())
+    } else {
+        Err("mp3_bitrate must be between 32 and 320 kbps".into())
     }
-    if request.steps.is_some_and(|steps| steps < 2) {
-        return Err("steps must be at least 2".into());
+}
+
+fn validate_semantic_tokens(tokens: &str) -> Result<(), String> {
+    let invalid = tokens
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .find(|value| value.parse::<u32>().map(|code| code >= 32768).unwrap_or(true));
+    match invalid {
+        Some(value) => Err(format!("semantic_tokens must be comma-separated codes below 32768; found `{value}`")),
+        None => Ok(()),
     }
-    if request.lm_batch_size.is_some_and(|size| size < 1) {
-        return Err("lm_batch_size must be at least 1".into());
+}
+
+/// Builds the yue-server request. Only what the user set travels: an absent
+/// field is the engine's protocol default, and the replay request the engine
+/// returns records the values it actually used.
+fn yue_request_from(request: &CreateMusicJobRequest, max_batch: u32) -> Result<Value, String> {
+    let semantic_tokens = request.semantic_tokens.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    if request.style.trim().is_empty() && request.lyrics.trim().is_empty() && semantic_tokens.is_none() {
+        return Err("write a style or lyrics: the engine needs at least one of them".into());
+    }
+    if let Some(cot) = request.cot.as_deref() {
+        if !matches!(cot, "full" | "melody" | "off") {
+            return Err("cot must be full, melody or off".into());
+        }
+    }
+    if let Some(duration) = request.duration_seconds {
+        if !duration.is_finite() || !(1.0..=360.0).contains(&duration) {
+            return Err("duration_seconds must be between 1 and 360".into());
+        }
+    }
+    if request.steps.is_some_and(|steps| !(1..=200).contains(&steps)) {
+        return Err("steps must be between 1 and 200".into());
+    }
+    if request.lm_batch_size.is_some_and(|size| size < 1 || size > max_batch) {
+        return Err(format!("lm_batch_size must be between 1 and {max_batch}; raise the song limit in Settings - Engine for more"));
     }
     if request.synth_batch_size.is_some_and(|size| !(1..=9).contains(&size)) {
         return Err("synth_batch_size must be between 1 and 9".into());
     }
-    for (field, value) in [("lm_cfg", request.lm_cfg), ("dit_cfg", request.dit_cfg)] {
-        if value.is_some_and(|value| !value.is_finite()) {
-            return Err(format!("{field} must be finite"));
-        }
+    if request.cfg_scale.is_some_and(|value| !value.is_finite() || value > 10.0) {
+        return Err("cfg_scale must be a finite number up to 10".into());
     }
-    if let Some(output_format) = request.output_format.as_deref() {
-        if !matches!(output_format, "mp3" | "wav16" | "wav24" | "wav32") {
-            return Err("output_format must be one of: mp3, wav16, wav24, wav32".into());
-        }
+    if request.peak_clip.is_some_and(|value| value < 0) {
+        return Err("peak_clip cannot be negative".into());
     }
-    let models = match request.models.clone() {
-        Some(models) => {
-            let all_explicit = [models.lm_model.as_deref(), models.depth_model.as_deref(), models.cond_model.as_deref(), models.dit_model.as_deref(), models.vae_model.as_deref()]
-                .iter().all(|value| value.is_some_and(|value| !value.trim().is_empty()));
-            if !all_explicit { return Err("advanced model selection must explicitly provide all five MM3 component filenames".into()); }
-            // A job carries the names of the weights it wants. A replayed or
-            // queued one can name a set that has since been removed, and the
-            // engine then spends a minute loading nothing before failing. The
-            // files are checked here, while there is still someone to tell.
-            if let Some(manager) = manager {
-                let root = manager.models_directory();
-                for name in [models.lm_model.as_deref(), models.depth_model.as_deref(), models.cond_model.as_deref(), models.dit_model.as_deref(), models.vae_model.as_deref()].into_iter().flatten() {
-                    if !root.join(name).is_file() {
-                        return Err(format!("this request names a model file that is no longer on disk: {name}. Choose a set in Settings - Models and try again."));
-                    }
-                }
-            }
-            models
-        }
-        None => {
-            let manager = manager.ok_or("local model manager is unavailable")?;
-            let files = if let Some(component_ids) = selected_component_ids {
-                manager.installed_component_files(component_ids).map_err(|error| error.to_string())?
-            } else {
-                let profile_id = selected_profile_id.ok_or("no installed local model profile or complete custom component set is selected")?;
-                manager.installed_profile_files(profile_id).map_err(|error| error.to_string())?
-            };
-            Mm3ModelSelection { lm_model: Some(files.lm_model), depth_model: Some(files.depth_model), cond_model: Some(files.cond_model), dit_model: Some(files.dit_model), vae_model: Some(files.vae_model) }
-        }
-    };
+    if let Some(format) = request.output_format.as_deref() {
+        validate_output_format(format)?;
+    }
+    if let Some(bitrate) = request.mp3_bitrate {
+        validate_mp3_bitrate(bitrate)?;
+    }
+    if let Some(tokens) = semantic_tokens {
+        validate_semantic_tokens(tokens)?;
+    }
     let mut body = serde_json::json!({
-        "caption": request.caption,
-        "lyrics": request.lyrics,
-        "duration": request.duration_seconds,
-        "lm_model": models.lm_model.expect("complete selection"),
-        "depth_model": models.depth_model.expect("complete selection"),
-        "cond_model": models.cond_model.expect("complete selection"),
-        "dit_model": models.dit_model.expect("complete selection"),
-        "vae_model": models.vae_model.expect("complete selection"),
+        "style": request.style,
+        "lyrics": request.lyrics.replace("\r\n", "\n"),
     });
-    // Make the submitted and replayed request a complete provenance record,
-    // rather than relying on hidden mm-server defaults.
-    body["steps"] = Value::from(request.steps.unwrap_or(30));
-    body["lm_batch_size"] = Value::from(request.lm_batch_size.unwrap_or(1));
-    body["synth_batch_size"] = Value::from(request.synth_batch_size.unwrap_or(1));
-    body["peak_clip"] = Value::from(request.peak_clip.unwrap_or(10));
-    body["mp3_bitrate"] = Value::from(request.mp3_bitrate.unwrap_or(128));
-    insert_optional(&mut body, "seed", request.seed);
-    insert_optional(&mut body, "lm_seed", request.lm_seed);
-    insert_optional(&mut body, "lm_cfg", request.lm_cfg);
-    insert_optional(&mut body, "lm_top_k", request.lm_top_k);
-    insert_optional(&mut body, "dit_cfg", request.dit_cfg);
+    if let Some(abc) = request.abc.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        body["abc"] = Value::String(format!("{abc}\n"));
+    }
+    insert_optional(&mut body, "cot", request.cot.clone());
+    insert_optional(&mut body, "duration", request.duration_seconds);
+    insert_optional(&mut body, "lm_seed", request.lm_seed.filter(|seed| *seed >= 0));
+    insert_optional(&mut body, "seed", request.seed.filter(|seed| *seed >= 0));
+    insert_optional(&mut body, "steps", request.steps);
+    insert_optional(&mut body, "lm_batch_size", request.lm_batch_size);
+    insert_optional(&mut body, "synth_batch_size", request.synth_batch_size);
+    insert_optional(&mut body, "cfg_scale", request.cfg_scale.filter(|value| *value >= 0.0));
+    insert_optional(&mut body, "semantic_tokens", semantic_tokens);
+    insert_optional(&mut body, "peak_clip", request.peak_clip);
     insert_optional(&mut body, "output_format", request.output_format.clone());
+    insert_optional(&mut body, "mp3_bitrate", request.mp3_bitrate);
+    for (key, preset) in [("abc_sampling", &request.abc_sampling), ("semantic_sampling", &request.semantic_sampling)] {
+        if let Some(preset) = preset.as_ref().filter(|preset| !preset.is_empty()) {
+            preset.validate(key)?;
+            body[key] = serde_json::to_value(preset).map_err(|error| error.to_string())?;
+        }
+    }
     Ok(body)
 }
 
 fn insert_optional<T: Serialize>(body: &mut Value, key: &str, value: Option<T>) {
     if let Some(value) = value {
-        body[key] = serde_json::to_value(value).expect("serializable MM3 request value");
+        body[key] = serde_json::to_value(value).expect("serializable request value");
     }
 }
 
@@ -4380,10 +4511,10 @@ fn queued_not_configured_job(request: CreateMusicJobRequest, engine_id: String) 
         status: MusicJobStatus::Queued,
         dispatch: MusicJobDispatch::NotConfigured,
         phase: MusicJobPhase::Queued,
-        caption: request.caption,
+        style: request.style,
         lyrics: request.lyrics,
-        duration_seconds: request.duration_seconds,
-        generation_settings: serde_json::Value::Null,
+        duration_seconds: request.duration_seconds.unwrap_or_default(),
+        generation_settings: Value::Null,
         song: None,
         songs: vec![],
         message: "The selected local music engine is not configured; this job remains queued and no inference has started.".into(),
@@ -4399,10 +4530,10 @@ fn failed_request_job(request: CreateMusicJobRequest, engine_id: String, error: 
         status: MusicJobStatus::Failed,
         dispatch: MusicJobDispatch::NotConfigured,
         phase: MusicJobPhase::Failed,
-        caption: request.caption,
+        style: request.style,
         lyrics: request.lyrics,
-        duration_seconds: request.duration_seconds,
-        generation_settings: serde_json::Value::Null,
+        duration_seconds: request.duration_seconds.unwrap_or_default(),
+        generation_settings: Value::Null,
         song: None,
         songs: vec![],
         message: error,
@@ -4413,38 +4544,35 @@ fn uuid_suffix() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
+/// yue-server has no queued state: a job is `running` from the moment it is
+/// accepted, whether the worker has reached it or not.
 fn apply_remote_status(job: &mut MusicJob, remote_status: &str) {
     match remote_status {
-        "queued" => {
-            job.status = MusicJobStatus::Queued;
-            job.phase = MusicJobPhase::Queued;
-            job.message = "mm-server has queued this job.".into();
-        }
         "running" => {
             job.status = MusicJobStatus::Running;
             job.phase = MusicJobPhase::Running;
-            job.message = "mm-server is running this job. Numeric progress is not provided by the engine.".into();
+            job.message = "The engine has this job.".into();
         }
         "done" => {
             job.status = MusicJobStatus::Completed;
             job.phase = MusicJobPhase::Completed;
-            job.message = "mm-server completed this job; fetch its result from mm-server using the job id.".into();
+            job.message = "The engine finished this job.".into();
         }
         "failed" => {
             job.status = MusicJobStatus::Failed;
             job.phase = MusicJobPhase::Failed;
-            job.message = "mm-server reported a failed job.".into();
+            job.message = engine_failure_reason().unwrap_or_else(|| "The engine reported a failed job; its log has the reason.".into());
         }
         "cancelled" => {
             job.status = MusicJobStatus::Cancelled;
             job.dispatch = MusicJobDispatch::Cancelled;
             job.phase = MusicJobPhase::Cancelled;
-            job.message = "mm-server cancelled this job.".into();
+            job.message = "The engine cancelled this job.".into();
         }
         other => {
             job.status = MusicJobStatus::Failed;
             job.phase = MusicJobPhase::Failed;
-            job.message = format!("mm-server returned an unknown job status: {other}");
+            job.message = format!("The engine returned an unknown job status: {other}");
         }
     }
 }
@@ -4490,95 +4618,82 @@ mod tests {
         );
     }
 
+    fn sample_request() -> CreateMusicJobRequest {
+        CreateMusicJobRequest {
+            style: "warm piano pop, female voice, 88 BPM".into(),
+            lyrics: "[Verse]\r\none line".into(),
+            ..CreateMusicJobRequest::default()
+        }
+    }
+
     #[test]
-    fn request_maps_only_confirmed_mm_server_fields() {
-        let body = mm_request_from(&CreateMusicJobRequest {
-            cover_prompt: None,
-            title: None,
-            caption: "night drive".into(),
-            lyrics: "one line".into(),
-            duration_seconds: 30.0,
-            steps: Some(30),
-            seed: Some(7),
-            lm_seed: None,
-            lm_cfg: Some(1.5),
-            lm_top_k: Some(50),
+    fn a_sparse_request_stays_sparse() {
+        let body = yue_request_from(&sample_request(), 1).unwrap();
+        let object = body.as_object().unwrap();
+        assert_eq!(object.len(), 2, "only style and lyrics travel when nothing else was set: {body}");
+        assert_eq!(body["lyrics"], "[Verse]\none line");
+    }
+
+    #[test]
+    fn every_set_field_reaches_the_engine_under_its_own_name() {
+        let request = CreateMusicJobRequest {
+            abc: Some("X:1\nK:C\nC".into()),
+            cot: Some("melody".into()),
+            duration_seconds: Some(95.0),
+            lm_seed: Some(42),
+            seed: Some(-1),
+            steps: Some(40),
             lm_batch_size: Some(2),
             synth_batch_size: Some(3),
-            dit_cfg: Some(1.7),
-            peak_clip: Some(10),
+            cfg_scale: Some(1.2),
             output_format: Some("wav24".into()),
             mp3_bitrate: Some(320),
-            models: Some(Mm3ModelSelection {
-                lm_model: Some("lm.gguf".into()),
-                depth_model: Some("depth.gguf".into()),
-                cond_model: Some("condition.gguf".into()),
-                dit_model: Some("dit.gguf".into()),
-                vae_model: Some("vocoder.gguf".into()),
-                ..Default::default()
-            }),
-        }, None, None, None)
-        .unwrap();
-        assert_eq!(body["duration"], 30.0);
-        assert_eq!(body["lm_model"], "lm.gguf");
-        assert_eq!(body["output_format"], "wav24");
+            peak_clip: Some(0),
+            abc_sampling: Some(SamplingPreset { temperature: Some(0.8), ..SamplingPreset::default() }),
+            semantic_sampling: Some(SamplingPreset::default()),
+            ..sample_request()
+        };
+        let body = yue_request_from(&request, 2).unwrap();
+        assert_eq!(body["abc"], "X:1\nK:C\nC\n");
+        assert_eq!(body["cot"], "melody");
+        assert_eq!(body["duration"], 95.0);
+        assert_eq!(body["lm_seed"], 42);
+        assert!(body.get("seed").is_none(), "a negative seed is the engine's random draw");
+        assert_eq!(body["steps"], 40);
         assert_eq!(body["lm_batch_size"], 2);
         assert_eq!(body["synth_batch_size"], 3);
-        assert_eq!(body["peak_clip"], 10);
-        assert_eq!(body["mp3_bitrate"], 320);
-        assert!(body.get("reference_audio").is_none());
+        assert_eq!(body["cfg_scale"], 1.2);
+        assert_eq!(body["output_format"], "wav24");
+        assert_eq!(body["peak_clip"], 0);
+        assert_eq!(body["abc_sampling"], serde_json::json!({ "temperature": 0.8 }));
+        assert!(body.get("semantic_sampling").is_none(), "an empty preset is the checkpoint preset");
     }
 
     #[test]
-    fn request_rejects_legacy_audio_formats_not_supported_by_mm_server() {
-        let error = mm_request_from(&CreateMusicJobRequest {
-            cover_prompt: None,
-            title: None,
-            caption: "night drive".into(),
-            lyrics: "one line".into(),
-            duration_seconds: 30.0,
-            steps: Some(30),
-            seed: None,
-            lm_seed: None,
-            lm_cfg: Some(1.5),
-            lm_top_k: Some(50),
-            lm_batch_size: None,
-            synth_batch_size: None,
-            dit_cfg: Some(1.7),
-            peak_clip: None,
-            output_format: Some("flac".into()),
-            mp3_bitrate: None,
-            models: Some(Mm3ModelSelection {
-                lm_model: Some("lm.gguf".into()),
-                depth_model: Some("depth.gguf".into()),
-                cond_model: Some("condition.gguf".into()),
-                dit_model: Some("dit.gguf".into()),
-                vae_model: Some("vocoder.gguf".into()),
-            }),
-        }, None, None, None).unwrap_err();
-        assert!(error.contains("output_format"));
+    fn requests_the_engine_would_refuse_are_refused_first_with_a_reason() {
+        let cases: Vec<(CreateMusicJobRequest, &str)> = vec![
+            (CreateMusicJobRequest { style: " ".into(), lyrics: String::new(), ..CreateMusicJobRequest::default() }, "style or lyrics"),
+            (CreateMusicJobRequest { cot: Some("half".into()), ..sample_request() }, "cot"),
+            (CreateMusicJobRequest { lm_batch_size: Some(2), ..sample_request() }, "lm_batch_size"),
+            (CreateMusicJobRequest { synth_batch_size: Some(10), ..sample_request() }, "synth_batch_size"),
+            (CreateMusicJobRequest { output_format: Some("flac".into()), ..sample_request() }, "output_format"),
+            (CreateMusicJobRequest { duration_seconds: Some(400.0), ..sample_request() }, "duration"),
+            (CreateMusicJobRequest { semantic_tokens: Some("1,2,x".into()), ..sample_request() }, "semantic_tokens"),
+            (CreateMusicJobRequest { semantic_tokens: Some("1,40000".into()), ..sample_request() }, "semantic_tokens"),
+            (CreateMusicJobRequest { abc_sampling: Some(SamplingPreset { top_p: Some(1.5), ..SamplingPreset::default() }), ..sample_request() }, "top_p"),
+            (CreateMusicJobRequest { semantic_sampling: Some(SamplingPreset { min_tokens: Some(10), max_tokens: Some(5), ..SamplingPreset::default() }), ..sample_request() }, "min_tokens"),
+        ];
+        for (request, expected) in cases {
+            let error = yue_request_from(&request, 1).expect_err(expected);
+            assert!(error.contains(expected), "{expected}: {error}");
+        }
     }
 
     #[test]
-    fn request_uses_confirmed_mm3_defaults_and_rejects_invalid_synth_batch() {
-        let request = CreateMusicJobRequest {
-            cover_prompt: None,
-            title: None,
-            caption: "night drive".into(), lyrics: "[verse] one line".into(), duration_seconds: 60.0,
-            steps: None, seed: None, lm_seed: None, lm_cfg: None, lm_top_k: None,
-            lm_batch_size: None, synth_batch_size: None, dit_cfg: None, peak_clip: None,
-            output_format: None, mp3_bitrate: None,
-            models: Some(Mm3ModelSelection { lm_model: Some("lm.gguf".into()), depth_model: Some("depth.gguf".into()), cond_model: Some("condition.gguf".into()), dit_model: Some("dit.gguf".into()), vae_model: Some("vocoder.gguf".into()) }),
-        };
-        let body = mm_request_from(&request, None, None, None).unwrap();
-        assert_eq!(body["steps"], 30);
-        assert_eq!(body["lm_batch_size"], 1);
-        assert_eq!(body["synth_batch_size"], 1);
-        assert_eq!(body["peak_clip"], 10);
-        assert_eq!(body["mp3_bitrate"], 128);
-
-        let invalid = CreateMusicJobRequest { synth_batch_size: Some(10), ..request };
-        assert!(mm_request_from(&invalid, None, None, None).unwrap_err().contains("synth_batch_size"));
+    fn codes_alone_are_a_valid_request() {
+        let request = CreateMusicJobRequest { semantic_tokens: Some("12, 8433 ,22418".into()), ..CreateMusicJobRequest::default() };
+        let body = yue_request_from(&request, 1).unwrap();
+        assert_eq!(body["semantic_tokens"], "12, 8433 ,22418");
     }
 
     #[test]
@@ -4597,7 +4712,7 @@ mod tests {
                 runtime: lyrics_sync::OnnxFlavour::default(),
             },
             selected_profile_id: None,
-            selected_component_ids: Some(vec!["lm-q8".into(), "depth-q8".into(), "condition-f32".into(), "dit-q6".into(), "vocoder-f32".into()]),
+            selected_component_ids: Some(vec!["backbone-q8".into(), "vae-f32".into()]),
             cover_templates: Some(cover_prompt::default_templates()),
             cover_auto: Some(true),
             separation: Some(separation::SeparationConfig::default()),
@@ -4607,7 +4722,7 @@ mod tests {
         assert!(restored.lyrics_sync.available());
         assert_eq!(restored.lyrics_sync.provider, lyrics_sync::AsrProvider::Parakeet);
         assert!(restored.selected_profile_id.is_none());
-        assert_eq!(restored.selected_component_ids.unwrap(), vec!["lm-q8", "depth-q8", "condition-f32", "dit-q6", "vocoder-f32"]);
+        assert_eq!(restored.selected_component_ids.unwrap(), vec!["backbone-q8", "vae-f32"]);
         // Engine flags survive a restart, and the songs-per-request ceiling is
         // derived from them rather than assumed.
         assert!(restored.engine_options.keep_loaded);
@@ -4630,28 +4745,7 @@ mod tests {
 
     #[test]
     fn remote_statuses_never_claim_success_for_an_unknown_value() {
-        let mut job = queued_not_configured_job(
-            CreateMusicJobRequest {
-                cover_prompt: None,
-                title: None,
-            caption: "night drive".into(),
-                lyrics: "one line".into(),
-                duration_seconds: 30.0,
-                steps: None,
-                seed: None,
-                lm_seed: None,
-                lm_cfg: None,
-                lm_top_k: None,
-                lm_batch_size: None,
-                synth_batch_size: None,
-                dit_cfg: None,
-                peak_clip: None,
-                output_format: None,
-                mp3_bitrate: None,
-                models: None,
-            },
-            PRIMARY_MUSIC_ENGINE_ID.into(),
-        );
+        let mut job = queued_not_configured_job(sample_request(), PRIMARY_MUSIC_ENGINE_ID.into());
         apply_remote_status(&mut job, "not-a-real-status");
         assert!(matches!(job.status, MusicJobStatus::Failed));
     }
@@ -4668,23 +4762,37 @@ mod tests {
         assert_eq!(serde_json::to_value(after_refresh).unwrap()["engines"].as_array().unwrap().len(), 5);
     }
 
-    #[test]
-    fn replay_synthesis_keeps_audio_codes_and_only_applies_confirmed_synthesis_overrides() {
-        let request = ReplayMusicJobRequest { song_id: None, replay_request: None, steps: Some(42), seed: Some(9), dit_cfg: Some(1.9), output_format: Some("wav24".into()), models: Some(Mm3ModelSelection { dit_model: Some("dit-q6.gguf".into()), ..Default::default() }) };
-        let replay = serde_json::json!({"caption":"night drive","lyrics":"[verse] hi","audio_codes":"1,2,3,4,5,6,7,8","lm_seed":123,"lm_cfg":1.5,"dit_cfg":1.7,"steps":30,"seed":1,"dit_model":"dit-q4.gguf"});
-        let prepared = prepare_replay_synthesis(replay, &request).unwrap();
-        assert_eq!(prepared["audio_codes"], "1,2,3,4,5,6,7,8");
-        assert_eq!(prepared["steps"], 42);
-        assert_eq!(prepared["seed"], 9);
-        assert_eq!(prepared["dit_cfg"], 1.9);
-        assert_eq!(prepared["output_format"], "wav24");
-        assert_eq!(prepared["dit_model"], "dit-q6.gguf");
-        assert_eq!(prepared["lm_seed"], 123);
+    fn replay_overrides() -> ReplayMusicJobRequest {
+        ReplayMusicJobRequest { song_id: None, replay_request: None, steps: None, seed: None, synth_batch_size: None, output_format: None, peak_clip: None, mp3_bitrate: None, title: None }
     }
 
     #[test]
-    fn replay_without_audio_codes_is_rejected_before_mm_server_submission() {
-        let request = ReplayMusicJobRequest { song_id: None, replay_request: None, steps: None, seed: None, dit_cfg: None, output_format: None, models: None };
-        assert!(prepare_replay_synthesis(serde_json::json!({"caption":"c","lyrics":"l"}), &request).is_err());
+    fn a_rerender_keeps_the_music_and_changes_only_the_acoustic_side() {
+        let request = ReplayMusicJobRequest { steps: Some(48), seed: Some(9), synth_batch_size: Some(2), output_format: Some("wav24".into()), mp3_bitrate: Some(192), ..replay_overrides() };
+        let replay = serde_json::json!({"style":"piano pop","lyrics":"[Verse] hi","abc":"X:1\nK:C\n","semantic_tokens":"1,2,3","lm_seed":123,"seed":1,"steps":32,"cot":"full"});
+        let prepared = prepare_replay_synthesis(replay, &request).unwrap();
+        assert_eq!(prepared["semantic_tokens"], "1,2,3");
+        assert_eq!(prepared["abc"], "X:1\nK:C\n");
+        assert_eq!(prepared["lm_seed"], 123);
+        assert_eq!(prepared["steps"], 48);
+        assert_eq!(prepared["seed"], 9);
+        assert_eq!(prepared["synth_batch_size"], 2);
+        assert_eq!(prepared["output_format"], "wav24");
+        assert_eq!(prepared["mp3_bitrate"], 192);
+        assert_eq!(prepared["lm_batch_size"], 1);
+    }
+
+    #[test]
+    fn a_track_without_its_semantic_stream_cannot_be_rerendered() {
+        assert!(prepare_replay_synthesis(serde_json::json!({"style":"s","lyrics":"l"}), &replay_overrides()).is_err());
+        assert!(prepare_replay_synthesis(serde_json::json!({"style":"s","semantic_tokens":"1,oops"}), &replay_overrides()).is_err());
+    }
+
+    #[test]
+    fn engine_options_become_launch_flags_with_a_batch_ceiling() {
+        let options = EngineOptions { max_seq: Some(8192), vae_core: Some(256), ..EngineOptions::default() }.to_engine();
+        assert_eq!(options.max_batch, Some(1));
+        assert_eq!(options.max_seq, Some(8192));
+        assert_eq!(options.vae_core, Some(256));
     }
 }

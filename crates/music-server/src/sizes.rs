@@ -29,7 +29,7 @@ use std::sync::{Mutex, OnceLock};
 /// between this and the `ureq` these downloads were modelled on.
 pub fn client() -> reqwest::Client {
     reqwest::Client::builder()
-        .user_agent(concat!("MiniMax-Music3-Studio/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("YuE2-Studio/", env!("CARGO_PKG_VERSION")))
         .build()
         .unwrap_or_default()
 }

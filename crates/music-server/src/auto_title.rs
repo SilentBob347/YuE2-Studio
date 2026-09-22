@@ -10,7 +10,7 @@
 //! title ends at the first sentence boundary if there is one, keeps at most two
 //! comma-separated phrases, and is cut to fifty characters on a word boundary.
 //!
-//! One thing the old studio never had to handle: Music3 reads the description as
+//! One thing to handle: a structured caption reads the description as
 //! a labelled document, so the description branch skips leading section labels -
 //! otherwise every instrumental would be called "Global Metadata".
 
@@ -86,7 +86,7 @@ fn first_sung_line(lyrics: &str) -> Option<&str> {
         .find(|line| !line.is_empty() && !is_marker(line))
 }
 
-/// The section names Music3's caption format uses. They are the document's
+/// Section names of structured captions (the MiniMax Music 3 format). They are the document's
 /// scaffolding, not a description of the song.
 pub const LABELS: &[&str] = &[
     "global metadata",
