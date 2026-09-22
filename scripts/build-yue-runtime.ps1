@@ -133,7 +133,7 @@ $stamp = [pscustomobject]@{
     commit = $engineSource.commit
     backend = $backend
     cuda_architecture = $CudaArchitecture
-    runtime = Join-Path $resolvedOutputDirectory 'yue-server.exe'
+    runtime = 'yue-server.exe'
 }
 [System.IO.File]::WriteAllText((Join-Path $resolvedOutputDirectory 'runtime.json'), ($stamp | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
 $stamp | ConvertTo-Json -Compress
