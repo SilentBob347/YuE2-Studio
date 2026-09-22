@@ -26,7 +26,7 @@ score before it sings. Describe a style, write the lyrics, and the model compose
 with chords as sheet music, then performs it as a full song with vocals. The score comes
 back with the track: read it, edit it, and render the same composition again with a
 different sound. Windows installer with auto-update or a portable folder, runs offline on
-an NVIDIA card with 6 GB of VRAM or more.
+a GPU with 6 GB of VRAM or more — NVIDIA through CUDA, AMD and Intel through Vulkan.
 
 It is built on [yue2.cpp](https://github.com/ServeurpersoCom/yue2.cpp), the native C++/CUDA
 port of YuE2. The studio around it is Rust and React in a Tauri window — nothing in the
@@ -80,9 +80,14 @@ The same screens in the language you read: [Русский](https://timoncool.gi
 ## What it needs
 
 - Windows 10/11 x64.
-- An NVIDIA card of the **GTX 16 / RTX 20 generation or newer** (Turing, Ampere, Ada,
-  Hopper, Blackwell) with **6 GB of VRAM** or more. The engine ships compiled for those
-  architectures; Pascal and older are not supported by the CUDA 13 toolkit that builds it.
+- A GPU with **6 GB of VRAM** or more:
+  - **NVIDIA**, GTX 16 / RTX 20 generation or newer (Turing through Blackwell), runs on
+    CUDA — the fastest path. Pascal and older are not supported by the CUDA 13 toolkit.
+  - **AMD or Intel** runs on Vulkan through the card's own driver, nothing extra to
+    install. Checked on AMD Radeon integrated graphics; discrete AMD and Intel cards have
+    not been tested yet.
+  - Without a GPU the engine falls back to the processor, which works but is many times
+    slower.
 - 4–10 GB of disk for one model set.
 
 ## Quick start
@@ -145,17 +150,22 @@ A file placed by hand with the exact catalogue name is recognised and never down
 ## The engine and the DLLs it needs
 
 ```text
-yue-server.exe
-  ├─ ggml.dll → ggml-base.dll, ggml-cpu.dll, ggml-cuda.dll     shipped inside the app
-  │                               └─ cublas64_13.dll, cublasLt64_13.dll   downloaded once
-  │                               └─ nvcuda.dll                           your NVIDIA driver
-  └─ vcruntime140.dll, msvcp140.dll                            Visual C++ runtime
+yue-server.exe → ggml.dll, ggml-base.dll            shipped inside the app
+  loads at run time, whichever the machine can use:
+  ├─ ggml-cuda.dll     → cublas64_13.dll, cublasLt64_13.dll (downloaded once), nvcuda.dll (NVIDIA driver)
+  ├─ ggml-vulkan.dll   → vulkan-1.dll (every AMD, Intel and NVIDIA driver)
+  └─ ggml-cpu-*.dll    nine builds, from SSE4.2 to AVX-512; the best one for the processor is picked
+  + vcruntime140.dll, msvcp140.dll                   Visual C++ runtime
 ```
 
-**Shipped inside the app.** `yue-server.exe` and the four `ggml*.dll` files, built from the
-pinned yue2.cpp commit, live in `resources\yue2-cpp\` beside the main executable.
+**Shipped inside the app.** `yue-server.exe` and every `ggml*.dll`, built from the pinned
+yue2.cpp commit with all backends, live in `resources\yue2-cpp\` beside the main
+executable. Settings → Local engine chooses the compute device: Auto (CUDA on NVIDIA,
+Vulkan on AMD and Intel, the processor without a GPU), or CUDA, Vulkan or the processor
+explicitly. On Vulkan the studio turns on the engine's FP16 clamp: without it an AMD Radeon
+renders silence.
 
-**Downloaded once, on the first engine start.**
+**Downloaded once, on the first engine start — on NVIDIA only.**
 
 | File(s) | Where from | Size | Why |
 | --- | --- | --- | --- |
@@ -196,15 +206,15 @@ cargo run -p music-server           # service on 127.0.0.1:8791
 npm --prefix app run dev            # UI on 127.0.0.1:3791
 ```
 
-The engine: `scripts/build-yue-runtime.ps1` builds the pinned yue2.cpp commit
-(`engines/yue2-cpp-source.json`) with CUDA 13, MSVC and Ninja for every supported
-architecture. `scripts/build-release.ps1 -Version X.Y.Z` produces the NSIS installer, the
+The engine: `scripts/build-yue-runtime.ps1 -RuntimeBackend all` builds the pinned yue2.cpp
+commit (`engines/yue2-cpp-source.json`) with runtime-loaded CUDA, Vulkan and CPU backends,
+using CUDA 13, the Vulkan SDK, MSVC and Ninja. `scripts/build-release.ps1 -Version X.Y.Z` produces the NSIS installer, the
 portable archive and the signed `latest.json` for the updater; it reads the signing key from
 `TAURI_SIGNING_PRIVATE_KEY` or `%USERPROFILE%\.tauri\yue2-studio.key`. Model weights are
 never part of a release.
 
-yue2.cpp also builds for Linux and macOS (Metal) and for Vulkan; the studio's release
-pipeline ships Windows + CUDA only for now.
+yue2.cpp also builds for Linux and macOS (Metal); the studio's release pipeline ships the
+Windows build with CUDA, Vulkan and CPU backends for now.
 
 ## Other Projects by [@timoncool](https://github.com/timoncool)
 

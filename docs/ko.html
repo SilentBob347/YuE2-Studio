@@ -4,10 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>YuE2 Studio — 편집 가능한 악보가 있는 완성곡을 내 GPU에서</title>
-<meta name="description" content="YuE2 노래 모델을 위한 데스크톱 스튜디오: 스타일과 가사를 넣으면 보컬이 있는 완성곡과 그 악보가 나옵니다. 커버, 정확한 재현, 가라오케. 실행 파일 하나, Python 없이 NVIDIA에서 오프라인으로 동작합니다." />
+<meta name="description" content="YuE2 노래 모델을 위한 데스크톱 스튜디오: 스타일과 가사를 넣으면 보컬이 있는 완성곡과 그 악보가 나옵니다. 커버, 정확한 재현, 가라오케. 실행 파일 하나, Python 없이 NVIDIA, AMD, Intel 그래픽카드에서 오프라인으로 동작합니다." />
 <link rel="icon" type="image/png" href="logo.png" />
 <meta property="og:title" content="YuE2 Studio" />
-<meta property="og:description" content="YuE2 노래 모델을 위한 데스크톱 스튜디오: 스타일과 가사를 넣으면 보컬이 있는 완성곡과 그 악보가 나옵니다. 커버, 정확한 재현, 가라오케. 실행 파일 하나, Python 없이 NVIDIA에서 오프라인으로 동작합니다." />
+<meta property="og:description" content="YuE2 노래 모델을 위한 데스크톱 스튜디오: 스타일과 가사를 넣으면 보컬이 있는 완성곡과 그 악보가 나옵니다. 커버, 정확한 재현, 가라오케. 실행 파일 하나, Python 없이 NVIDIA, AMD, Intel 그래픽카드에서 오프라인으로 동작합니다." />
 <meta property="og:type" content="website" />
 <meta property="og:image" content="https://timoncool.github.io/YuE2-Studio/screenshots/ko-01-create.png" />
 <link rel="alternate" hreflang="en" href="https://timoncool.github.io/YuE2-Studio/" />
@@ -152,7 +152,7 @@ footer a { color: var(--text); }
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio">GitHub 소스</a>
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio/blob/main/DONATE.md">프로젝트 후원</a>
   </div>
-  <p class="note">Windows 10/11 x64와 VRAM 6 GB 이상의 NVIDIA GTX 16 / RTX 20 세대 이상 그래픽카드. 모델은 스튜디오 안에서 원할 때 내려받습니다.</p>
+  <p class="note">Windows 10/11 x64와 VRAM 6 GB 이상의 그래픽카드: NVIDIA(GTX 16 / RTX 20 이상)는 CUDA, AMD와 Intel은 Vulkan으로 동작합니다. 모델은 스튜디오 안에서 원할 때 내려받습니다.</p>
 
   <figure class="hero-shot">
     <img src="screenshots/ko-01-create.png" alt="곡 쓰기: 스타일, 가사, 예제 110개 중 하나를 불러온 상태." loading="eager" />
@@ -220,9 +220,9 @@ footer a { color: var(--text); }
       <table>
         <thead><tr><th>구성 요소</th><th>실행 위치</th><th>크기</th></tr></thead>
         <tbody>
-          <tr><td>YuE2 엔진 (yue2.cpp)</td><td>내 GPU, CUDA</td><td>포함</td></tr>
+          <tr><td>YuE2 엔진 (yue2.cpp)</td><td>그래픽카드: CUDA, Vulkan 또는 프로세서</td><td>포함</td></tr>
           <tr><td>YuE2 모델 세트</td><td>내 GPU</td><td>3.6–9.7 GB</td></tr>
-          <tr><td>NVIDIA cuBLAS</td><td>내 GPU</td><td>391 MB, 한 번</td></tr>
+          <tr><td>NVIDIA cuBLAS</td><td>NVIDIA 카드 전용</td><td>391 MB, 한 번</td></tr>
           <tr><td>가라오케 타이밍 — Parakeet 또는 Whisper</td><td>내 컴퓨터</td><td>선택</td></tr>
           <tr><td>스템 분리 — HT-Demucs</td><td>GPU 또는 CPU</td><td>선택</td></tr>
           <tr><td>작사 도우미</td><td>로컬 Gemma 또는 OpenRouter</td><td>선택</td></tr>

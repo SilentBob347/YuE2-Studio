@@ -4,10 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>YuE2 Studio — целые песни с редактируемой партитурой на своей видеокарте</title>
-<meta name="description" content="Десктопная студия для модели YuE2: на входе стиль и текст, на выходе целая песня с вокалом и её нотная партитура. Каверы, точный повтор, караоке. Один exe, без Python, работает офлайн на NVIDIA." />
+<meta name="description" content="Десктопная студия для модели YuE2: на входе стиль и текст, на выходе целая песня с вокалом и её нотная партитура. Каверы, точный повтор, караоке. Один exe, без Python, работает офлайн на видеокартах NVIDIA, AMD и Intel." />
 <link rel="icon" type="image/png" href="logo.png" />
 <meta property="og:title" content="YuE2 Studio" />
-<meta property="og:description" content="Десктопная студия для модели YuE2: на входе стиль и текст, на выходе целая песня с вокалом и её нотная партитура. Каверы, точный повтор, караоке. Один exe, без Python, работает офлайн на NVIDIA." />
+<meta property="og:description" content="Десктопная студия для модели YuE2: на входе стиль и текст, на выходе целая песня с вокалом и её нотная партитура. Каверы, точный повтор, караоке. Один exe, без Python, работает офлайн на видеокартах NVIDIA, AMD и Intel." />
 <meta property="og:type" content="website" />
 <meta property="og:image" content="https://timoncool.github.io/YuE2-Studio/screenshots/ru-01-create.png" />
 <link rel="alternate" hreflang="en" href="https://timoncool.github.io/YuE2-Studio/" />
@@ -152,7 +152,7 @@ footer a { color: var(--text); }
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio">Исходники на GitHub</a>
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio/blob/main/DONATE.md">Поддержать проект</a>
   </div>
-  <p class="note">Windows 10/11 x64 и видеокарта NVIDIA поколения GTX 16 / RTX 20 или новее с 6 ГБ видеопамяти. Модели скачиваются из самой студии, когда вы решите.</p>
+  <p class="note">Windows 10/11 x64 и видеокарта с 6 ГБ видеопамяти: NVIDIA (GTX 16 / RTX 20 и новее) через CUDA, AMD и Intel через Vulkan. Модели скачиваются из самой студии, когда вы решите.</p>
 
   <figure class="hero-shot">
     <img src="screenshots/ru-01-create.png" alt="Пишем песню: стиль, текст, загружен один из 110 примеров." loading="eager" />
@@ -220,9 +220,9 @@ footer a { color: var(--text); }
       <table>
         <thead><tr><th>Часть</th><th>Где работает</th><th>Размер</th></tr></thead>
         <tbody>
-          <tr><td>Движок YuE2 (yue2.cpp)</td><td>Ваша видеокарта, CUDA</td><td>в комплекте</td></tr>
+          <tr><td>Движок YuE2 (yue2.cpp)</td><td>Видеокарта: CUDA, Vulkan или процессор</td><td>в комплекте</td></tr>
           <tr><td>Набор моделей YuE2</td><td>Ваша видеокарта</td><td>3.6–9.7 ГБ</td></tr>
-          <tr><td>NVIDIA cuBLAS</td><td>Ваша видеокарта</td><td>391 МБ, один раз</td></tr>
+          <tr><td>NVIDIA cuBLAS</td><td>Только карты NVIDIA</td><td>391 МБ, один раз</td></tr>
           <tr><td>Тайминги караоке — Parakeet или Whisper</td><td>Ваш компьютер</td><td>по желанию</td></tr>
           <tr><td>Разделение на стемы — HT-Demucs</td><td>Видеокарта или процессор</td><td>по желанию</td></tr>
           <tr><td>Помощник по текстам</td><td>Локальная Gemma или OpenRouter</td><td>по желанию</td></tr>

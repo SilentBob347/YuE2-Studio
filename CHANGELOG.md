@@ -36,6 +36,10 @@ YuE2 and [yue2.cpp](https://github.com/ServeurpersoCom/yue2.cpp) at commit `ea07
   checked by SHA-256 and downloads resume.
 - **A writing assistant** tuned to YuE2's style tags and lyric sections, local (Gemma via
   llama.cpp) or through OpenRouter; it can also edit the score on request.
+- **Any GPU** — the engine ships with runtime-loaded CUDA, Vulkan and CPU backends. NVIDIA
+  runs on CUDA (cuBLAS is fetched once, on NVIDIA only); AMD and Intel run on Vulkan with
+  nothing to install, and with the engine's FP16 clamp turned on automatically — without
+  it an AMD Radeon renders silence. Settings → Local engine chooses the device.
 - **Interface in five languages** — English, Russian, Chinese, Japanese, Korean.
 - **Windows installer with auto-update** and a portable archive.
 
