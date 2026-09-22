@@ -20,3 +20,16 @@ describe('YuE2 strings', () => {
     }
   });
 });
+
+describe('merged interface strings', () => {
+  it('nothing the interface shows names the forked-from model', async () => {
+    const { translations } = await import('./translations');
+    const leaks: string[] = [];
+    for (const [language, strings] of Object.entries(translations)) {
+      for (const [key, value] of Object.entries(strings)) {
+        if (typeof value === 'string' && /music ?3|minimax/i.test(value)) leaks.push(`${language}.${key}`);
+      }
+    }
+    expect(leaks).toEqual([]);
+  });
+});

@@ -9,7 +9,7 @@
 
 </div>
 
-**MiniMax Music3 Studio** 는 **Nerual Dreming** 이 만들고 관리합니다. 아티스트이자
+**YuE2 Studio** 는 **Nerual Dreming** 이 만들고 관리합니다. 아티스트이자
 [ArtGeneration.me](https://artgeneration.me) 와 Neuro-Cartel 커뮤니티의 설립자이며, 이 스튜디오의
 바탕이 된 [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio) 의 저자이기도 합니다.
 

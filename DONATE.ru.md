@@ -9,7 +9,7 @@
 
 </div>
 
-**MiniMax Music3 Studio** пишет и поддерживает **Nerual Dreming** — художник, основатель
+**YuE2 Studio** пишет и поддерживает **Nerual Dreming** — художник, основатель
 [ArtGeneration.me](https://artgeneration.me) и сообщества «Нейро-Картель», автор
 [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio), из которой выросла эта студия.
 

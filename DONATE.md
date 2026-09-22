@@ -9,7 +9,7 @@
 
 </div>
 
-**MiniMax Music3 Studio** is written and maintained by **Nerual Dreming** — artist, founder of
+**YuE2 Studio** is written and maintained by **Nerual Dreming** — artist, founder of
 [ArtGeneration.me](https://artgeneration.me) and of the Neuro-Cartel community, and the author of
 [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio), which this studio grew out of.
 

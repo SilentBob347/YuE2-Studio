@@ -125,6 +125,15 @@ const en = {
   "profile_balanced": "Balanced - Q6_K backbone",
   "profile_quality-q8": "Quality - Q8_0 backbone, near lossless",
   "profile_native": "Full native - BF16 backbone, original weights",
+  takeTitle: "Reuse this take?",
+  takeBody: "The audio codes hold a performance already sung. Keeping them renders it again; dropping them performs the prompt anew.",
+  sameTake: "Same take",
+  newTake: "New take",
+  composeScore: "Compose the score",
+  composeScoreAgain: "Compose another",
+  composingScore: "Composing…",
+  composeScoreHint: "Only the score, from the style and lyrics, without singing: read and edit it, then create.",
+  composeScoreCancel: "Click again to stop.",
 } as const;
 
 export type Yue2Strings = { readonly [K in keyof typeof en]: string };
@@ -250,6 +259,15 @@ const ru: Yue2Strings = {
   "profile_balanced": "Сбалансированный - бэкбон Q6_K",
   "profile_quality-q8": "Качество - бэкбон Q8_0, почти без потерь",
   "profile_native": "Полный оригинал - бэкбон BF16, исходные веса",
+  takeTitle: "Взять этот дубль?",
+  takeBody: "Аудиокоды хранят уже спетое исполнение. С ними оно отрендерится заново; без них модель споёт промпт с нуля.",
+  sameTake: "Тот же дубль",
+  newTake: "Новый дубль",
+  composeScore: "Сочинить партитуру",
+  composeScoreAgain: "Сочинить другую",
+  composingScore: "Сочиняю…",
+  composeScoreHint: "Только партитура по стилю и тексту, без пения: прочитайте, поправьте, потом создавайте.",
+  composeScoreCancel: "Нажмите ещё раз, чтобы остановить.",
 };
 
 const zh: Yue2Strings = {
@@ -373,6 +391,15 @@ const zh: Yue2Strings = {
   "profile_balanced": "均衡 - Q6_K 主干",
   "profile_quality-q8": "高质量 - Q8_0 主干，接近无损",
   "profile_native": "完整原生 - BF16 主干，原始权重",
+  takeTitle: "沿用这一版演唱？",
+  takeBody: "音频编码保存着一次已经唱过的演绎。保留它们会重新渲染这一版；去掉它们则重新演唱提示词。",
+  sameTake: "同一版",
+  newTake: "新的一版",
+  composeScore: "创作乐谱",
+  composeScoreAgain: "再创作一份",
+  composingScore: "正在创作…",
+  composeScoreHint: "只根据风格和歌词写出乐谱，不演唱：先阅读、修改，再创作。",
+  composeScoreCancel: "再次点击即可停止。",
 };
 
 const ja: Yue2Strings = {
@@ -496,6 +523,15 @@ const ja: Yue2Strings = {
   "profile_balanced": "バランス - Q6_K バックボーン",
   "profile_quality-q8": "高品質 - Q8_0 バックボーン、ほぼロスレス",
   "profile_native": "フルネイティブ - BF16 バックボーン、オリジナル重み",
+  takeTitle: "このテイクを使いますか？",
+  takeBody: "オーディオコードには歌い終えた演奏が入っています。残せばそれを再レンダリングし、外せばプロンプトを新たに演奏します。",
+  sameTake: "同じテイク",
+  newTake: "新しいテイク",
+  composeScore: "楽譜を作曲",
+  composeScoreAgain: "別の楽譜を作曲",
+  composingScore: "作曲中…",
+  composeScoreHint: "スタイルと歌詞から楽譜だけを書き、歌いません。読んで編集してから作成します。",
+  composeScoreCancel: "もう一度クリックすると停止します。",
 };
 
 const ko: Yue2Strings = {
@@ -619,6 +655,15 @@ const ko: Yue2Strings = {
   "profile_balanced": "균형 - Q6_K 백본",
   "profile_quality-q8": "고품질 - Q8_0 백본, 거의 무손실",
   "profile_native": "풀 네이티브 - BF16 백본, 원본 가중치",
+  takeTitle: "이 테이크를 다시 쓸까요?",
+  takeBody: "오디오 코드에는 이미 부른 연주가 들어 있습니다. 유지하면 그 연주를 다시 렌더링하고, 빼면 프롬프트를 새로 연주합니다.",
+  sameTake: "같은 테이크",
+  newTake: "새 테이크",
+  composeScore: "악보 작곡",
+  composeScoreAgain: "다른 악보 작곡",
+  composingScore: "작곡 중…",
+  composeScoreHint: "스타일과 가사로 악보만 쓰고 부르지는 않습니다. 읽고 고친 뒤 만드세요.",
+  composeScoreCancel: "다시 누르면 멈춥니다.",
 };
 
 export const yue2 = { en, ru, zh, ja, ko };

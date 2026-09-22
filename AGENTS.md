@@ -1,4 +1,4 @@
-# MiniMax Music3 Studio guidelines
+# YuE2 Studio guidelines
 
 This is a native Windows desktop studio: Tauri 2 shell, Rust/Axum service and native C++/CUDA engines.
 

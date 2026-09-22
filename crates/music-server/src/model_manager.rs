@@ -18,7 +18,7 @@ const REVISION: &str = "64b030e3deb6e8150d2b7c0db641ef5a17eca8a3";
 
 /// The recommendation is a property of the machine, not of the catalog.
 fn recommended_profile() -> &'static str {
-    crate::presets::recommended_local_profile()
+    crate::hardware::recommended_local_profile()
 }
 
 #[derive(Clone)]
@@ -601,11 +601,6 @@ async fn verified_file_async(path: PathBuf, component: Component) -> Result<bool
         .context("join GGUF SHA-256 verification task")?
 }
 
-fn profile_complete(profile_id: &str, root: &Path) -> bool {
-    let Ok(selection) = resolve_install(InstallRequest { profile_id: Some(profile_id.into()), component_ids: vec![] }) else { return false; };
-    selection.components.iter().all(|component| verified_file(&root.join(component.filename), component).unwrap_or(false))
-}
-
 fn verified_file(path: &Path, component: &Component) -> Result<bool> {
     if fs::metadata(path).map(|metadata| metadata.len()).unwrap_or(0) == 0 {
         return Ok(false);
@@ -638,6 +633,7 @@ fn profiles() -> Vec<Profile> {
     ]
 }
 
+#[cfg(test)]
 pub fn profile_exists(id: &str) -> bool {
     profiles().iter().any(|profile| profile.id == id && profile.installable && profile.backend == ENGINE_ID)
 }

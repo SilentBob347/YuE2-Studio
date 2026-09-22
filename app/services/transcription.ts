@@ -1,9 +1,12 @@
 /**
- * Reads a recording into an ABC score with SheetSage2, through the studio
- * service: the audio is either a file the user picked or a library track.
+ * Jobs whose answer is a score, through the studio service: SheetSage2 reading
+ * a recording (a file the user picked or a library track), or YuE2 composing
+ * one from a style and lyrics without singing it.
  */
 
-interface TranscriptionJob {
+import type { YueCot, YueSampling } from '../types';
+
+interface ScoreJob {
   id: string;
   status: 'running' | 'done' | 'failed' | 'cancelled';
   abc?: string;
@@ -12,28 +15,45 @@ interface TranscriptionJob {
 
 const POLL_MS = 1000;
 
+async function awaitScore(route: string, submitted: Response, signal?: AbortSignal): Promise<string> {
+  const job = (await submitted.json().catch(() => ({}))) as Partial<ScoreJob>;
+  if (!submitted.ok || !job.id) throw new Error(job.error || `the engine refused the job (${submitted.status})`);
+  const url = `${route}/${encodeURIComponent(job.id)}`;
+  for (;;) {
+    await new Promise(resolve => window.setTimeout(resolve, POLL_MS));
+    if (signal?.aborted) {
+      await fetch(url, { method: 'POST' }).catch(() => undefined);
+      throw new DOMException('cancelled', 'AbortError');
+    }
+    const response = await fetch(url, { signal });
+    const state = (await response.json().catch(() => ({}))) as Partial<ScoreJob>;
+    if (!response.ok) throw new Error(state.error || `job status failed (${response.status})`);
+    if (state.status === 'done' && state.abc) return state.abc;
+    if (state.status === 'failed') throw new Error(state.error || 'the engine could not write this score');
+    if (state.status === 'cancelled') throw new DOMException('cancelled', 'AbortError');
+  }
+}
+
 export async function transcribe(source: { file?: File; songId?: string }, melodyOnly: boolean, signal?: AbortSignal): Promise<string> {
   const form = new FormData();
   if (source.file) form.append('audio', source.file, source.file.name);
   else if (source.songId) form.append('song_id', source.songId);
   else throw new Error('no audio to transcribe');
   if (melodyOnly) form.append('melody_only', '1');
-
   const submitted = await fetch('/v1/transcriptions', { method: 'POST', body: form, signal });
-  const job = (await submitted.json().catch(() => ({}))) as Partial<TranscriptionJob> & { error?: string };
-  if (!submitted.ok || !job.id) throw new Error(job.error || `transcription was refused (${submitted.status})`);
+  return awaitScore('/v1/transcriptions', submitted, signal);
+}
 
-  for (;;) {
-    await new Promise(resolve => window.setTimeout(resolve, POLL_MS));
-    if (signal?.aborted) {
-      await fetch(`/v1/transcriptions/${encodeURIComponent(job.id)}`, { method: 'POST' }).catch(() => undefined);
-      throw new DOMException('cancelled', 'AbortError');
-    }
-    const response = await fetch(`/v1/transcriptions/${encodeURIComponent(job.id)}`, { signal });
-    const state = (await response.json().catch(() => ({}))) as Partial<TranscriptionJob> & { error?: string };
-    if (!response.ok) throw new Error(state.error || `transcription status failed (${response.status})`);
-    if (state.status === 'done' && state.abc) return state.abc;
-    if (state.status === 'failed') throw new Error(state.error || 'the engine could not transcribe this recording');
-    if (state.status === 'cancelled') throw new DOMException('cancelled', 'AbortError');
-  }
+/** The planning stage alone: the score YuE2 would sing this prompt from. */
+export async function composeScore(
+  prompt: { style: string; lyrics: string; cot: YueCot; lmSeed?: number; abcSampling?: YueSampling },
+  signal?: AbortSignal,
+): Promise<string> {
+  const submitted = await fetch('/v1/scores', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ style: prompt.style, lyrics: prompt.lyrics, cot: prompt.cot, lm_seed: prompt.lmSeed, abc_sampling: prompt.abcSampling }),
+    signal,
+  });
+  return awaitScore('/v1/scores', submitted, signal);
 }

@@ -40,8 +40,6 @@ pub struct AuthenticatedOpenRouterRequest {
     pub api_key: String,
 }
 
-pub type OpenRouterMusicStreamRequest = AuthenticatedOpenRouterRequest;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Base64AudioInput<'a> {
     /// Ask for per-segment and per-word times.
@@ -55,7 +53,6 @@ pub struct Base64AudioInput<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
-    Get,
     Post,
 }
 
@@ -77,13 +74,6 @@ pub struct ModelDefaults {
     pub frequency_penalty: Option<f64>,
     pub presence_penalty: Option<f64>,
     pub repetition_penalty: Option<f64>,
-}
-
-impl ModelDefaults {
-    /// True when the model published nothing at all.
-    pub fn is_empty(&self) -> bool {
-        *self == Self::default()
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -276,23 +266,6 @@ impl CapabilityCatalog {
     }
 }
 
-pub fn models_request() -> OpenRouterRequest {
-    OpenRouterRequest {
-        method: HttpMethod::Get,
-        path: MODELS_PATH,
-        body: Value::Null,
-    }
-}
-
-/// The second listing the catalog needs: dedicated transcription models.
-pub fn transcription_models_request() -> OpenRouterRequest {
-    OpenRouterRequest {
-        method: HttpMethod::Get,
-        path: TRANSCRIPTION_MODELS_PATH,
-        body: Value::Null,
-    }
-}
-
 /// Build the exact request shape for a catalog-backed selection. The HTTP
 /// layer supplies the Authorization bearer credential from secure storage.
 pub fn request_for(
@@ -326,16 +299,7 @@ pub fn request_for(
         Capability::SpeechToText => bail!(
             "use stt_request_for with base64 audio; a text prompt is not a valid OpenRouter transcription input"
         ),
-        Capability::MusicGeneration => (
-            CHAT_COMPLETIONS_PATH,
-            json!({
-                "model": model.id,
-                "messages": [{ "role": "user", "content": prompt }],
-                "stream": true,
-                "modalities": ["text", "audio"],
-                "audio": { "format": "wav" },
-            }),
-        ),
+        Capability::MusicGeneration => bail!("music is generated locally by YuE2, never through OpenRouter"),
     };
 
     Ok(OpenRouterRequest {
@@ -343,19 +307,6 @@ pub fn request_for(
         path,
         body,
     })
-}
-
-/// Builds the documented OpenRouter streaming chat request for a catalog
-/// verified music model. The caller must attach this key as a Bearer token and
-/// consume SSE audio chunks; this adapter never starts a paid generation.
-pub fn music_stream_request_for(
-    catalog: &CapabilityCatalog,
-    model_id: &str,
-    prompt: &str,
-) -> Result<OpenRouterMusicStreamRequest> {
-    authenticated_request_for(
-        request_for(catalog, Capability::MusicGeneration, model_id, prompt)?,
-    )
 }
 
 /// Add the locally-held credential to an already catalog-validated request.
@@ -395,7 +346,6 @@ pub fn suggested_model(catalog: &CapabilityCatalog, capability: Capability) -> O
             Capability::PromptEnhancement,
             &["google/gemini-3.1-flash-lite", "google/gemini-2.5-flash", "anthropic/claude-haiku-4.5", "deepseek/deepseek-chat"],
         ),
-        (Capability::MusicGeneration, &["google/lyria-3-pro-preview", "google/lyria-3-clip-preview"]),
     ];
 
     let preferred = PREFERENCES.iter().find(|(entry, _)| *entry == capability).map(|(_, list)| *list)?;
@@ -470,20 +420,7 @@ fn infer_capabilities(model: &RemoteModel) -> Vec<Capability> {
     if input.contains("text") && output.contains("image") {
         capabilities.push(Capability::CoverArt);
     }
-    // Generic audio is insufficient: it may mean TTS. OpenRouter's models API
-    // exposes the needed product evidence in title/description for models such
-    // as music generators, while the streaming endpoint remains common.
-    if input.contains("text") && output.contains("audio") && music_evidence(model) {
-        capabilities.push(Capability::MusicGeneration);
-    }
     capabilities
-}
-
-fn music_evidence(model: &RemoteModel) -> bool {
-    let text = format!("{} {}", model.name, model.description.as_deref().unwrap_or_default()).to_ascii_lowercase();
-    ["music generation", "music generator", "generate music", "full-length song", "full length song", "songs", "song generation"]
-        .iter()
-        .any(|needle| text.contains(needle))
 }
 
 fn normalized(values: Vec<String>) -> Vec<String> {
@@ -545,21 +482,6 @@ mod tests {
         assert_eq!(catalog.models_for(Capability::PromptEnhancement).count(), 1);
         assert_eq!(catalog.models_for(Capability::SpeechToText).count(), 1);
         assert_eq!(catalog.models_for(Capability::CoverArt).count(), 1);
-        assert_eq!(catalog.models_for(Capability::MusicGeneration).count(), 1);
-    }
-
-    #[test]
-    fn music_request_uses_documented_streaming_chat_shape() {
-        let catalog = CapabilityCatalog::parse(r#"{"data":[{"id":"catalog/music","name":"Song creator","description":"Music generation for full-length songs","architecture":{"input_modalities":["text"],"output_modalities":["audio"]}}]}"#).unwrap();
-        let request = request_for(&catalog, Capability::MusicGeneration, "catalog/music", "dream pop").unwrap();
-        assert_eq!(request.path, CHAT_COMPLETIONS_PATH);
-        assert_eq!(request.body["stream"], true);
-        assert_eq!(request.body["modalities"], json!(["text", "audio"]));
-    }
-
-    #[test]
-    fn audio_only_tts_is_not_music() {
-        let catalog = CapabilityCatalog::parse(r#"{"data":[{"id":"catalog/tts","name":"Voice TTS","description":"Natural speech synthesis","architecture":{"input_modalities":["text"],"output_modalities":["audio"]}}]}"#).unwrap();
         assert_eq!(catalog.models_for(Capability::MusicGeneration).count(), 0);
     }
 

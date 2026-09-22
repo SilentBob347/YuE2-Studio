@@ -52,10 +52,6 @@ impl SeparationConfig {
     pub fn sane_overlap(&self) -> f64 {
         self.overlap.clamp(0.0, 0.5)
     }
-
-    pub fn wants(&self, stem: &str) -> bool {
-        self.stems.iter().any(|wanted| wanted == stem)
-    }
 }
 
 

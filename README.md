@@ -2,282 +2,230 @@
 
 <img src="docs/logo.png" alt="" width="112" height="112" />
 
-# MiniMax Music3 Studio
+# YuE2 Studio
 
-**Full-length AI music on your own GPU. One executable — no Python, no Node.js, no launcher.**
+**Full songs with an editable score, generated on your own GPU. One executable — no Python, no Node.js, no launcher.**
 
-[![Project page](https://img.shields.io/badge/🌐_Project_page-timoncool.github.io-7c3aed?style=for-the-badge)](https://timoncool.github.io/MiniMax-Music3-Studio/)
-[![Download](https://img.shields.io/badge/⬇_Download-Windows_x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/timoncool/MiniMax-Music3-Studio/releases/latest)
-[![Donate](https://img.shields.io/badge/💖_Support-Donate-ff69b4?style=for-the-badge)](DONATE.md)
+[![Project page](https://img.shields.io/badge/Project_page-timoncool.github.io-7c3aed?style=for-the-badge)](https://timoncool.github.io/YuE2-Studio/)
+[![Download](https://img.shields.io/badge/Download-Windows_x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/timoncool/YuE2-Studio/releases/latest)
+[![Donate](https://img.shields.io/badge/Support-Donate-ff69b4?style=for-the-badge)](DONATE.md)
 
-[![Stars](https://img.shields.io/github/stars/timoncool/MiniMax-Music3-Studio?style=flat-square&logo=github)](https://github.com/timoncool/MiniMax-Music3-Studio/stargazers)
-[![License](https://img.shields.io/github/license/timoncool/MiniMax-Music3-Studio?style=flat-square)](LICENSE)
-[![Last commit](https://img.shields.io/github/last-commit/timoncool/MiniMax-Music3-Studio?style=flat-square)](https://github.com/timoncool/MiniMax-Music3-Studio/commits/main)
-[![Issues](https://img.shields.io/github/issues/timoncool/MiniMax-Music3-Studio?style=flat-square)](https://github.com/timoncool/MiniMax-Music3-Studio/issues)
+[![License](https://img.shields.io/github/license/timoncool/YuE2-Studio?style=flat-square)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/timoncool/YuE2-Studio?style=flat-square)](https://github.com/timoncool/YuE2-Studio/stargazers)
+[![Last commit](https://img.shields.io/github/last-commit/timoncool/YuE2-Studio?style=flat-square)](https://github.com/timoncool/YuE2-Studio/commits/main)
+[![Downloads](https://img.shields.io/github/downloads/timoncool/YuE2-Studio/total?style=flat-square)](https://github.com/timoncool/YuE2-Studio/releases)
 
-[![Rust](https://img.shields.io/badge/Rust-native_service-000000?style=flat-square&logo=rust&logoColor=white)](#architecture)
-[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri&logoColor=white)](#architecture)
-[![C%2B%2B](https://img.shields.io/badge/minimaxmusic.cpp-CUDA-76B900?style=flat-square&logo=nvidia&logoColor=white)](#architecture)
-[![Windows](https://img.shields.io/badge/Windows-10%2F11_x64-0078D6?style=flat-square&logo=windows&logoColor=white)](#models)
+**English** · [Русский](https://timoncool.github.io/YuE2-Studio/ru.html) · [中文](https://timoncool.github.io/YuE2-Studio/zh.html) · [日本語](https://timoncool.github.io/YuE2-Studio/ja.html) · [한국어](https://timoncool.github.io/YuE2-Studio/ko.html)
 
-**English** · [Русский](https://timoncool.github.io/MiniMax-Music3-Studio/ru.html) · [中文](https://timoncool.github.io/MiniMax-Music3-Studio/zh.html) · [日本語](https://timoncool.github.io/MiniMax-Music3-Studio/ja.html) · [한국어](https://timoncool.github.io/MiniMax-Music3-Studio/ko.html)
-
-![MiniMax Music3 Studio](docs/screenshots/en-01-create.png)
+![YuE2 Studio](docs/screenshots/en-01-create.png)
 
 </div>
 
-A Windows desktop studio for **MiniMax Music3**. Write a caption and lyrics, generate a
-full-length track on your own GPU, and keep everything — audio, settings and the exact
-request that produced it — in a local library.
+YuE2 Studio is a desktop studio for **YuE2**, the open song model from M-A-P that writes a
+score before it sings. Describe a style, write the lyrics, and the model composes a melody
+with chords as sheet music, then performs it as a full song with vocals. The score comes
+back with the track: read it, edit it, and render the same composition again with a
+different sound. Windows installer with auto-update or a portable folder, runs offline on
+an NVIDIA card with 6 GB of VRAM or more.
 
-One executable. No Python, no Node.js, no launcher script, nothing phoning home unless you
-ask it to.
+It is built on [yue2.cpp](https://github.com/ServeurpersoCom/yue2.cpp), the native C++/CUDA
+port of YuE2. The studio around it is Rust and React in a Tauri window — nothing in the
+runtime path is Python.
 
 ## What you can do
 
-- **Generate music locally** with the complete Music3 component set: caption, lyrics,
-  duration, DiT steps, LM CFG and top-k, DiT CFG, peak clip, separate DiT and LM seeds,
-  several songs per prompt and several variations per song, MP3 or 16/24/32-bit WAV.
-- **Reproduce any track exactly.** Every generation stores its request and its audio codes,
-  so a track can be re-rendered deterministically, or re-rendered with different steps,
-  seed or output format.
-- **Word-level karaoke** — enhanced LRC with a timestamp on every word, aligned by
-  Parakeet, Whisper or a cloud model. Your lyrics are kept; only the timing is borrowed.
-- **Karaoke video** written with the bundled ffmpeg, hardware-encoded when the machine can
-  and software-encoded when it cannot.
-- **A writing assistant** for captions and lyrics, from a local GGUF model or OpenRouter,
-  following MiniMax's own published prompting skill.
-- **Cover art from templates** — write the look once with `{title}`, `{style}` and
-  `{excerpt}`, and the track fills the rest in.
-- **Manage your library** — search, playlists, favourites, rename, import your own audio,
-  export tracks, edit audio in the built-in editor.
-- **Watch what generation costs** — live GPU load, VRAM, temperature, power draw, RAM and
-  engine memory, in the sidebar or in a pop-out panel.
-- **Add cloud capabilities when you want them.** Speech-to-text, a caption/lyrics
-  assistant, cover art and cloud music can each independently use OpenRouter, chosen from
-  the live model catalog. Local stays the default.
-- **Split a finished track into six stems** — drums, bass, other, vocals, guitar and
-  piano — with HT-Demucs on the GPU, or on the CPU when you prefer. The model is an
-  optional download like everything else.
-- **Export files that carry their own data** — MP3s are written with ID3v2.4: title,
-  artist, album, genre, tempo, the lyrics and the cover art.
-- **Choose your own quality/VRAM trade-off** in the model manager. Nothing downloads by
-  itself.
+- **Full songs from a style and lyrics** — up to six minutes, in the languages the model
+  sings. On an RTX 4090 with the Q8_0 set a 3:38 song renders in about 46 seconds.
+- **Read and edit the score** — the model writes its composition in ABC notation first; the
+  studio engraves it as sheet music. Edit the notes, tempo or key and create again: the
+  composition stays, the performance changes. Or switch to melody-only, or no score at all.
+- **Compose the score first** — write only the score from the style and lyrics, without
+  singing it (the studio's take on yue2.cpp's `yue-plan`), read and fix it, then create.
+- **Covers** — SheetSage2 listens to any recording and writes its melody as a score; YuE2
+  then sings that melody with your lyrics in your style. A track from your library can be
+  transcribed from its menu.
+- **Exact replay** — every track keeps its request and its audio codes, so it can be
+  re-rendered bit for bit, or re-rendered with other steps, a new sound seed, several
+  variations, or another output format, without composing again.
+- **110 ready examples** — the style/lyrics/score sets that ship with yue2.cpp, covers
+  included, one click to load.
+- **Every engine setting** — all seven sampling knobs (temperature, top-p, top-k,
+  repetition penalty and its window, minimum and maximum tokens) for the score and for the
+  audio codes, flow-matching steps, guidance, both seeds, peak normalisation, MP3 or
+  16/24/32-bit WAV. Prompts open and save as JSON or YAML in the engine's own request
+  format, so they move freely between the studio, the yue2.cpp WebUI and `yue-synth`.
+- **A writing assistant** — a local Gemma model or OpenRouter writes the style and lyrics
+  from an idea and edits the score on request.
+- **Word-level karaoke** — enhanced LRC with a timestamp on every word, aligned by Parakeet
+  or Whisper. Your lyrics are kept; only the timing is borrowed.
+- **Six stems on the GPU** — drums, bass, other, vocals, guitar and piano with HT-Demucs.
+- **A library of plain files** — search, playlists, cover art from prompt templates, MP3s
+  exported with title, lyrics and cover in their ID3 tags. Interface in English, Russian,
+  Chinese, Japanese and Korean.
 
 ## Screenshots
 
 | | |
 |---|---|
-| ![A finished track](docs/screenshots/en-02-player.png) | ![Studio tools](docs/screenshots/en-03-tools.png) |
-| A finished track — cover, timed lyrics, the request that made it | Studio tools — six-stem separation on the GPU, transcription, editor |
-| ![Models](docs/screenshots/en-04-models.png) | ![Providers](docs/screenshots/en-05-providers.png) |
-| Model sets — one quantisation per role, switchable once installed | Every capability runs where you say, local or OpenRouter |
-| ![Cover art](docs/screenshots/en-06-cover.png) | ![Writing a track](docs/screenshots/en-01-create.png) |
-| Cover art — large preview, prompt templates filled from the track | Writing a track — the caption as a document, every parameter a slider |
+| ![The score](docs/screenshots/en-02-score.png) | ![A finished track](docs/screenshots/en-03-track.png) |
+| The score as sheet music and as ABC text — melody + chords, melody only, or none | A finished track — its lyrics and the score it was sung from, ready to reuse |
+| ![Cover mode](docs/screenshots/en-04-cover.png) | ![Models](docs/screenshots/en-05-models.png) |
+| Cover mode — pick a recording, SheetSage2 writes its melody down | Model sets — one quantisation per role, what is on disk, switch in one click |
 
-The same six screens are in the interface language you read: [Русский](https://timoncool.github.io/MiniMax-Music3-Studio/ru.html),
-[中文](https://timoncool.github.io/MiniMax-Music3-Studio/zh.html), [日本語](https://timoncool.github.io/MiniMax-Music3-Studio/ja.html),
-[한국어](https://timoncool.github.io/MiniMax-Music3-Studio/ko.html) — on the project page, or in
+The same screens in the language you read: [Русский](https://timoncool.github.io/YuE2-Studio/ru.html),
+[中文](https://timoncool.github.io/YuE2-Studio/zh.html), [日本語](https://timoncool.github.io/YuE2-Studio/ja.html),
+[한국어](https://timoncool.github.io/YuE2-Studio/ko.html) — on the project page, or in
 [docs/screenshots](docs/screenshots).
 
 ## What it needs
 
-Windows 10/11 x64 and an NVIDIA card of the **GTX 16 / RTX 20 generation or newer** —
-Turing, Ampere, Ada and Blackwell. The engine ships compiled for those architectures;
-Pascal and older (GTX 10 series and down) are not supported, because the CUDA 13 toolkit
-that builds it dropped them.
+- Windows 10/11 x64.
+- An NVIDIA card of the **GTX 16 / RTX 20 generation or newer** (Turing, Ampere, Ada,
+  Hopper, Blackwell) with **6 GB of VRAM** or more. The engine ships compiled for those
+  architectures; Pascal and older are not supported by the CUDA 13 toolkit that builds it.
+- 4–10 GB of disk for one model set.
+
+## Quick start
+
+1. **Install** — run `YuE2.Studio_x.y.z_x64-setup.exe` from the
+   [latest release](https://github.com/timoncool/YuE2-Studio/releases/latest), or unzip the
+   portable archive anywhere and run `YuE2-Studio.exe`.
+2. **Choose a model set** — the first screen preselects the set your card can run. Press
+   download; it fetches only what is missing and resumes if interrupted.
+3. **Create** — write a style and lyrics, or load one of the examples, and press Create.
+   The engine starts by itself and the song lands in your library with its score.
+
+The installed version updates itself: a new release is offered inside the studio and
+installed in place. The portable version keeps everything — models, songs, settings —
+inside its own folder.
 
 ## Models
 
-A runnable Music3 installation is always five components: language model, RVQ depth
-decoder, condition encoder, DiT and vocoder.
+A runnable YuE2 installation is a **backbone** (the 3B model that writes the score and the
+audio codes) and the **VAE** (turns them into 48 kHz stereo). **SheetSage2** is optional:
+without it the studio generates, but cannot transcribe recordings for covers.
 
-| Your GPU | Recommended profile | Download |
+| Your GPU | Set | Download |
 | --- | --- | --- |
-| 30 GB VRAM and above | Full Native — BF16 / BF16 / F32 | 28.6 GB |
-| 15 GB and above | Quality — Q8_0 | 12.8 GB |
-| 11.5 GB and above | Balanced — Q6_K / Q8_0 / Q5_K_M | 9.8 GB |
-| 9.5 GB and above | Light — Q4_K_M / Q4_K_M / Q4_K_S | 7.7 GB |
-| 8 GB cards | Minimal — Q3_K_M | 6.5 GB |
+| 12 GB VRAM and above | Full native — BF16 backbone, original weights | 9.7 GB |
+| 8 GB and above | Quality — Q8_0 backbone, near lossless | 4.9 GB |
+| 7 GB and above | Balanced — Q6_K backbone | 4.0 GB |
+| 5.5 GB and above | Light — Q5_K_M backbone | 3.6 GB |
 
-The studio detects your GPU and preselects the profile it can actually run, but the
-download is always your decision. Every component is checksum-verified against a pinned
-Hugging Face revision and downloads resume where they stopped.
+Sizes include SheetSage2 at the matching quantisation. The studio detects your card and
+preselects the set, but the download is always your decision; the model manager also builds
+a custom mix role by role. Q5_K_M is the lightest quantisation published for YuE2.
 
-Every profile is the same five roles at a different quantisation. The heavier sets — Q5
-and up, and the original BF16/F32 weights — come from
-[Serveurperso/MiniMax-Music3-GGUF](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF);
-the lighter ones that let the studio fit an 8 GB card — Q4 and below, plus the two FP4
-formats — come from [scragnog/MiniMax-Music3-GGUF](https://huggingface.co/scragnog/MiniMax-Music3-GGUF).
-Both repositories are pinned to a fixed revision.
+All files come from [Serveurperso/YuE2-GGUF](https://huggingface.co/Serveurperso/YuE2-GGUF),
+pinned to revision `64b030e`, and are checked by size and SHA-256. They are written to, and
+can be dropped into by hand at:
 
-The files are written to, and can be dropped into by hand at:
+- **Installed:** `%LOCALAPPDATA%\YuE2 Studio\models\yue2-cpp\`
+- **Portable:** `<the folder you unzipped>\data\models\yue2-cpp\`
 
-- **Installed:** `%LOCALAPPDATA%\MiniMax Music3 Studio\models\minimaxmusic-cpp\`
-- **Portable:** `<the folder you unzipped>\data\models\minimaxmusic-cpp\`
-
-Filenames must match the catalogue exactly. The studio checks each file's size and SHA-256,
-so a file you place by hand is recognised as already installed and never re-downloaded.
+A file placed by hand with the exact catalogue name is recognised and never downloaded again.
 
 <details>
-<summary><b>Model zoo — every file, with direct download links</b></summary>
+<summary><b>Every file, with direct download links</b></summary>
 
-Only the profile that matches your GPU is downloaded automatically; the rest are here for
-manual placement or for building a custom mix role-by-role in the model manager.
-
-**Language model (writes the audio-token stream)**
-
-| File | Size | Used by | Source |
-| --- | --- | --- | --- |
-| [`MiniMax-Music3-language_model-BF16.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-language_model-BF16.gguf) | 17.17 GB | Full native | Serveurperso |
-| [`MiniMax-Music3-language_model-Q8_0.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-language_model-Q8_0.gguf) | 9.13 GB | Quality | Serveurperso |
-| [`MiniMax-Music3-language_model-Q6_K.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-language_model-Q6_K.gguf) | 7.05 GB | Balanced | Serveurperso |
-| [`MiniMax-Music3-language_model-Q5_K_M.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-language_model-Q5_K_M.gguf) | 6.28 GB | Custom | Serveurperso |
-| [`mm3-lm-Q4_K_M.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-lm-Q4_K_M.gguf) | 5.51 GB | Light | scragnog |
-| [`mm3-lm-Q4_K_S.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-lm-Q4_K_S.gguf) | 5.29 GB | Custom | scragnog |
-| [`mm3-lm-Q3_K_M.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-lm-Q3_K_M.gguf) | 4.59 GB | Minimal | scragnog |
-| [`mm3-lm-MXFP4.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-lm-MXFP4.gguf) | 5.44 GB | Custom (FP4) | scragnog |
-| [`mm3-lm-NVFP4.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-lm-NVFP4.gguf) | 5.66 GB | Custom (Blackwell FP4) | scragnog |
-
-**DiT / transformer (the diffusion generator)**
-
-| File | Size | Used by | Source |
-| --- | --- | --- | --- |
-| [`MiniMax-Music3-transformer-F32.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-transformer-F32.gguf) | 9.73 GB | Full native | Serveurperso |
-| [`MiniMax-Music3-transformer-Q8_0.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-transformer-Q8_0.gguf) | 2.60 GB | Quality | Serveurperso |
-| [`MiniMax-Music3-transformer-Q6_K.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-transformer-Q6_K.gguf) | 2.01 GB | Custom | Serveurperso |
-| [`MiniMax-Music3-transformer-Q5_K_M.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-transformer-Q5_K_M.gguf) | 1.69 GB | Balanced | Serveurperso |
-| [`MiniMax-Music3-transformer-Q4_K_M.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-transformer-Q4_K_M.gguf) | 1.39 GB | Custom | Serveurperso |
-| [`mm3-dit-Q4_K_S.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-dit-Q4_K_S.gguf) | 1.39 GB | Light | scragnog |
-| [`mm3-dit-Q3_K_M.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-dit-Q3_K_M.gguf) | 1.14 GB | Minimal | scragnog |
-| [`mm3-dit-MXFP4.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-dit-MXFP4.gguf) | 1.31 GB | Custom (FP4) | scragnog |
-| [`mm3-dit-NVFP4.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-dit-NVFP4.gguf) | 1.38 GB | Custom (Blackwell FP4) | scragnog |
-
-**RVQ depth decoder**
-
-| File | Size | Used by | Source |
-| --- | --- | --- | --- |
-| [`MiniMax-Music3-rvq_depth_decoder-BF16.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-rvq_depth_decoder-BF16.gguf) | 1.29 GB | Full native | Serveurperso |
-| [`MiniMax-Music3-rvq_depth_decoder-Q8_0.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-rvq_depth_decoder-Q8_0.gguf) | 687 MB | Quality / Balanced | Serveurperso |
-| [`mm3-depth-Q6_K.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-depth-Q6_K.gguf) | 530 MB | Custom | scragnog |
-| [`mm3-depth-Q5_K_M.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-depth-Q5_K_M.gguf) | 466 MB | Custom | scragnog |
-| [`mm3-depth-Q4_K_M.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-depth-Q4_K_M.gguf) | 405 MB | Light / Minimal | scragnog |
-| [`mm3-depth-MXFP4.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-depth-MXFP4.gguf) | 384 MB | Custom (FP4) | scragnog |
-| [`mm3-depth-NVFP4.gguf`](https://huggingface.co/scragnog/MiniMax-Music3-GGUF/resolve/6781ce79b21beb7413f6b2358cd4adb355217c3d/mm3-depth-NVFP4.gguf) | 401 MB | Custom (Blackwell FP4) | scragnog |
-
-**Condition encoder** and **vocoder** — the same file in every profile:
-
-| File | Size | Used by | Source |
-| --- | --- | --- | --- |
-| [`MiniMax-Music3-condition_encoder-F32.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-condition_encoder-F32.gguf) | 101 MB | every profile | Serveurperso |
-| [`MiniMax-Music3-vocoder-F32.gguf`](https://huggingface.co/Serveurperso/MiniMax-Music3-GGUF/resolve/9cdffedb54de2509ae55a6831a677645fb353a7d/MiniMax-Music3-vocoder-F32.gguf) | 306 MB | every profile | Serveurperso |
+| File | Role | Size |
+| --- | --- | --- |
+| [`YuE2-3B-BF16.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-3B-BF16.gguf) | backbone | 6.67 GB |
+| [`YuE2-3B-Q8_0.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-3B-Q8_0.gguf) | backbone | 3.55 GB |
+| [`YuE2-3B-Q6_K.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-3B-Q6_K.gguf) | backbone | 2.74 GB |
+| [`YuE2-3B-Q5_K_M.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-3B-Q5_K_M.gguf) | backbone | 2.44 GB |
+| [`YuE2-Vae-F32.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/YuE2-Vae-F32.gguf) | VAE, every set | 506 MB |
+| [`SheetSage2-F32.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/SheetSage2-F32.gguf) | transcriber | 2.52 GB |
+| [`SheetSage2-Q8_0.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/SheetSage2-Q8_0.gguf) | transcriber | 913 MB |
+| [`SheetSage2-Q6_K.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/SheetSage2-Q6_K.gguf) | transcriber | 776 MB |
+| [`SheetSage2-Q5_K_M.gguf`](https://huggingface.co/Serveurperso/YuE2-GGUF/resolve/64b030e3deb6e8150d2b7c0db641ef5a17eca8a3/SheetSage2-Q5_K_M.gguf) | transcriber | 703 MB |
 
 </details>
 
 ## The engine and the DLLs it needs
 
-The generator is a native CUDA program, not a Python stack. `mm-server.exe` loads a short
-chain of libraries, and the studio's job before it starts the engine is to make sure every
-link in that chain is present:
-
 ```text
-mm-server.exe
+yue-server.exe
   ├─ ggml.dll → ggml-base.dll, ggml-cpu.dll, ggml-cuda.dll     shipped inside the app
   │                               └─ cublas64_13.dll, cublasLt64_13.dll   downloaded once
   │                               └─ nvcuda.dll                           your NVIDIA driver
-  └─ vcruntime140.dll, msvcp140.dll, vcomp140.dll              Visual C++ runtime
+  └─ vcruntime140.dll, msvcp140.dll                            Visual C++ runtime
 ```
 
-**Shipped inside the app.** `mm-server.exe`, the four `ggml*.dll` files and
-`neural-codec.exe` are part of every release, in `resources\minimaxmusic-cpp\` beside the
-main executable. They are built from the pinned `minimaxmusic.cpp` commit and never
-downloaded.
+**Shipped inside the app.** `yue-server.exe` and the four `ggml*.dll` files, built from the
+pinned yue2.cpp commit, live in `resources\yue2-cpp\` beside the main executable.
 
 **Downloaded once, on the first engine start.**
 
 | File(s) | Where from | Size | Why |
 | --- | --- | --- | --- |
-| `cublas64_13.dll`, `cublasLt64_13.dll` | NVIDIA's redistributable [`libcublas-windows-x86_64-13.5.1.27-archive.zip`](https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-13.5.1.27-archive.zip) | 391 MB (zip) | The CUDA linear-algebra library `ggml-cuda.dll` is linked against. Too large, and under NVIDIA's own licence, to bundle — so it comes straight from NVIDIA. This is the **NVIDIA cuBLAS 13.5** item in the model panel. |
-| Visual C++ 2015–2022 runtime | Microsoft's permanent link [`vc_redist.x64.exe`](https://aka.ms/vs/17/release/vc_redist.x64.exe) | small installer | The C++ runtime the engine is compiled against. Run **only** when the DLLs are missing — most Windows machines already have it. |
+| `cublas64_13.dll`, `cublasLt64_13.dll` | NVIDIA's redistributable [`libcublas-windows-x86_64-13.5.1.27-archive.zip`](https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-13.5.1.27-archive.zip) | 391 MB (zip) | The CUDA linear algebra `ggml-cuda.dll` is linked against; too large, and under NVIDIA's licence, to bundle. |
+| Visual C++ 2015–2022 runtime | Microsoft's [`vc_redist.x64.exe`](https://aka.ms/vs/17/release/vc_redist.x64.exe) | small | Installed only when the DLLs are missing. |
 
-**Never downloaded.** `nvcuda.dll` is part of your NVIDIA driver; if the engine complains
-about it, update the driver. A machine that already has the CUDA Toolkit installed has
-cuBLAS on its `PATH` and downloads nothing at all.
-
-### If the automatic download can't reach out (proxy, firewall, offline)
-
-You can place the CUDA libraries by hand:
-
-1. Download the cuBLAS archive from the NVIDIA link above and open the `.zip`.
-2. Inside `libcublas-windows-x86_64-13.5.1.27-archive\bin\`, take `cublas64_13.dll` and
-   `cublasLt64_13.dll`.
-3. Drop both **next to `mm-server.exe`** — the `resources\minimaxmusic-cpp\` folder beside
-   the app's main `.exe`.
-4. If the engine still won't start, install the Visual C++ runtime from the Microsoft link,
-   and make sure your NVIDIA driver is current.
-
-On startup the engine reads its own import table and fetches only what is genuinely
-missing, so a hand-placed DLL is simply found and used.
+A machine with the CUDA 13 toolkit already has cuBLAS on its `PATH` and downloads nothing.
+Behind a proxy, take the two DLLs from the archive's `bin\` folder and drop them next to
+`yue-server.exe`; the studio finds and uses them.
 
 ## Architecture
 
 ```text
 React UI ─┐
-          ├─ MiniMax Music3 Studio.exe   (window + native service)
+          ├─ YuE2-Studio.exe   (Tauri window + Rust/Axum service on 127.0.0.1:8791)
 Rust axum ┘        │
-                   └─ minimaxmusic.cpp `mm-server`  (C++/CUDA, GGUF)
+                   └─ yue2.cpp `yue-server`   (C++/CUDA, GGUF, 127.0.0.1:18087)
 ```
 
-The service is compiled into the desktop binary and supervises the C++ engine. Cloud
-capabilities go through a capability catalog fetched live from OpenRouter, so the studio
-never offers a model that does not declare the modality it would be used for.
-
-Music generation, speech-to-text, the assistant and cover art are configured
-independently, which makes fully local, fully cloud and hybrid setups possible without
-changing anything about how projects are stored.
+The service is compiled into the desktop binary. It supervises the engine process, restarts
+it when you switch model sets, and imports finished songs itself, so a result is never lost
+if the window was reloaded or closed mid-generation. Progress is read from the engine's own
+log: score, audio codes, acoustic rendering, decoding.
 
 ## Building from source
 
 ```powershell
 npm --prefix app install
 npm --prefix desktop install
-npm --prefix desktop run build      # the studio executable
 cargo test --workspace
+npm --prefix app test
 ```
 
 Developing the UI against a running service:
 
 ```powershell
-cargo run -p music-server           # service on 127.0.0.1:8765
-npm --prefix app run dev            # UI on 127.0.0.1:3000
+cargo run -p music-server           # service on 127.0.0.1:8791
+npm --prefix app run dev            # UI on 127.0.0.1:3791
 ```
 
-### Native engine
+The engine: `scripts/build-yue-runtime.ps1` builds the pinned yue2.cpp commit
+(`engines/yue2-cpp-source.json`) with CUDA 13, MSVC and Ninja for every supported
+architecture. `scripts/build-release.ps1 -Version X.Y.Z` produces the NSIS installer, the
+portable archive and the signed `latest.json` for the updater; it reads the signing key from
+`TAURI_SIGNING_PRIVATE_KEY` or `%USERPROFILE%\.tauri\yue2-studio.key`. Model weights are
+never part of a release.
 
-`scripts/build-minimax-runtime.ps1` builds the pinned `minimaxmusic.cpp` runtime. Releases
-always stage a universal CUDA build; a card-specific build is for local testing only:
-
-```powershell
-scripts\build-minimax-runtime.ps1 -OutputDirectory .\build\engine -RuntimeBackend cuda -CudaArchitecture native
-```
-
-### Release
-
-`scripts/build-release.ps1 -Version X.Y.Z` produces the NSIS installer, a portable
-archive and a signed `latest.json` for the in-app updater. It needs the updater signing
-keys: it reads them from `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-and `TAURI_UPDATER_PUBKEY` if they are set, and otherwise from
-`%USERPROFILE%\.tauri\mm3-release.key`, its `.pub`, and `.password` beside them. It stops
-if it can find the key neither way. Model weights are never included in an installer.
+yue2.cpp also builds for Linux and macOS (Metal) and for Vulkan; the studio's release
+pipeline ships Windows + CUDA only for now.
 
 ## Other Projects by [@timoncool](https://github.com/timoncool)
 
 | Project | Description |
 |---------|-------------|
-| [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio) | Local AI music generation on ACE-Step — the studio this one grew out of |
-| [ACE-Step Studio · Pinokio](https://github.com/timoncool/ACE-Step-Studio-pinokio) | One-click cross-platform launcher for ACE-Step Studio |
+| [MiniMax Music3 Studio](https://github.com/timoncool/MiniMax-Music3-Studio) | The same studio on MiniMax Music3 — the one this grew out of |
+| [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio) | AI music studio — songs, vocals, covers, videos |
+| [Foundation Music Lab](https://github.com/timoncool/Foundation-Music-Lab) | Music generation + timeline editor |
+| [VibeVoice ASR](https://github.com/timoncool/VibeVoice_ASR_portable_ru) | Portable speech recognition |
+| [Qwen3-TTS](https://github.com/timoncool/Qwen3-TTS_portable_rus) | Portable text-to-speech with voice cloning |
 | [telegram-api-mcp](https://github.com/timoncool/telegram-api-mcp) | Full Telegram Bot API as an MCP server |
-| [civitai-mcp-ultimate](https://github.com/timoncool/civitai-mcp-ultimate) | Civitai search, downloads and trend analysis over MCP |
+
+## Authors
+
+- **Nerual Dreming** — [Telegram](https://t.me/nerual_dreming) | [neuro-cartel.com](https://neuro-cartel.com) | [ArtGeneration.me](https://artgeneration.me)
+- **Нейро-Софт** — [Telegram](https://t.me/neuroport) | portable neural networks
+
+## Acknowledgements
+
+- [M-A-P](https://huggingface.co/m-a-p) for YuE2-3B, the YuE2 VAE and SheetSage2.
+- [Serveurperso](https://github.com/ServeurpersoCom) for yue2.cpp, its examples and the GGUF conversions.
 
 ## Support the Author
 
@@ -291,7 +239,7 @@ I build open-source software and do AI research. Most of what I create is free a
 
 ## Star History
 
-<a href="https://github.com/timoncool/MiniMax-Music3-Studio/stargazers">
+<a href="https://github.com/timoncool/YuE2-Studio/stargazers">
  <picture>
    <source media="(prefers-color-scheme: dark)" srcset="docs/stars-dark.svg" />
    <source media="(prefers-color-scheme: light)" srcset="docs/stars-light.svg" />
@@ -299,11 +247,10 @@ I build open-source software and do AI research. Most of what I create is free a
  </picture>
 </a>
 
-## Licensing
+## License
 
-This studio is a fork of ACE-Step Studio with ACE inference replaced by MiniMax Music3;
-the ACE sources live in their own repository. MiniMax Music3 weights are governed by their
-own community license — commercial use must display the MiniMax-Music3 name and implement
-the safeguards that license requires.
+The studio is MIT, and so is yue2.cpp. **The models are not:** YuE2-3B, the YuE2 VAE and
+SheetSage2 are released under **CC BY-NC 4.0** — songs you make with them are for
+non-commercial use unless you obtain other terms from their authors.
 
 What changed and when is in [CHANGELOG.md](CHANGELOG.md).

@@ -61,23 +61,6 @@ impl LyricsSyncConfig {
     }
 }
 
-/// whisper.cpp is pinned to one release so a working setup keeps working.
-/// The recogniser is pinned to one release, so a setup that works keeps
-/// working: Purfview's standalone faster-whisper, the build Dub Studio runs.
-const WHISPER_BUILD: &str = "Whisper-Faster_r192.3";
-/// CTranslate2 in that build links against CUDA 11, not the 12 the separator
-/// uses, so Whisper carries its own pair of libraries.
-const WHISPER_CUBLAS_BUILD: &str = "11.11.3.6";
-const WHISPER_CUDNN_BUILD: &str = "8.9.7.29";
-/// The ONNX Runtime that Parakeet loads. Mixing versions deadlocks the loader,
-/// so this is pinned exactly as Dub Studio pins it.
-/// The NVIDIA libraries the CUDA provider links against, pinned like the rest.
-const CUBLAS_BUILD: &str = "12.9.2.10";
-const CUDART_BUILD: &str = "12.9.79";
-const CUFFT_BUILD: &str = "11.4.1.4";
-const CUDNN_BUILD: &str = "9.25.0.15";
-const ONNXRUNTIME_BUILD: &str = "v1.24.2";
-
 /// Where the recogniser's binaries live once unpacked. CTranslate2 loads its
 /// CUDA libraries from beside the executable, so they share one directory - the
 /// way Dub Studio arranges it, and the reason its card mode works instead of
@@ -1105,12 +1088,6 @@ pub struct TimedLine {
     pub words: Vec<(f64, String)>,
 }
 
-impl TimedLine {
-    pub fn text(&self) -> String {
-        self.words.iter().map(|(_, word)| word.as_str()).collect::<Vec<_>>().join(" ")
-    }
-}
-
 /// Enhanced LRC - the A2 format every karaoke player understands: a line time
 /// followed by a time before each word. Without per-word times a player has
 /// nothing to do but sweep the highlight linearly, which drifts away from the
@@ -1339,75 +1316,6 @@ fn similarity(expected: &str, heard: &str) -> f64 {
     previous[right.len()] as f64 / left.len() as f64
 }
 
-/// Turns timed segments into an LRC body. Used by the providers that return
-/// structured timings rather than a file.
-pub fn lrc_from_segments(segments: &[(f64, String)]) -> String {
-    let mut out = String::new();
-    for (start, text) in segments {
-        let text = text.trim();
-        if text.is_empty() {
-            continue;
-        }
-        let total = start.max(0.0);
-        let minutes = (total as u64) / 60;
-        let seconds = (total as u64) % 60;
-        let hundredths = ((total - total.floor()) * 100.0).round() as u64;
-        out.push_str(&format!("[{minutes:02}:{seconds:02}.{hundredths:02}]{text}\n"));
-    }
-    out
-}
-
-/// The opening lines of the lyrics, as a decoding hint. Whisper's prompt is
-/// bounded, and the first lines are enough to tell it this is singing, in this
-/// language, about these words.
-fn prompt_from(lyrics: &str) -> String {
-    let mut prompt = String::new();
-    for line in lyrics.lines().map(str::trim).filter(|line| !line.is_empty() && !(line.starts_with('[') && line.ends_with(']'))) {
-        if prompt.chars().count() + line.chars().count() > 400 {
-            break;
-        }
-        if !prompt.is_empty() {
-            prompt.push(' ');
-        }
-        prompt.push_str(line);
-    }
-    prompt
-}
-
-/// Reads a whisper.cpp LRC back as a word stream.
-pub fn words_from_lrc(lrc: &str) -> Vec<(f64, String)> {
-    let mut words = Vec::new();
-    for line in lrc.lines() {
-        let Some(rest) = line.strip_prefix('[') else { continue };
-        let Some((stamp, text)) = rest.split_once(']') else { continue };
-        let Some((minutes, seconds)) = stamp.split_once(':') else { continue };
-        let (Ok(minutes), Ok(seconds)) = (minutes.trim().parse::<f64>(), seconds.trim().parse::<f64>()) else {
-            continue;
-        };
-        let text = text.trim();
-        if !text.is_empty() {
-            words.push((minutes * 60.0 + seconds, text.to_string()));
-        }
-    }
-    words
-}
-
-/// The timestamps in an LRC body, in seconds. Also the emptiness check: a file
-/// with no timestamps is not karaoke, however much text it contains.
-pub fn parse_lrc_times(lrc: &str) -> Vec<f64> {
-    let mut times = Vec::new();
-    for line in lrc.lines() {
-        let Some(rest) = line.strip_prefix('[') else { continue };
-        let Some((stamp, _)) = rest.split_once(']') else { continue };
-        let Some((minutes, seconds)) = stamp.split_once(':') else { continue };
-        let (Ok(minutes), Ok(seconds)) = (minutes.trim().parse::<f64>(), seconds.trim().parse::<f64>()) else {
-            continue;
-        };
-        times.push(minutes * 60.0 + seconds);
-    }
-    times
-}
-
 #[cfg(windows)]
 fn hide_console(command: &mut Command) {
     use std::os::windows::process::CommandExt;
@@ -1422,16 +1330,20 @@ fn hide_console(_command: &mut Command) {}
 mod tests {
     use super::*;
 
-    #[test]
-    fn segments_become_a_playable_lrc_body() {
-        let lrc = lrc_from_segments(&[
-            (0.0, "neon on the glass".into()),
-            (12.5, "driving home".into()),
-            (75.25, "  ".into()),
-            (81.5, "the engine dies".into()),
-        ]);
-        assert_eq!(lrc, "[00:00.00]neon on the glass\n[00:12.50]driving home\n[01:21.50]the engine dies\n");
-        assert_eq!(parse_lrc_times(&lrc), vec![0.0, 12.5, 81.5]);
+    // The releases every runtime download is pinned to.
+    const WHISPER_BUILD: &str = "Whisper-Faster_r192.3";
+    const WHISPER_CUBLAS_BUILD: &str = "11.11.3.6";
+    const WHISPER_CUDNN_BUILD: &str = "8.9.7.29";
+    const CUBLAS_BUILD: &str = "12.9.2.10";
+    const CUDART_BUILD: &str = "12.9.79";
+    const CUFFT_BUILD: &str = "11.4.1.4";
+    const CUDNN_BUILD: &str = "9.25.0.15";
+    const ONNXRUNTIME_BUILD: &str = "v1.24.2";
+
+    impl TimedLine {
+        fn text(&self) -> String {
+            self.words.iter().map(|(_, word)| word.as_str()).collect::<Vec<_>>().join(" ")
+        }
     }
 
     #[test]
@@ -1546,11 +1458,6 @@ Third");
         assert_eq!(lines[0].0, 0.0);
         assert!(lines[1].0 > 0.0 && lines[1].0 < 10.0, "the middle line got {}", lines[1].0);
         assert_eq!(lines[2].0, 10.0);
-    }
-
-    #[test]
-    fn text_without_timestamps_is_not_karaoke() {
-        assert!(parse_lrc_times("just some lyrics\nand another line").is_empty());
     }
 
     #[test]

@@ -1173,7 +1173,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       const link = document.createElement('a');
       link.style.display = 'none';
       link.href = url;
-      link.download = `${song.title || 'minimax-music3'}.mp4`;
+      link.download = `${song.title || 'yue2-song'}.mp4`;
       document.body.appendChild(link);
       link.click();
       setTimeout(() => {

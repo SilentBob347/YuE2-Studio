@@ -10,7 +10,7 @@ mod engine_runtime;
 mod lyrics_sync;
 mod credentials;
 mod model_manager;
-mod presets;
+mod hardware;
 mod request_log;
 mod resources;
 mod chunked;
@@ -20,7 +20,6 @@ mod skill;
 mod library;
 mod engine_result;
 mod progress;
-mod openrouter_stream;
 
 use std::{collections::HashMap, env, fs, net::SocketAddr, path::PathBuf, sync::Arc};
 use anyhow::Context;
@@ -206,7 +205,6 @@ enum MusicJobStatus {
 enum MusicJobDispatch {
     NotConfigured,
     Local,
-    OpenRouter,
     Cancelled,
 }
 
@@ -298,11 +296,6 @@ struct SetupDownloadRequest {
     #[serde(default, alias = "component_ids")]
     ids: Vec<String>,
     profile_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ApplyPresetRequest {
-    id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -496,7 +489,7 @@ pub async fn serve() -> anyhow::Result<()> {
         persisted
             .as_ref()
             .and_then(|settings| settings.selected_profile_id.clone())
-            .or_else(|| Some(presets::recommended_local_profile().into()))
+            .or_else(|| Some(hardware::recommended_local_profile().into()))
     };
     let state = AppState {
         configuration: Arc::new(RwLock::new(sanitize_persisted_configuration(
@@ -550,8 +543,6 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/v1/capabilities", get(capabilities))
         .route("/v1/configuration", get(configuration).put(update_configuration))
-        .route("/engine/presets", get(engine_presets))
-        .route("/engine/preset", post(apply_engine_preset))
         .route("/engine/options", get(engine_options).put(update_engine_options))
         .route("/engine/restart", post(restart_local_engine))
         .route("/v1/engine/logs", get(engine_logs))
@@ -613,7 +604,9 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/music/jobs", post(create_music_job).get(list_active_music_jobs))
         .route("/v1/music/replay", post(replay_music_job))
         .route("/v1/transcriptions", post(create_transcription))
-        .route("/v1/transcriptions/{job_id}", get(transcription_status).post(cancel_transcription))
+        .route("/v1/transcriptions/{job_id}", get(score_job_status).post(cancel_score_job))
+        .route("/v1/scores", post(compose_score))
+        .route("/v1/scores/{job_id}", get(score_job_status).post(cancel_score_job))
         .route(
             "/v1/music/jobs/{job_id}",
             get(music_job_status).post(cancel_music_job),
@@ -1995,51 +1988,6 @@ async fn reload_engine_if_models_changed(state: &AppState) {
     }
 }
 
-async fn engine_presets(State(state): State<AppState>) -> Json<Value> {
-    let catalog = state.openrouter_catalog.read().await;
-    let music_available = catalog.catalog.as_ref().is_some_and(|catalog| catalog.models_for(Capability::MusicGeneration).next().is_some());
-    Json(serde_json::json!({
-        "presets": presets::list(),
-        "hardware": presets::hardware(),
-        "selected_profile_id": state.selected_profile_id.read().await.clone(),
-        "openrouter_music": { "available": music_available, "refreshed_at": catalog.refreshed_at, "requires_live_catalog_resolution": !music_available }
-    }))
-}
-
-async fn apply_engine_preset(
-    State(state): State<AppState>,
-    Json(request): Json<ApplyPresetRequest>,
-) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
-    let mut configuration = state.configuration.write().await;
-    let music_available = state.openrouter_catalog.read().await.catalog.as_ref().is_some_and(|catalog| catalog.models_for(Capability::MusicGeneration).next().is_some());
-    let application = presets::apply(&request.id, &mut configuration, music_available)
-        .map_err(|error| api_error(StatusCode::BAD_REQUEST, error))?;
-    if let Some(profile_id) = &application.profile_id {
-        if !state.model_manager.catalog().profiles.iter().any(|profile| profile.id == profile_id && profile.installable) {
-            return Err(api_error(StatusCode::BAD_REQUEST, format!("preset profile '{profile_id}' is not installable")));
-        }
-    }
-    let applied_configuration = configuration.clone();
-    drop(configuration);
-    if application.selected_profile_changed {
-        *state.selected_profile_id.write().await = application.profile_id;
-        *state.selected_component_ids.write().await = None;
-    }
-    let selected_profile_id = state.selected_profile_id.read().await.clone();
-    let selected_component_ids = state.selected_component_ids.read().await.clone();
-    persist_studio_settings(&state)
-        .await
-        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    Ok(Json(serde_json::json!({
-        "ok": true,
-        "id": request.id,
-        "profile_id": selected_profile_id,
-        "component_ids": selected_component_ids,
-        "configuration": applied_configuration,
-        "openrouter_music_requires_live_catalog_resolution": request.id == "full-openrouter" && !music_available,
-    })))
-}
-
 async fn openrouter_catalog(State(state): State<AppState>) -> Json<Value> {
     // Fetch it if this process has not yet: an empty answer here made every
     // capability read "no model in the refreshed catalog", which is a lie -
@@ -2054,7 +2002,6 @@ async fn openrouter_catalog(State(state): State<AppState>) -> Json<Value> {
             "speech_to_text": providers::openrouter::suggested_model(catalog, Capability::SpeechToText),
             "prompt_enhancement": providers::openrouter::suggested_model(catalog, Capability::PromptEnhancement),
             "cover_art": providers::openrouter::suggested_model(catalog, Capability::CoverArt),
-            "music_generation": providers::openrouter::suggested_model(catalog, Capability::MusicGeneration),
         })
     });
     Json(serde_json::json!({
@@ -2398,7 +2345,7 @@ async fn compose_setup_status(state: &AppState, manager_status: model_manager::M
         fields.insert("engine_id".into(), Value::String(PRIMARY_MUSIC_ENGINE_ID.into()));
         fields.insert("selected_profile_id".into(), serde_json::to_value(selected_profile_id).unwrap_or(Value::Null));
         fields.insert("selected_component_ids".into(), serde_json::to_value(selected_component_ids).unwrap_or(Value::Null));
-        fields.insert("hardware".into(), serde_json::to_value(presets::hardware()).unwrap_or(Value::Null));
+        fields.insert("hardware".into(), serde_json::to_value(hardware::hardware()).unwrap_or(Value::Null));
         fields.insert("engine_options".into(), serde_json::to_value(*state.engine_options.read().await).unwrap_or(Value::Null));
         fields.insert("effective_max_batch".into(), Value::from(state.engine_options.read().await.effective_max_batch()));
         // Where everything the studio owns actually lives. People complained
@@ -3330,7 +3277,7 @@ async fn assistant_write(
     let user = assistant::user_message(&request);
 
     let response: Value = match config.provider {
-        AssistantProvider::None | AssistantProvider::Local | AssistantProvider::Managed => {
+        AssistantProvider::Local | AssistantProvider::Managed => {
             // A managed model is started on first use and then stays loaded, so
             // the second request does not pay for the load again.
             let (base, model) = match config.provider {
@@ -3415,7 +3362,7 @@ async fn assistant_write(
                 .map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("OpenRouter assistant failed: {error}")))?
                 .body
         }
-        AssistantProvider::None => unreachable!("availability was checked above"),
+        AssistantProvider::None => return Err(api_error(StatusCode::CONFLICT, "No writing assistant is configured.".into())),
     };
 
     release_assistant_unless_kept(&state).await;
@@ -3696,17 +3643,13 @@ async fn capabilities(State(state): State<AppState>) -> Json<CapabilitiesRespons
     let whisper_installed = state.lyrics_sync.whisper_binary().is_some();
     let assistant = state.assistant.read().await.clone();
     let assistant_installed = assistant.available();
-    let catalog = state.openrouter_catalog.read().await;
     Json(CapabilitiesResponse {
-        engines: capability_engines_with(catalog.catalog.as_ref(), primary_installed, parakeet_installed, whisper_installed, assistant_installed),
+        engines: capability_engines_with(primary_installed, parakeet_installed, whisper_installed, assistant_installed),
     })
 }
 
-fn capability_engines(
-    catalog: Option<&providers::openrouter::CapabilityCatalog>,
-    primary_installed: bool,
-) -> Vec<EngineDescriptor> {
-    capability_engines_with(catalog, primary_installed, false, false, false)
+fn capability_engines(primary_installed: bool) -> Vec<EngineDescriptor> {
+    capability_engines_with(primary_installed, false, false, false)
 }
 
 /// The engines the studio can offer, including the local ones it only has when
@@ -3714,20 +3657,16 @@ fn capability_engines(
 /// page was disabled for ever: the studio recognises speech and writes captions
 /// locally, but never said so here.
 fn capability_engines_with(
-    catalog: Option<&providers::openrouter::CapabilityCatalog>,
     primary_installed: bool,
     parakeet_installed: bool,
     whisper_installed: bool,
     assistant_installed: bool,
 ) -> Vec<EngineDescriptor> {
-    let mut openrouter_capabilities = vec![
+    let openrouter_capabilities = vec![
         Capability::SpeechToText,
         Capability::PromptEnhancement,
         Capability::CoverArt,
     ];
-    if catalog.is_some_and(|catalog| catalog.models_for(Capability::MusicGeneration).next().is_some()) {
-        openrouter_capabilities.push(Capability::MusicGeneration);
-    }
     vec![
         EngineDescriptor {
             id: PRIMARY_MUSIC_ENGINE_ID.into(),
@@ -3809,10 +3748,6 @@ async fn create_music_job(
     State(state): State<AppState>,
     Json(request): Json<CreateMusicJobRequest>,
 ) -> (StatusCode, Json<MusicJob>) {
-    let music_selection = state.configuration.read().await.selections.iter().find(|selection| selection.capability == Capability::MusicGeneration).cloned();
-    if music_selection.as_ref().is_some_and(|selection| selection.mode == ExecutionMode::OpenRouter) {
-        return create_openrouter_music_job(state, request, music_selection.and_then(|selection| selection.cloud_model)).await;
-    }
     let engine_id = selected_local_music_engine(&*state.configuration.read().await)
         .unwrap_or_else(|| "unconfigured".into());
     if engine_id != PRIMARY_MUSIC_ENGINE_ID {
@@ -3940,69 +3875,6 @@ fn prepare_replay_synthesis(mut replay: Value, overrides: &ReplayMusicJobRequest
     // but the stored provenance should not claim a batch.
     object.insert("lm_batch_size".into(), Value::from(1));
     Ok(replay)
-}
-
-async fn create_openrouter_music_job(state: AppState, request: CreateMusicJobRequest, model_id: Option<String>) -> (StatusCode, Json<MusicJob>) {
-    let engine_id = "openrouter".to_owned();
-    let model_id = match model_id.filter(|model| !model.trim().is_empty()) {
-        Some(model) => model,
-        None => return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, "OpenRouter music requires a selected model from the refreshed catalog".into()))),
-    };
-    let prompt = openrouter_music_prompt(&request);
-    let catalog = match state.openrouter_catalog.read().await.catalog.clone() {
-        Some(catalog) => catalog,
-        None => return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, "Refresh the OpenRouter catalog before starting cloud music generation".into()))),
-    };
-    let stream_request = match providers::openrouter::music_stream_request_for(&catalog, &model_id, &prompt) {
-        Ok(request) => request,
-        Err(error) => return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, error.to_string()))),
-    };
-    let job = MusicJob {
-        id: format!("openrouter-{}", uuid_suffix()), engine_id: engine_id.clone(), cover_prompt: request.cover_prompt.clone(), title: Some(titled(&request)), status: MusicJobStatus::Running,
-        dispatch: MusicJobDispatch::OpenRouter, phase: MusicJobPhase::Running, style: request.style, lyrics: request.lyrics,
-        duration_seconds: request.duration_seconds.unwrap_or_default(), generation_settings: stream_request.request.body.clone(), song: None, songs: vec![],
-        message: "OpenRouter music stream started; the completed audio will be imported into the studio library.".into(),
-    };
-    state.jobs.write().await.insert(job.id.clone(), job.clone());
-    let job_id = job.id.clone();
-    tokio::spawn(async move { run_openrouter_music_generation(state, job_id, stream_request).await });
-    (StatusCode::ACCEPTED, Json(job))
-}
-
-fn openrouter_music_prompt(request: &CreateMusicJobRequest) -> String {
-    format!("Style:\n{}\n\nLyrics:\n{}", request.style.trim(), request.lyrics.trim())
-}
-
-async fn run_openrouter_music_generation(state: AppState, job_id: String, stream_request: providers::openrouter::OpenRouterMusicStreamRequest) {
-    let outcome = async {
-        let response = reqwest::Client::new()
-            .post(format!("{}{}", providers::openrouter::API_BASE_URL, stream_request.request.path))
-            .bearer_auth(stream_request.api_key)
-            .json(&stream_request.request.body)
-            .send().await?
-            .error_for_status()?;
-        let mut stream = response.bytes_stream();
-        let mut sse = Vec::new();
-        while let Some(chunk) = stream.next().await { sse.extend_from_slice(&chunk?); }
-        let audio = openrouter_stream::decode_audio_sse(&sse)?;
-        let job = state.jobs.read().await.get(&job_id).cloned().context("cloud music job disappeared before import")?;
-        let imported_song = state.library.import_generated_song(library::GeneratedSongInput {
-            title: job.title.clone(),
-            metadata: serde_json::json!({ "duration_seconds": job.duration_seconds, "cover_prompt": job.cover_prompt.clone() }),
-            caption: job.style.clone(), lyrics: job.lyrics.clone(), generation_settings: job.generation_settings.clone(),
-            replay_request: None, audio_codes: None, engine_id: "openrouter".into(), profile_id: None,
-            source: "openrouter_generation".into(), audio_extension: "wav", audio,
-        })?;
-        tag_stored_song(&state, &imported_song.song.id).await;
-        after_import(&state, &imported_song.song.id);
-        Ok::<CompletedSong, anyhow::Error>(CompletedSong { id: imported_song.song.id.clone(), audio_url: format!("/v1/library/media/{}", imported_song.song.id), song: imported_song.song })
-    }.await;
-    let mut jobs = state.jobs.write().await;
-    let Some(job) = jobs.get_mut(&job_id) else { return; };
-    match outcome {
-        Ok(song) => { job.status = MusicJobStatus::Completed; job.phase = MusicJobPhase::Completed; job.song = Some(song.clone()); job.songs = vec![song]; job.message = "OpenRouter music stream completed and its audio was imported into the studio library.".into(); }
-        Err(error) => { job.status = MusicJobStatus::Failed; job.phase = MusicJobPhase::Failed; job.message = format!("OpenRouter music generation failed: {error}"); }
-    }
 }
 
 /// Covers and karaoke timings follow every finished track, local or cloud.
@@ -4237,14 +4109,85 @@ async fn local_music_model_catalog(
     Ok(Json(LocalMusicModelCatalog { engine_id, catalog }))
 }
 
+/// A job whose answer is a score: a transcription of a recording, or a
+/// composition from a style and lyrics.
 #[derive(Debug, Serialize)]
-struct TranscriptionJob {
+struct ScoreJob {
     id: String,
     status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     abc: Option<String>,
+    /// The token seed a composition drew its score with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lm_seed: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+impl ScoreJob {
+    fn running(id: String) -> Self {
+        Self { id, status: "running".into(), abc: None, lm_seed: None, error: None }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ComposeScoreRequest {
+    #[serde(default)]
+    style: String,
+    #[serde(default)]
+    lyrics: String,
+    #[serde(default)]
+    cot: Option<String>,
+    #[serde(default)]
+    lm_seed: Option<i64>,
+    #[serde(default)]
+    abc_sampling: Option<SamplingPreset>,
+}
+
+/// The engine request that runs the planning stage and next to nothing else.
+/// The score is written from the prompt alone - the duration never reaches the
+/// prompt, it only caps the semantic stage - so a one second budget, one solver
+/// step and one track return the same score a full song would have been sung
+/// from, the equivalent of yue2.cpp's `yue-plan`.
+fn compose_request_from(request: &ComposeScoreRequest) -> Result<Value, String> {
+    if request.style.trim().is_empty() && request.lyrics.trim().is_empty() {
+        return Err("write a style or lyrics: the engine needs at least one of them".into());
+    }
+    let cot = request.cot.as_deref().unwrap_or("full");
+    if !matches!(cot, "full" | "melody") {
+        return Err("a score is composed in full or melody mode".into());
+    }
+    let mut body = serde_json::json!({
+        "style": request.style,
+        "lyrics": request.lyrics.replace("\r\n", "\n"),
+        "cot": cot,
+        "duration": 1.0,
+        "steps": 1,
+        "lm_batch_size": 1,
+        "synth_batch_size": 1,
+        "output_format": "wav16",
+    });
+    if let Some(seed) = request.lm_seed.filter(|seed| *seed >= 0) {
+        body["lm_seed"] = Value::from(seed);
+    }
+    if let Some(sampling) = &request.abc_sampling {
+        sampling.validate("abc_sampling")?;
+        body["abc_sampling"] = serde_json::to_value(sampling).map_err(|error| error.to_string())?;
+    }
+    Ok(body)
+}
+
+async fn compose_score(
+    State(state): State<AppState>,
+    Json(request): Json<ComposeScoreRequest>,
+) -> Result<(StatusCode, Json<ScoreJob>), (StatusCode, Json<ApiError>)> {
+    let body = compose_request_from(&request).map_err(|error| api_error(StatusCode::BAD_REQUEST, error))?;
+    let remote = state
+        .music_server
+        .submit(body)
+        .await
+        .map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine refused the composition: {error}")))?;
+    Ok((StatusCode::ACCEPTED, Json(ScoreJob::running(remote.id))))
 }
 
 /// Reads a recording into the ABC score a cover takes as its `abc`. The audio
@@ -4253,7 +4196,7 @@ struct TranscriptionJob {
 async fn create_transcription(
     State(state): State<AppState>,
     mut multipart: Multipart,
-) -> Result<(StatusCode, Json<TranscriptionJob>), (StatusCode, Json<ApiError>)> {
+) -> Result<(StatusCode, Json<ScoreJob>), (StatusCode, Json<ApiError>)> {
     let transcriber_loaded = {
         let supervisor = state.engine.lock().await;
         supervisor.as_ref().map(|engine| engine.config().models.transcriber.is_some())
@@ -4298,36 +4241,50 @@ async fn create_transcription(
         .transcribe(bytes, name, melody_only)
         .await
         .map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine refused the transcription: {error}")))?;
-    Ok((StatusCode::ACCEPTED, Json(TranscriptionJob { id: remote.id, status: "running".into(), abc: None, error: None })))
+    Ok((StatusCode::ACCEPTED, Json(ScoreJob::running(remote.id))))
 }
 
-async fn transcription_status(
+/// The score a finished job carries. A transcription answers with JSON; a
+/// composition with the engine's multipart result, whose replay request holds
+/// the score it wrote and the seed it drew.
+fn score_from_result(content_type: &str, body: &[u8]) -> Result<(String, Option<i64>), String> {
+    let (abc, lm_seed) = if content_type.starts_with("multipart/") {
+        let tracks = engine_result::parse_multipart_result(content_type, body).map_err(|error| error.to_string())?;
+        let replay = tracks.into_iter().next().ok_or("the composition returned no track")?.replay_request;
+        (replay.get("abc").and_then(Value::as_str).map(str::to_owned), replay.get("lm_seed").and_then(Value::as_i64))
+    } else {
+        let value: Value = serde_json::from_slice(body).map_err(|error| format!("the result is not JSON: {error}"))?;
+        (value.get("abc").and_then(Value::as_str).map(str::to_owned), None)
+    };
+    let abc = abc.filter(|value| !value.trim().is_empty()).ok_or("the engine returned no score")?;
+    Ok((abc.trim_end().to_owned(), lm_seed))
+}
+
+async fn score_job_status(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
-) -> Result<Json<TranscriptionJob>, (StatusCode, Json<ApiError>)> {
+) -> Result<Json<ScoreJob>, (StatusCode, Json<ApiError>)> {
     let remote = state.music_server.job(&job_id).await.map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
-    let mut job = TranscriptionJob { id: job_id.clone(), status: remote.status.clone(), abc: None, error: None };
+    let mut job = ScoreJob { status: remote.status.clone(), ..ScoreJob::running(job_id.clone()) };
     match remote.status.as_str() {
         "done" => {
             let result = state.music_server.result(&job_id).await.map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
-            let body: Value = serde_json::from_slice(&result.body)
-                .map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("the transcription result is not JSON: {error}")))?;
-            let abc = body.get("abc").and_then(Value::as_str).filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| api_error(StatusCode::BAD_GATEWAY, "the transcription produced no score".into()))?;
-            job.abc = Some(abc.to_owned());
+            let (abc, lm_seed) = score_from_result(&result.content_type, &result.body).map_err(|error| api_error(StatusCode::BAD_GATEWAY, error))?;
+            job.abc = Some(abc);
+            job.lm_seed = lm_seed;
         }
-        "failed" => job.error = Some(engine_failure_reason().unwrap_or_else(|| "The engine could not transcribe this recording.".into())),
+        "failed" => job.error = Some(engine_failure_reason().unwrap_or_else(|| "The engine could not write this score.".into())),
         _ => {}
     }
     Ok(Json(job))
 }
 
-async fn cancel_transcription(
+async fn cancel_score_job(
     State(state): State<AppState>,
     Path(job_id): Path<String>,
-) -> Result<Json<TranscriptionJob>, (StatusCode, Json<ApiError>)> {
+) -> Result<Json<ScoreJob>, (StatusCode, Json<ApiError>)> {
     let remote = state.music_server.cancel(&job_id).await.map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
-    Ok(Json(TranscriptionJob { id: job_id, status: remote.status, abc: None, error: None }))
+    Ok(Json(ScoreJob { status: remote.status, ..ScoreJob::running(job_id) }))
 }
 
 impl EngineClient {
@@ -4457,7 +4414,7 @@ fn initial_configuration() -> StudioConfiguration {
 /// not declared by `capability_engines` is dropped so the interface never
 /// offers a provider nobody can serve.
 fn sanitize_persisted_configuration(mut configuration: StudioConfiguration) -> StudioConfiguration {
-    let declared = capability_engines(None, false);
+    let declared = capability_engines(false);
     for selection in &mut configuration.selections {
         let engine_serves_capability = selection.local_engine.as_deref().is_some_and(|engine_id| {
             declared.iter().any(|engine| {
@@ -4838,15 +4795,41 @@ mod tests {
     }
 
     #[test]
-    fn capabilities_use_the_engines_envelope_and_only_advertise_catalog_verified_cloud_music() {
-        let before_refresh = capability_engines(None, false);
-        assert!(!before_refresh.iter().find(|engine| engine.id == "openrouter").unwrap().capabilities.contains(&Capability::MusicGeneration));
-        let catalog = providers::openrouter::CapabilityCatalog::parse(r#"{"data":[{"id":"catalog/music","name":"Song","description":"Music generation for full-length songs","architecture":{"input_modalities":["text"],"output_modalities":["audio"]}}]}"#).unwrap();
-        let after_refresh = CapabilitiesResponse { engines: capability_engines(Some(&catalog), false) };
-        assert!(after_refresh.engines.iter().find(|engine| engine.id == "openrouter").unwrap().capabilities.contains(&Capability::MusicGeneration));
+    fn capabilities_use_the_engines_envelope_and_music_stays_local() {
+        let after_refresh = CapabilitiesResponse { engines: capability_engines(false) };
+        assert!(!after_refresh.engines.iter().find(|engine| engine.id == "openrouter").unwrap().capabilities.contains(&Capability::MusicGeneration));
         // The music engine, two recognisers, the local assistant and
         // OpenRouter: everything listed is something the studio can actually do.
         assert_eq!(serde_json::to_value(after_refresh).unwrap()["engines"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn a_composition_runs_the_planning_stage_and_next_to_nothing_else() {
+        let request = ComposeScoreRequest { style: "folk rock".into(), lyrics: "[Verse]\r\nline".into(), cot: Some("melody".into()), lm_seed: Some(7), abc_sampling: None };
+        let body = compose_request_from(&request).unwrap();
+        assert_eq!(body["cot"], "melody");
+        assert_eq!(body["duration"], 1.0);
+        assert_eq!(body["steps"], 1);
+        assert_eq!(body["lm_batch_size"], 1);
+        assert_eq!(body["lm_seed"], 7);
+        assert_eq!(body["lyrics"], "[Verse]\nline");
+        assert!(body.get("abc").is_none());
+    }
+
+    #[test]
+    fn a_composition_needs_a_mode_that_writes_a_score_and_a_prompt() {
+        let off = ComposeScoreRequest { style: "pop".into(), lyrics: String::new(), cot: Some("off".into()), lm_seed: None, abc_sampling: None };
+        assert!(compose_request_from(&off).is_err());
+        let empty = ComposeScoreRequest { style: " ".into(), lyrics: String::new(), cot: None, lm_seed: None, abc_sampling: None };
+        assert!(compose_request_from(&empty).is_err());
+    }
+
+    #[test]
+    fn a_transcription_result_is_read_as_json() {
+        let (abc, seed) = score_from_result("application/json", br#"{"abc":"X:1\nK:C\n|C|\n"}"#).unwrap();
+        assert_eq!(abc, "X:1\nK:C\n|C|");
+        assert_eq!(seed, None);
+        assert!(score_from_result("application/json", br#"{"abc":""}"#).is_err());
     }
 
     fn replay_overrides() -> ReplayMusicJobRequest {

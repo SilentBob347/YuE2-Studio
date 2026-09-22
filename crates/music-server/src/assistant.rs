@@ -292,22 +292,6 @@ pub fn draft_schema(required: &[&str]) -> Value {
     })
 }
 
-/// An OpenAI-compatible chat request. Both providers speak this shape, so the
-/// only difference between them is the endpoint and the credential.
-pub fn chat_body(model: &str, system: &str, user: &str) -> Value {
-    chat_body_with_reasoning(model, system, user, None)
-}
-
-/// The same body, asking the model to think harder.
-///
-/// `effort` is OpenRouter's unified reasoning control - "minimal" through
-/// "max" - which they translate per provider. A local OpenAI-compatible server
-/// has no such parameter, so nothing is sent there and the model decides for
-/// itself; its thinking is read back out of `reasoning_content` either way.
-pub fn chat_body_with_reasoning(model: &str, system: &str, user: &str, effort: Option<&str>) -> Value {
-    chat_body_full(model, system, user, effort, None)
-}
-
 /// The request as it goes out, with the model's own sampling when it has any.
 ///
 /// OpenRouter publishes `default_parameters` per model, and 83 of them fill it
@@ -427,8 +411,7 @@ mod tests {
         let (system, _) = instructions(&request(AssistTarget::All));
         assert!(system.contains("verbatim"));
         assert!(system.contains("[Verse 1]"));
-        let body = chat_body("any-model", &system, "idea");
-        assert!(body["messages"][0]["content"].as_str().unwrap_or_default().contains("style prompt YuE2 reads"));
+        assert!(system.contains("style prompt YuE2 reads"));
     }
 
     #[test]

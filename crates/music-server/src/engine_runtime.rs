@@ -14,7 +14,9 @@
 //! Toolkit, which is exactly why this was invisible until someone without the
 //! Toolkit ran the release.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 
@@ -24,6 +26,7 @@ use crate::downloads::{Asset, AssetKind, Downloader};
 /// library file names themselves - `cublas64_13.dll` - so a rebuild of the
 /// engine on a different CUDA is a change here as well, and the dependency
 /// check in the release build is what catches it.
+#[cfg(test)]
 pub const CUDA_MAJOR: &str = "13";
 
 /// The libraries, by file name, exactly as the engine imports them.
@@ -75,6 +78,7 @@ impl EngineRuntime {
     }
 
     /// Where the libraries live once installed - beside the engine.
+    #[cfg(test)]
     pub fn library_dir(&self) -> PathBuf {
         self.downloader.root().to_path_buf()
     }
@@ -100,10 +104,6 @@ impl EngineRuntime {
             .filter(|asset| !self.downloader.is_installed(asset))
             .filter(|asset| !asset.pick.iter().all(|library| is_on_the_search_path(library)))
             .collect()
-    }
-
-    pub fn missing_bytes(&self) -> u64 {
-        self.missing().iter().map(|asset| asset.bytes).sum()
     }
 
     /// Fetches whatever is missing and waits for it.
@@ -175,6 +175,7 @@ fn is_on_the_search_path(library: &str) -> bool {
 /// version is part of the file name - `cublas64_13.dll`, not `cublas.dll`.
 /// Reading it here means the release can check itself instead of trusting
 /// that whoever built it remembered.
+#[cfg(test)]
 pub fn imported_libraries(binary: &Path) -> Result<Vec<String>> {
     let data = std::fs::read(binary)?;
     let at = |offset: usize| -> Result<u32> {
@@ -231,6 +232,7 @@ pub fn imported_libraries(binary: &Path) -> Result<Vec<String>> {
 
 /// Libraries every Windows machine has, or that arrive with the display
 /// driver. Everything else has to be shipped or downloaded.
+#[cfg(test)]
 fn is_provided_by_the_system(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     name.starts_with("api-ms-win-")
@@ -271,6 +273,7 @@ fn is_provided_by_the_system(name: &str) -> bool {
 /// `ggml-cuda.dll`, which is where cuBLAS actually comes in. Checking only the
 /// executable's own imports would have found nothing wrong with the release
 /// that could not start.
+#[cfg(test)]
 pub fn unresolved_dependencies(directory: &Path, entry_point: &str) -> Result<Vec<String>> {
     let mut seen: Vec<String> = Vec::new();
     let mut queue = vec![entry_point.to_string()];

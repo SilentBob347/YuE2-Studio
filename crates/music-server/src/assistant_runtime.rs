@@ -58,9 +58,6 @@ pub struct Asset {
     pub note: &'static str,
 }
 
-/// llama.cpp is pinned to one build so a working setup keeps working.
-const LLAMA_BUILD: &str = "b9966";
-
 pub const ASSETS: &[Asset] = &[
     Asset {
         id: "gemma-4-e4b-q4_0",
@@ -764,6 +761,9 @@ fn hide_console(_command: &mut Command) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// llama.cpp is pinned to one build so a working setup keeps working.
+    const LLAMA_BUILD: &str = "b9966";
 
     #[test]
     fn every_asset_has_a_size_and_a_distinct_id() {

@@ -9,7 +9,7 @@
 
 </div>
 
-**MiniMax Music3 Studio** 由 **Nerual Dreming** 编写并维护 —— 艺术家，
+**YuE2 Studio** 由 **Nerual Dreming** 编写并维护 —— 艺术家，
 [ArtGeneration.me](https://artgeneration.me) 与 Neuro-Cartel 社区的创始人，也是
 [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio) 的作者，本工作室正是由它发展而来。
 

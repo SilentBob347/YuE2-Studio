@@ -8,8 +8,9 @@ import type { Song, YueCot, YueOutputFormat, YueRequest, YueSampling } from '../
 import { useI18n } from '../context/I18nContext';
 import { EXAMPLES, randomExample } from '../services/examples';
 import { ScoreView } from './ScoreView';
-import { transcribe } from '../services/transcription';
+import { composeScore, transcribe } from '../services/transcription';
 import { profileLabel as setLabel } from '../services/modelCatalog';
+import { REQUEST_FILE_ACCEPT, parseRequestFile, requestFileTitle, serializeRequest, type RequestFileFormat } from '../services/requestFile';
 
 /**
  * The YuE2 request form.
@@ -252,6 +253,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [lmSeed, setLmSeed] = useState('');
   const [seed, setSeed] = useState('');
   const [semanticTokens, setSemanticTokens] = useState('');
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const [takeChoiceOpen, setTakeChoiceOpen] = useState(false);
   const [abcSampling, setAbcSampling] = useState<SamplingText>(emptySampling);
   const [semanticSampling, setSemanticSampling] = useState<SamplingText>(emptySampling);
   const [peakClip, setPeakClip] = useState('');
@@ -277,6 +280,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [error, setError] = useState<string | null>(null);
   const [examplesOpen, setExamplesOpen] = useState(false);
   const [transcribing, setTranscribing] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);
+  const composeRun = useRef<AbortController | null>(null);
   const [coverSource, setCoverSource] = useState<string>('');
   const [coverMelodyOnly, setCoverMelodyOnly] = useState(true);
   const promptFile = useRef<HTMLInputElement | null>(null);
@@ -446,7 +451,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setExamplesOpen(false);
   };
 
-  const buildRequest = (): YueRequest => {
+  // A saved prompt keeps the seeds only when they were pinned: with the random
+  // switch on, the file stays a prompt rather than one particular take.
+  const buildRequest = (forFile = false): YueRequest => {
     const request: YueRequest = {
       style: style.trim(),
       // An instrumental has no words, whatever is still sitting in the box.
@@ -471,8 +478,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     const randomSeed = () => Math.floor(Math.random() * 0x100000000);
     const lmSeedValue = randomizeSeed ? undefined : numberOrUndefined(lmSeed);
     const seedValue = randomizeSeed ? undefined : numberOrUndefined(seed);
-    request.lm_seed = lmSeedValue !== undefined && lmSeedValue >= 0 ? lmSeedValue : randomSeed();
-    request.seed = seedValue !== undefined && seedValue >= 0 ? seedValue : randomSeed();
+    const pinned = (value: number | undefined) => value !== undefined && value >= 0;
+    if (!forFile || pinned(lmSeedValue)) request.lm_seed = pinned(lmSeedValue) ? lmSeedValue : randomSeed();
+    if (!forFile || pinned(seedValue)) request.seed = pinned(seedValue) ? seedValue : randomSeed();
     if (semanticTokens.trim()) request.semantic_tokens = semanticTokens.trim();
     const abcPreset = samplingFrom(abcSampling);
     if (abcPreset) request.abc_sampling = abcPreset;
@@ -498,12 +506,16 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
 
   const safeName = () => (name.trim() || 'request').replace(/[\\/:*?"<>|]/g, '');
 
-  const savePrompt = () => download(`${safeName()}.json`, JSON.stringify(buildRequest(), null, 2), 'application/json');
+  const savePrompt = (format: RequestFileFormat) => {
+    setSaveMenuOpen(false);
+    download(`${safeName()}.${format}`, serializeRequest(buildRequest(true), format), format === 'json' ? 'application/json' : 'application/x-yaml');
+  };
 
   const openPrompt = async (file: File) => {
     try {
-      const parsed = JSON.parse(await file.text()) as Record<string, unknown>;
-      applyRequest(parsed, typeof parsed.title === 'string' ? parsed.title : file.name.replace(/\.json$/i, ''));
+      const parsed = parseRequestFile(file.name, await file.text());
+      applyRequest(parsed, requestFileTitle(file.name, parsed));
+      setError(null);
     } catch {
       setError(t('promptFileInvalid'));
     }
@@ -542,6 +554,36 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setTranscribing(null);
+    }
+  };
+
+  /** Writes the score alone, so it can be read and edited before a song is sung from it. */
+  const runComposition = async () => {
+    if (!ready) { setError(t('downloadProfileFirst')); return; }
+    if (!style.trim() && !lyrics.trim()) { setError(tt('styleOrLyricsRequired')); return; }
+    setError(null);
+    setComposing(true);
+    const controller = new AbortController();
+    composeRun.current = controller;
+    try {
+      const pinned = randomizeSeed ? undefined : numberOrUndefined(lmSeed);
+      const score = await composeScore({
+        style: style.trim(),
+        lyrics: instrumental ? '' : lyrics.replace(/\r\n?/g, '\n').trim(),
+        cot: effectiveCot,
+        lmSeed: pinned !== undefined && pinned >= 0 ? pinned : undefined,
+        abcSampling: samplingFrom(abcSampling),
+      }, controller.signal);
+      setAbc(score);
+      setSemanticTokens('');
+      setShowNotation(true);
+    } catch (reason) {
+      if (!(reason instanceof DOMException && reason.name === 'AbortError')) {
+        setError(reason instanceof Error ? reason.message : String(reason));
+      }
+    } finally {
+      composeRun.current = null;
+      setComposing(false);
     }
   };
 
@@ -640,7 +682,22 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     if (!ready) { setError(t('downloadProfileFirst')); return; }
     if (!style.trim() && !lyrics.trim() && !semanticTokens.trim()) { setError(tt('styleOrLyricsRequired')); return; }
     setError(null);
+    // Audio codes hold a performance already sung: ask whether to render that
+    // take again or perform the prompt anew, as the engine's own WebUI does.
+    if (semanticTokens.trim()) { setTakeChoiceOpen(true); return; }
     onGenerate(buildRequest());
+  };
+
+  const renderTake = (fresh: boolean) => {
+    setTakeChoiceOpen(false);
+    const request = buildRequest();
+    if (fresh) {
+      delete request.semantic_tokens;
+      request.lm_seed = Math.floor(Math.random() * 0x100000000);
+      request.seed = Math.floor(Math.random() * 0x100000000);
+      setSemanticTokens('');
+    }
+    onGenerate(request);
   };
 
   const songs = numberOrUndefined(lmBatch) ?? 1;
@@ -833,12 +890,21 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                 )}
                 <button type="button" onClick={() => setExamplesOpen(open => !open)} className={ICON} title={t('examplePrompt')} aria-expanded={examplesOpen}><Dices size={14} /></button>
                 <button type="button" onClick={() => promptFile.current?.click()} className={ICON} title={t('openPrompt')}><FolderOpen size={14} /></button>
-                <button type="button" onClick={savePrompt} className={ICON} title={t('savePrompt')}><Save size={14} /></button>
+                <span className="relative">
+                  <button type="button" onClick={() => setSaveMenuOpen(open => !open)} className={ICON} title={t('savePrompt')} aria-expanded={saveMenuOpen}><Save size={14} /></button>
+                  {saveMenuOpen && (
+                    <span className="absolute right-0 top-full z-20 mt-1 flex overflow-hidden rounded-lg border border-zinc-200 bg-white text-[11px] font-semibold shadow-lg dark:border-white/10 dark:bg-zinc-900">
+                      {(['json', 'yaml'] as const).map(format => (
+                        <button key={format} type="button" onClick={() => savePrompt(format)} className="px-3 py-1.5 uppercase text-zinc-700 hover:bg-pink-500/10 hover:text-pink-600 dark:text-zinc-200">{format}</button>
+                      ))}
+                    </span>
+                  )}
+                </span>
                 <button type="button" onClick={reset} className={ICON} title={t('resetPrompt')}><RotateCcw size={14} /></button>
                 <input
                   ref={promptFile}
                   type="file"
-                  accept="application/json,.json"
+                  accept={REQUEST_FILE_ACCEPT}
                   className="hidden"
                   onChange={event => { const file = event.target.files?.[0]; if (file) void openPrompt(file); event.target.value = ''; }}
                 />
@@ -977,6 +1043,18 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                   className={`${CONTROL} mt-3 resize-none overflow-y-auto font-mono text-[11px] leading-4 custom-scrollbar`}
                 />
                 <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('scoreHint')}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => (composing ? composeRun.current?.abort() : void runComposition())}
+                    disabled={!composing && !ready}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-pink-500/40 px-3 py-1.5 text-xs font-semibold text-pink-600 transition hover:bg-pink-500/10 disabled:opacity-50 dark:text-pink-300"
+                  >
+                    {composing ? <Loader2 size={13} className="animate-spin" /> : <FileMusic size={13} />}
+                    {composing ? tt('composingScore') : abc.trim() ? tt('composeScoreAgain') : tt('composeScore')}
+                  </button>
+                  <span className="text-[11px] leading-4 text-zinc-500">{composing ? tt('composeScoreCancel') : tt('composeScoreHint')}</span>
+                </div>
                 {melodyWithChords && (
                   <div className="mt-2 flex items-start gap-2 rounded-lg bg-amber-500/10 p-2 text-[11px] leading-4 text-amber-700 dark:text-amber-300">
                     <AlertTriangle size={13} className="mt-0.5 shrink-0" />
@@ -1035,7 +1113,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                 label={tt('flowSteps')}
                 value={steps}
                 fallback={Number(defaults.steps ?? 32)}
-                min={4}
+                min={1}
                 max={100}
                 step={1}
                 onChange={setSteps}
@@ -1173,6 +1251,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       </div>
 
       <footer className="shrink-0 border-t border-zinc-200 bg-zinc-50/95 p-4 backdrop-blur dark:border-white/5 dark:bg-suno-panel/95">
+        {takeChoiceOpen && (
+          <div role="dialog" aria-label={tt('takeTitle')} className="mb-3 rounded-xl border border-pink-300/50 bg-pink-50 p-3 text-xs leading-5 text-zinc-700 dark:border-pink-500/25 dark:bg-pink-500/10 dark:text-zinc-200">
+            <p className="font-semibold text-zinc-900 dark:text-white">{tt('takeTitle')}</p>
+            <p className="mt-1">{tt('takeBody')}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button type="button" onClick={() => renderTake(false)} className="rounded-lg bg-pink-600 px-3 py-1.5 font-semibold text-white hover:brightness-110">{tt('sameTake')}</button>
+              <button type="button" onClick={() => renderTake(true)} className="rounded-lg border border-zinc-300 px-3 py-1.5 font-semibold hover:border-pink-400 dark:border-white/15">{tt('newTake')}</button>
+              <button type="button" onClick={() => setTakeChoiceOpen(false)} className="ml-auto px-2 py-1.5 text-zinc-500 hover:text-zinc-800 dark:hover:text-white">{t('cancel')}</button>
+            </div>
+          </div>
+        )}
         <button
           type="button"
           onClick={submit}

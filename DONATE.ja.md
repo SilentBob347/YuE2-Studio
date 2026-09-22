@@ -9,7 +9,7 @@
 
 </div>
 
-**MiniMax Music3 Studio** を書き、保守しているのは **Nerual Dreming** です。アーティストであり、
+**YuE2 Studio** を書き、保守しているのは **Nerual Dreming** です。アーティストであり、
 [ArtGeneration.me](https://artgeneration.me) と Neuro-Cartel コミュニティの創設者、そして本スタジオの
 元になった [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio) の作者でもあります。
 
