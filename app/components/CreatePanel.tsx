@@ -306,6 +306,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
 
   useEffect(() => {
     let finished = '';
+    // Failures already on the server when the page opened are old news; only
+    // one that happens while the studio is open is told, once, as a toast.
+    let reported: Set<string> | null = null;
     const read = () => void fetch('/v1/activity')
       .then(response => response.json())
       .then((body: { activity?: typeof activity }) => {
@@ -314,6 +317,20 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         if (done !== finished) {
           finished = done;
           window.dispatchEvent(new CustomEvent('yue:library-changed'));
+        }
+        const failed = entries.filter(entry => entry.state === 'failed');
+        const keyOf = (entry: (typeof entries)[number]) => `${entry.song_id}:${entry.kind}:${entry.detail ?? ''}`;
+        if (reported === null) {
+          reported = new Set(failed.map(keyOf));
+        } else {
+          for (const entry of failed) {
+            const key = keyOf(entry);
+            if (reported.has(key)) continue;
+            reported.add(key);
+            const what = entry.kind === 'cover' ? t('coverArt') : t('karaokeSection');
+            const why = karaokeReason(tt, entry.detail) ?? '';
+            window.dispatchEvent(new CustomEvent('yue:toast', { detail: { message: `${what} · ${entry.title}: ${why}`, type: 'info' } }));
+          }
         }
         setActivity(entries);
       })
@@ -844,18 +861,15 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             </Card>
           )}
 
-          {activity.filter(entry => entry.state !== 'done').slice(-3).map(entry => (
+          {activity.filter(entry => entry.state === 'running').slice(-3).map(entry => (
             <div key={`${entry.song_id}-${entry.kind}`} className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-[11px] dark:border-white/10 dark:bg-suno-card">
               <div className="flex items-center gap-2">
-                {entry.state === 'running'
-                  ? <Loader2 size={12} className="animate-spin text-pink-500" />
-                  : <AlertTriangle size={12} className="text-amber-500" />}
+                <Loader2 size={12} className="animate-spin text-pink-500" />
                 <span className="font-semibold text-zinc-700 dark:text-zinc-200">
                   {entry.kind === 'cover' ? t('activityCover') : t('activityKaraoke')}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-zinc-500">{entry.title}</span>
               </div>
-              {entry.detail && <p className="mt-1 break-words text-[11px] leading-4 text-amber-600 dark:text-amber-300">{karaokeReason(t, entry.detail)}</p>}
             </div>
           ))}
 

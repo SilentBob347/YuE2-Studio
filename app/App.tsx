@@ -1195,6 +1195,16 @@ function AppContent() {
     return () => window.removeEventListener('yue:library-changed', reload);
   }, [refreshNativeLibrary]);
 
+  // Background work reports its outcome here once, and the toast goes away.
+  useEffect(() => {
+    const onToast = (event: Event) => {
+      const { message, type } = (event as CustomEvent<{ message: string; type?: ToastType }>).detail;
+      showToast(message, type ?? 'info');
+    };
+    window.addEventListener('yue:toast', onToast);
+    return () => window.removeEventListener('yue:toast', onToast);
+  }, []);
+
   // A track sent to be covered opens the form it lands in.
   useEffect(() => {
     const open = () => {
@@ -1456,7 +1466,7 @@ function AppContent() {
         type={toast.type}
         isVisible={toast.isVisible}
         onClose={closeToast}
-        duration={toast.type === 'error' ? 8000 : 3000}
+        duration={toast.type === 'error' ? 8000 : toast.type === 'info' ? 6000 : 3000}
       />
       {/* Cover regen modal — only mounted while a song is selected for regen.
           Unmounting on close revokes blob URLs (see CoverRegenModal cleanup
