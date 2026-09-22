@@ -1,0 +1,28 @@
+target/
+node_modules/
+dist/
+# ...except the waveform editor's own bundle, which is shipped, not built.
+!app/public/editor/dist/
+!app/public/editor/dist/**
+.env
+.env.*
+!.env.example
+data/
+models/
+engines/*/bin/
+desktop/src-tauri/resources/
+*.db
+*.db-shm
+*.db-wal
+
+# Built installers and portable archives belong to a GitHub release, not here.
+release/
+
+# Local engineering notes: they never belong to the published repository.
+HANDOFF.md
+NEXT_SESSION_PROMPT.md
+
+# Local editor and agent settings.
+.claude/
+desktop/src-tauri/tauri.release.conf.json
+*.password
