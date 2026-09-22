@@ -1,7 +1,7 @@
-//! Desktop shell for MiniMax Music3 Studio.
+//! Desktop shell for YuE2 Studio.
 //!
 //! The whole studio is this one executable: the window, and the native service
-//! hosted inside it. The service in turn supervises the `minimaxmusic.cpp`
+//! hosted inside it. The service in turn supervises the `yue2.cpp`
 //! engine, so there is exactly one owner of that process and no launcher
 //! script in the release layout. If a compatible service is already listening
 //! on loopback — a developer running it separately — the shell uses it instead
@@ -13,9 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-const SERVER_PORT: u16 = 8765;
-const RELEASES_URL: &str = "https://github.com/timoncool/MiniMax-Music3-Studio/releases/latest";
-const STUDIO_DATA_DIRECTORY: &str = "MiniMax Music3 Studio";
+const SERVER_PORT: u16 = 8791;
+const RELEASES_URL: &str = "https://github.com/timoncool/YuE2-Studio/releases/latest";
+const STUDIO_DATA_DIRECTORY: &str = "YuE2 Studio";
 
 /// Mutable studio data must not be derived from the process working directory
 /// or from the installed executable directory: a Start Menu shortcut is free
@@ -50,17 +50,17 @@ fn studio_data_directory() -> PathBuf {
     #[cfg(not(windows))]
     {
         if let Some(root) = std::env::var_os("XDG_DATA_HOME") {
-            return PathBuf::from(root).join("minimax-music3-studio");
+            return PathBuf::from(root).join("yue2-studio");
         }
         if let Some(home) = std::env::var_os("HOME") {
             return PathBuf::from(home)
                 .join(".local")
                 .join("share")
-                .join("minimax-music3-studio");
+                .join("yue2-studio");
         }
     }
 
-    std::env::temp_dir().join("minimax-music3-studio")
+    std::env::temp_dir().join("yue2-studio")
 }
 
 /// Sets the same deterministic roots before the Axum bridge is spawned. Its
@@ -81,36 +81,36 @@ fn configure_studio_runtime_paths() {
             }
         }
     }
-    if std::env::var_os("MINIMAX_MUSIC_MODELS_ROOT").is_none() {
+    if std::env::var_os("YUE_MODELS_ROOT").is_none() {
         unsafe {
             std::env::set_var(
-                "MINIMAX_MUSIC_MODELS_ROOT",
-                data_root.join("models").join("minimaxmusic-cpp"),
+                "YUE_MODELS_ROOT",
+                data_root.join("models").join("yue2-cpp"),
             );
         }
     }
-    if std::env::var_os("MINIMAX_STUDIO_SETTINGS_PATH").is_none() {
+    if std::env::var_os("YUE_STUDIO_SETTINGS_PATH").is_none() {
         unsafe {
-            std::env::set_var("MINIMAX_STUDIO_SETTINGS_PATH", data_root.join("studio-settings.json"));
+            std::env::set_var("YUE_STUDIO_SETTINGS_PATH", data_root.join("studio-settings.json"));
         }
     }
     // Without this the service falls back to `<working directory>/data` for the
     // library and media files. A Start Menu shortcut does not control the
     // working directory, so an installed build would scatter or lose the user's
     // library depending on how it was launched.
-    if std::env::var_os("MINIMAX_STUDIO_DATA_ROOT").is_none() {
+    if std::env::var_os("YUE_STUDIO_DATA_ROOT").is_none() {
         unsafe {
-            std::env::set_var("MINIMAX_STUDIO_DATA_ROOT", &data_root);
+            std::env::set_var("YUE_STUDIO_DATA_ROOT", &data_root);
         }
     }
 
     // The service resolves and supervises the engine; the shell only needs the
     // loopback address they agree on.
-    let host = std::env::var("MINIMAX_MM_SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".into());
-    let port = std::env::var("MINIMAX_MM_SERVER_PORT").ok().and_then(|value| value.parse::<u16>().ok()).unwrap_or(8086);
-    if std::env::var_os("MINIMAX_MUSIC_CPP_BASE_URL").is_none() {
+    let host = std::env::var("YUE_ENGINE_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    let port = std::env::var("YUE_ENGINE_PORT").ok().and_then(|value| value.parse::<u16>().ok()).unwrap_or(music_engine::yue_server::DEFAULT_PORT);
+    if std::env::var_os("YUE_ENGINE_BASE_URL").is_none() {
         unsafe {
-            std::env::set_var("MINIMAX_MUSIC_CPP_BASE_URL", format!("http://{host}:{port}"));
+            std::env::set_var("YUE_ENGINE_BASE_URL", format!("http://{host}:{port}"));
         }
     }
 }
@@ -224,8 +224,8 @@ fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
         if portable {
             let open_release = app
                 .dialog()
-                .message(format!("MiniMax Music3 Studio {version} is available. Open the download page?"))
-                .title("MiniMax Music3 Studio update")
+                .message(format!("YuE2 Studio {version} is available. Open the download page?"))
+                .title("YuE2 Studio update")
                 .kind(MessageDialogKind::Info)
                 .buttons(MessageDialogButtons::OkCancelCustom("Open".into(), "Later".into()))
                 .blocking_show();
@@ -238,8 +238,8 @@ fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
 
         let install = app
             .dialog()
-            .message(format!("MiniMax Music3 Studio {version} is available. Install it now?"))
-            .title("MiniMax Music3 Studio update")
+            .message(format!("YuE2 Studio {version} is available. Install it now?"))
+            .title("YuE2 Studio update")
             .kind(MessageDialogKind::Info)
             .buttons(MessageDialogButtons::OkCancelCustom("Install".into(), "Later".into()))
             .blocking_show();
@@ -250,7 +250,7 @@ fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
         if let Err(error) = update.download_and_install(|_, _| {}, || {}).await {
             app.dialog()
                 .message(format!("Could not install the update: {error}"))
-                .title("MiniMax Music3 Studio update")
+                .title("YuE2 Studio update")
                 .kind(MessageDialogKind::Error)
                 .blocking_show();
             return;
@@ -365,6 +365,6 @@ pub fn run() {
             Ok(())
         })
         .run(context)
-        .expect("error while running MiniMax Music3 Studio");
+        .expect("error while running YuE2 Studio");
 }
 

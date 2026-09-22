@@ -23,7 +23,7 @@ const LIMIT: u64 = 4 * 1024 * 1024;
 const ANSWER_SAMPLE: usize = 4000;
 
 pub fn path() -> PathBuf {
-    let root = std::env::var_os("MINIMAX_STUDIO_DATA_ROOT")
+    let root = std::env::var_os("YUE_STUDIO_DATA_ROOT")
         .map(PathBuf::from)
         .or_else(crate::studio_data_root)
         .unwrap_or_else(std::env::temp_dir);

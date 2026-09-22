@@ -1956,15 +1956,15 @@ async fn restart_engine(state: &AppState) -> Result<(), String> {
 /// Where the packaged or developer-built `mm-server` lives. Every value is an
 /// explicit override or a documented default; nothing is downloaded here.
 fn engine_bundle_root() -> PathBuf {
-    env::var_os("MINIMAX_MM_SERVER_ROOT")
+    env::var_os("YUE_ENGINE_ROOT")
         .map(PathBuf::from)
-        .or_else(|| env::var_os("MINIMAX_MM_SERVER_BIN").map(PathBuf::from).and_then(|path| path.parent().map(std::path::Path::to_path_buf)))
+        .or_else(|| env::var_os("YUE_ENGINE_BIN").map(PathBuf::from).and_then(|path| path.parent().map(std::path::Path::to_path_buf)))
         .or_else(|| std::env::current_exe().ok().and_then(|path| path.parent().map(|parent| parent.join("resources").join("minimaxmusic-cpp"))))
         .unwrap_or_else(|| PathBuf::from("resources/minimaxmusic-cpp"))
 }
 
 fn engine_location(options: EngineOptions) -> music_engine::mm_server::MmServerLocation {
-    let configured_executable = env::var_os("MINIMAX_MM_SERVER_BIN").map(PathBuf::from);
+    let configured_executable = env::var_os("YUE_ENGINE_BIN").map(PathBuf::from);
     let bundle_root = engine_bundle_root();
     music_engine::mm_server::MmServerLocation {
         bundle_root,
@@ -1973,14 +1973,14 @@ fn engine_location(options: EngineOptions) -> music_engine::mm_server::MmServerL
         // inside the engine bundle: pointing the service at a developer build
         // of mm-server used to leave it looking for models next to the binary
         // and failing with "models root is not a directory".
-        configured_models_root: env::var_os("MINIMAX_MUSIC_MODELS_ROOT")
+        configured_models_root: env::var_os("YUE_MODELS_ROOT")
             .map(PathBuf::from)
             .or_else(|| {
                 let managed = studio_data_root()?.join("models").join(model_manager::ENGINE_ID);
                 managed.is_dir().then_some(managed)
             }),
-        host: env::var("MINIMAX_MM_SERVER_HOST").ok(),
-        port: env::var("MINIMAX_MM_SERVER_PORT").ok().and_then(|value| value.parse().ok()),
+        host: env::var("YUE_ENGINE_HOST").ok(),
+        port: env::var("YUE_ENGINE_PORT").ok().and_then(|value| value.parse().ok()),
         options: options.to_engine(),
     }
 }
@@ -2288,13 +2288,13 @@ async fn create_openrouter_completion(
 /// The loopback port the studio serves on. Overridable for development, so a
 /// second instance can run beside a released one.
 fn listen_port() -> u16 {
-    env::var("MINIMAX_STUDIO_PORT").ok().and_then(|value| value.parse().ok()).unwrap_or(8765)
+    env::var("YUE_STUDIO_PORT").ok().and_then(|value| value.parse().ok()).unwrap_or(8791)
 }
 
 fn chrono_like_timestamp() -> String { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|value| value.as_secs().to_string()).unwrap_or_default() }
 
 fn studio_settings_path() -> PathBuf {
-    env::var_os("MINIMAX_STUDIO_SETTINGS_PATH")
+    env::var_os("YUE_STUDIO_SETTINGS_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(default_studio_settings_path)
 }
@@ -2308,7 +2308,7 @@ fn default_studio_settings_path() -> PathBuf {
 /// Single per-user directory for every piece of Studio runtime data: settings,
 /// library, media and locally stored provider credentials.
 pub fn studio_data_root() -> Option<PathBuf> {
-    if let Some(root) = env::var_os("MINIMAX_STUDIO_DATA_ROOT") {
+    if let Some(root) = env::var_os("YUE_STUDIO_DATA_ROOT") {
         return Some(PathBuf::from(root));
     }
 
@@ -4140,8 +4140,8 @@ async fn local_music_model_catalog(
 
 impl MmServerClient {
     fn from_environment() -> Self {
-        let base_url = env::var("MINIMAX_MUSIC_CPP_BASE_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:8086".into())
+        let base_url = env::var("YUE_ENGINE_BASE_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:18087".into())
             .trim_end_matches('/')
             .to_owned();
         Self {

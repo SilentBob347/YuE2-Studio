@@ -1,7 +1,7 @@
 /**
  * Studio API surface.
  *
- * Everything the desktop app talks to is the native Rust server on :8765.
+ * Everything the desktop app talks to is the native Rust server on :8791.
  * There is deliberately no HTTP client for accounts, feeds, comments or the
  * retired ACE Node service: a route that does not exist must not be reachable
  * from the UI at all.

@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/ServeurpersoCom/yue2.cpp.git",
+  "commit": "ea07706f4958a9594f4ef1dd185e5ce1b5ab1175",
+  "license": "MIT",
+  "build": {
+    "windows": "buildcuda.cmd",
+    "output": "build/Release/yue-server.exe"
+  }
+}

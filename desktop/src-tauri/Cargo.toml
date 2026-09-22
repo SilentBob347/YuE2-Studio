@@ -1,12 +1,12 @@
 [package]
-name = "minimax-music3-studio-desktop"
+name = "yue2-studio-desktop"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Native Tauri shell for MiniMax Music3 Studio"
+description = "Native Tauri shell for YuE2 Studio"
 
 [lib]
-name = "minimax_music3_studio_desktop"
+name = "yue2_studio_desktop"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

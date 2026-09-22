@@ -12,7 +12,7 @@
  * dev server, and from a plain browser tab.
  */
 
-const DEFAULT_BASE = 'http://127.0.0.1:8765';
+const DEFAULT_BASE = 'http://127.0.0.1:8791';
 
 /** Paths owned by the studio service; everything else is left untouched. */
 const SERVICE_PREFIXES = ['/v1/', '/setup/', '/engine/', '/health'];
@@ -21,7 +21,7 @@ function resolveBase(): string {
   const override = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_STUDIO_API_BASE;
   if (override) return override.replace(/\/$/, '');
   // Already served by the service itself: keep requests same-origin.
-  if (typeof location !== 'undefined' && location.port === '8765') return '';
+  if (typeof location !== 'undefined' && location.port === '8791') return '';
   return DEFAULT_BASE;
 }
 

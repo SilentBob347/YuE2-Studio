@@ -258,7 +258,7 @@ mod live {
     /// read - so this is where that would show.
     #[test]
     fn decoding_a_real_track_gives_whisper_something_to_read() {
-        let Some(track) = std::env::var_os("MM3_TEST_TRACK").map(std::path::PathBuf::from) else { return };
+        let Some(track) = std::env::var_os("YUE_TEST_TRACK").map(std::path::PathBuf::from) else { return };
         let output = std::env::temp_dir().join("mm3-decode-check.wav");
         write_wav16k_mono(&track, &output).expect("decode the track");
         let size = std::fs::metadata(&output).expect("the wav exists").len();

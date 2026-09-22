@@ -1600,7 +1600,7 @@ mod live_recognition {
     /// finished installation still refuse to run.
     #[test]
     fn recognising_a_real_track_end_to_end() {
-        let (Some(root), Some(track)) = (std::env::var_os("MM3_DATA_ROOT"), std::env::var_os("MM3_TEST_TRACK")) else { return };
+        let (Some(root), Some(track)) = (std::env::var_os("YUE_DATA_ROOT"), std::env::var_os("YUE_TEST_TRACK")) else { return };
         let sync = LyricsSync::new(std::path::Path::new(&root));
         let config = LyricsSyncConfig {
             enabled: true,

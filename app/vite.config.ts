@@ -10,19 +10,19 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       proxy: {
         '/v1': {
-          target: 'http://127.0.0.1:8765',
+          target: 'http://127.0.0.1:8791',
           changeOrigin: true,
         },
         '/setup': {
-          target: 'http://127.0.0.1:8765',
+          target: 'http://127.0.0.1:8791',
           changeOrigin: true,
         },
         '/engine': {
-          target: 'http://127.0.0.1:8765',
+          target: 'http://127.0.0.1:8791',
           changeOrigin: true,
         },
         '/health': {
-          target: 'http://127.0.0.1:8765',
+          target: 'http://127.0.0.1:8791',
           changeOrigin: true,
         },
         // There is deliberately no proxy for the retired ACE Node service:

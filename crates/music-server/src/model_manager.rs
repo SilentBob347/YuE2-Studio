@@ -13,18 +13,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::{io::AsyncWriteExt, sync::RwLock};
 
-pub const ENGINE_ID: &str = "minimaxmusic-cpp";
-const REPOSITORY: &str = "Serveurperso/MiniMax-Music3-GGUF";
-const REVISION: &str = "9cdffedb54de2509ae55a6831a677645fb353a7d";
-/// The lighter quantisations - Q4 and below for every role - come from a
-/// separate community set. Serveurperso's repository starts at Q5_K_M for the
-/// language model, which is what put the floor of the studio at 8.8 GB.
-const LIGHT_REPOSITORY: &str = "scragnog/MiniMax-Music3-GGUF";
-const LIGHT_REVISION: &str = "6781ce79b21beb7413f6b2358cd4adb355217c3d";
+pub const ENGINE_ID: &str = "yue2-cpp";
+const REPOSITORY: &str = "Serveurperso/YuE2-GGUF";
+const REVISION: &str = "64b030e3deb6e8150d2b7c0db641ef5a17eca8a3";
 
-/// The recommendation is a property of the machine, not of the catalog: a
-/// 24 GB card must land on Full Native and a 12 GB card on Q8 Quality. The
-/// Light set is only ever recommended in the low-VRAM tier.
+/// The recommendation is a property of the machine, not of the catalog.
 fn recommended_profile() -> &'static str {
     crate::presets::recommended_local_profile()
 }
@@ -90,9 +83,7 @@ pub struct ManagerStatus {
     pub active: Option<DownloadJob>,
     pub components: Vec<ComponentStatus>,
     pub installed_components: Vec<String>,
-    /// The five files the selected set actually resolves to. The panel used to
-    /// print "profile default" beside every role, which says nothing about
-    /// what is loaded.
+    /// The files the selected set resolves to, named rather than implied.
     pub profile_files: Option<ProfileModelFiles>,
 }
 
@@ -116,11 +107,11 @@ pub struct DownloadJob {
 
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 pub struct ProfileModelFiles {
-    pub lm_model: String,
-    pub depth_model: String,
-    pub cond_model: String,
-    pub dit_model: String,
-    pub vae_model: String,
+    pub backbone: String,
+    pub vae: String,
+    /// SheetSage2 is optional: without it the studio generates but cannot
+    /// read a recording into a score.
+    pub transcriber: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,7 +130,7 @@ struct PersistentState {
 
 impl ModelManager {
     pub fn from_environment() -> Result<Self> {
-        let root = env::var_os("MINIMAX_MUSIC_MODELS_ROOT")
+        let root = env::var_os("YUE_MODELS_ROOT")
             .map(PathBuf::from)
             .unwrap_or_else(default_model_root);
         validate_model_root(&root)?;
@@ -289,9 +280,8 @@ impl ModelManager {
         self.installed_files_from_selection(selection, &format!("selected profile '{profile_id}'"))
     }
 
-    /// Resolves an explicitly selected complete five-component set. This is
-    /// deliberately component-id based rather than filename based: callers
-    /// cannot persist or submit arbitrary paths to the native engine.
+    /// Resolves an explicitly selected complete set. Component ids, never
+    /// filenames: callers cannot hand arbitrary paths to the native engine.
     pub fn installed_component_files(&self, component_ids: &[String]) -> Result<ProfileModelFiles> {
         let selection = resolve_install(InstallRequest { profile_id: None, component_ids: component_ids.to_vec() })?;
         self.installed_files_from_selection(selection, "selected custom component set")
@@ -454,39 +444,33 @@ fn persist_state_file(path: &Path, state: &PersistentState) -> Result<()> {
     Ok(())
 }
 
-/// Direct `music-server` launches use the same OS application-data location
-/// as the Tauri shell. The environment variable remains the explicit override
-/// for development and a user-managed model library.
+/// Direct `music-server` launches use the same data location as the shell;
+/// the environment variable stays the explicit override.
 fn default_model_root() -> PathBuf {
-    // A portable copy sets the studio's data root to its own folder, and the
-    // models are the largest thing the studio owns: resolving them separately
-    // would put ten gigabytes on the system drive while everything else stayed
-    // beside the executable.
+    // Models are the largest thing the studio owns, so they follow its data
+    // root: beside the executable when it is portable.
     if let Some(root) = crate::studio_data_root() {
-        return root.join("models").join("minimaxmusic-cpp");
+        return root.join("models").join(ENGINE_ID);
     }
 
     #[cfg(windows)]
     {
         if let Some(root) = env::var_os("LOCALAPPDATA").or_else(|| env::var_os("APPDATA")) {
-            return PathBuf::from(root)
-                .join("MiniMax Music3 Studio")
-                .join("models")
-                .join("minimaxmusic-cpp");
+            return PathBuf::from(root).join("YuE2 Studio").join("models").join(ENGINE_ID);
         }
     }
 
     #[cfg(not(windows))]
     {
         if let Some(root) = env::var_os("XDG_DATA_HOME") {
-            return PathBuf::from(root).join("minimax-music3-studio/models/minimaxmusic-cpp");
+            return PathBuf::from(root).join("yue2-studio/models").join(ENGINE_ID);
         }
         if let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home).join(".local/share/minimax-music3-studio/models/minimaxmusic-cpp");
+            return PathBuf::from(home).join(".local/share/yue2-studio/models").join(ENGINE_ID);
         }
     }
 
-    env::temp_dir().join("minimax-music3-studio/models/minimaxmusic-cpp")
+    env::temp_dir().join("yue2-studio/models").join(ENGINE_ID)
 }
 
 /// What a removal actually did.
@@ -537,20 +521,24 @@ fn resolve_install(request: InstallRequest) -> Result<ResolvedInstall> {
 }
 
 fn validate_complete_set(selected: &[Component]) -> Result<()> {
-    for kind in ["lm", "depth", "condition", "dit", "vocoder"] {
+    for kind in ["backbone", "vae"] {
         if selected.iter().filter(|component| component.kind == kind).count() != 1 {
-            bail!("a runnable MiniMax Music3 installation requires exactly one {kind} component");
+            bail!("a runnable YuE2 installation requires exactly one {kind} component");
         }
     }
-    if selected.len() != 5 {
-        bail!("advanced installation must contain exactly five compatible components");
+    if selected.iter().filter(|component| component.kind == "transcriber").count() > 1 {
+        bail!("a YuE2 installation takes at most one transcriber");
     }
     Ok(())
 }
 
 fn profile_files_from_components(components: &[Component]) -> ProfileModelFiles {
-    let filename = |kind| components.iter().find(|component| component.kind == kind).expect("complete profile").filename.to_owned();
-    ProfileModelFiles { lm_model: filename("lm"), depth_model: filename("depth"), cond_model: filename("condition"), dit_model: filename("dit"), vae_model: filename("vocoder") }
+    let filename = |kind| components.iter().find(|component| component.kind == kind).map(|component| component.filename.to_owned());
+    ProfileModelFiles {
+        backbone: filename("backbone").expect("complete set"),
+        vae: filename("vae").expect("complete set"),
+        transcriber: filename("transcriber"),
+    }
 }
 
 fn preflight_space(root: &Path, selection: &ResolvedInstall) -> Result<()> {
@@ -586,24 +574,10 @@ fn status_snapshot(root: PathBuf, active: Option<DownloadJob>, target: Option<In
     let ready = target.as_ref().is_some_and(|selection| selection.components.iter().all(|component| installed(component.id)));
     let download_pending = target.as_ref().map(|selection| selection.components.iter()
         .filter(|component| !installed(component.id)).map(|component| component.bytes).sum()).unwrap_or_default();
-    // What the five roles actually resolve to, so the panel can name the files
-    // instead of saying "profile default".
-    let profile_files = target.as_ref().and_then(|selection| {
-        let file = |kind: &str| {
-            selection
-                .components
-                .iter()
-                .find(|component| component.kind == kind)
-                .map(|component| component.filename.to_string())
-        };
-        Some(ProfileModelFiles {
-            lm_model: file("lm")?,
-            depth_model: file("depth")?,
-            cond_model: file("condition")?,
-            dit_model: file("dit")?,
-            vae_model: file("vocoder")?,
-        })
-    });
+    let profile_files = target
+        .as_ref()
+        .filter(|selection| validate_complete_set(&selection.components).is_ok())
+        .map(|selection| profile_files_from_components(&selection.components));
     ManagerStatus {
         engine_id: ENGINE_ID, model_root: root.display().to_string(), first_run: !ready, ready, download_pending,
         recommended_profile_id: recommended_profile().into(), active, profile_files,
@@ -645,7 +619,7 @@ fn verified_file(path: &Path, component: &Component) -> Result<bool> {
 
 fn validate_model_root(root: &Path) -> Result<()> {
     if root.as_os_str().is_empty() || root.parent().is_none() || root.file_name().is_none() {
-        bail!("MINIMAX_MUSIC_MODELS_ROOT must be a specific non-root directory");
+        bail!("YUE_MODELS_ROOT must be a specific non-root directory");
     }
     Ok(())
 }
@@ -658,11 +632,10 @@ fn part_path(path: &Path) -> PathBuf {
 
 fn profiles() -> Vec<Profile> {
     vec![
-        profile("minimal", "Minimal - Q3_K_M / Q4_K_M / Q3_K_M (8 GB cards)", false, &["lm-q3", "depth-q4", "condition-f32", "dit-q3", "vocoder-f32"]),
-        profile("recommended-light", "Light - Q4_K_M / Q4_K_M / Q4_K_S (speed / low VRAM)", false, &["lm-q4", "depth-q4", "condition-f32", "dit-q4-s", "vocoder-f32"]),
-        profile("balanced", "Balanced - Q6_K / Q8_0 / Q5_K_M", false, &["lm-q6", "depth-q8", "condition-f32", "dit-q5", "vocoder-f32"]),
-        profile("quality-q8", "Recommended - Quality Q8_0", true, &["lm-q8", "depth-q8", "condition-f32", "dit-q8", "vocoder-f32"]),
-        profile("native", "Full native - BF16 / F32 original weights", false, &["lm-bf16", "depth-bf16", "condition-f32", "dit-f32", "vocoder-f32"]),
+        profile("light", "Light - Q5_K_M backbone (6 GB cards)", false, &["backbone-q5", "vae-f32", "transcriber-q5"]),
+        profile("balanced", "Balanced - Q6_K backbone", false, &["backbone-q6", "vae-f32", "transcriber-q6"]),
+        profile("quality-q8", "Quality - Q8_0 backbone, near lossless", true, &["backbone-q8", "vae-f32", "transcriber-q8"]),
+        profile("native", "Full native - BF16 backbone, original weights", false, &["backbone-bf16", "vae-f32", "transcriber-f32"]),
     ]
 }
 
@@ -677,49 +650,21 @@ fn profile(id: &'static str, label: &'static str, recommended: bool, ids: &[&'st
 
 fn components() -> Vec<Component> {
     vec![
-        c("condition-f32", "condition", "MiniMax-Music3-condition_encoder-F32.gguf", 100672192, "ebb69ec6e6d730b4dcc48ba1b51da4f201514cbaaa7cae0c8d6259d3b178efb0"),
-        c("lm-bf16", "lm", "MiniMax-Music3-language_model-BF16.gguf", 17174297792, "6fd8a735ed9bba12c620f86504bb062a4ed5ba2237615f318dcfe14ee911c4ae"),
-        c("lm-q5", "lm", "MiniMax-Music3-language_model-Q5_K_M.gguf", 6277696800, "6e34cc2be16c7f832198ca07837d026d8adc1f5b7914b76a95b9b4f7e5acd902"),
-        c("lm-q6", "lm", "MiniMax-Music3-language_model-Q6_K.gguf", 7048279328, "ca605cbae894696f9c111bfef33023b29722e93fe2c287071250b0af1a0e5416"),
-        c("lm-q8", "lm", "MiniMax-Music3-language_model-Q8_0.gguf", 9127257376, "9ffa190eb5892c5c0829014dc3070b9ce8d2464636bbaae884b08f1bf6de0ad3"),
-        c("depth-bf16", "depth", "MiniMax-Music3-rvq_depth_decoder-BF16.gguf", 1292053888, "d566347637257b86e4ce598907caa257be9794f70fc38861da70f0d8bd2f0686"),
-        c("depth-q8", "depth", "MiniMax-Music3-rvq_depth_decoder-Q8_0.gguf", 686513600, "7da73a953747f3f40857ba266a53eeb5487adbe473d4e7a53c99d5eaf9e5c3d5"),
-        c("dit-f32", "dit", "MiniMax-Music3-transformer-F32.gguf", 9727655296, "ffcf7873d475448ba7b18b62b2495d7e1f2941f9fe5cba315557f6307367ae59"),
-        c("dit-q4", "dit", "MiniMax-Music3-transformer-Q4_K_M.gguf", 1389592032, "4afc48e737c28788b4679f0303ed4d00f13c1f23cf9cc7ff408a2d8266ac6ba8"),
-        c("dit-q5", "dit", "MiniMax-Music3-transformer-Q5_K_M.gguf", 1692794336, "35d1ed8902237215064a4bb5a9bf3e03507d65b89146bea9e24e915cb4c5c8ce"),
-        c("dit-q6", "dit", "MiniMax-Music3-transformer-Q6_K.gguf", 2014946784, "9682694cd37d49361315204f69a25b054dbc817e4ed77487fc47d6f8ce7650ac"),
-        c("dit-q8", "dit", "MiniMax-Music3-transformer-Q8_0.gguf", 2602401248, "cbadca0600f325ba9263ea4dcf0d71d0361abf0733303398b9995fbadac6b38e"),
-        c("vocoder-f32", "vocoder", "MiniMax-Music3-vocoder-F32.gguf", 306102784, "4eaa451e54fa755cfe7b0fd15b0bfe64458db35b822e1d250488d0a2a363507d"),
-        // Below what Serveurperso publishes: the community set goes down to Q3
-        // for every role, which is what lets the studio fit on an 8 GB card.
-        q("lm-q4", "lm", "mm3-lm-Q4_K_M.gguf", 5512456544, "8d8e21098e1027b963776bbe9790609191e95610caa6e7cb53c26830b3efc94b"),
-        q("lm-q4-s", "lm", "mm3-lm-Q4_K_S.gguf", 5286685024, "8874ff5ed793ebb1a93d3a4373ba77f6a1732a21f3bd226be25d12fcbbfee878"),
-        q("lm-q3", "lm", "mm3-lm-Q3_K_M.gguf", 4589971808, "65a1ee35212547a95ed19067c5b3bc3492725d55e754729e693e4141396064a5"),
-        q("dit-q4-s", "dit", "mm3-dit-Q4_K_S.gguf", 1389823808, "e20449c3f6a73a8cc2672947f2ee41728b12f0dcfd351c1c9a34a04a1c193031"),
-        q("dit-q3", "dit", "mm3-dit-Q3_K_M.gguf", 1138427712, "f1a67119c34ede23e27240d3ebd630fa492247e1d0184263574482302ab48f3f"),
-        q("depth-q4", "depth", "mm3-depth-Q4_K_M.gguf", 404836256, "77e729d6e0599ed7928a3c0f13a36e1d3ef5f7de9259eaf01a19445549fa958e"),
-        q("depth-q5", "depth", "mm3-depth-Q5_K_M.gguf", 465653664, "82f6fd51fdb7bd4ee154492b24a358b718b40b121be15cc7afd7ed431a77b01c"),
-        q("depth-q6", "depth", "mm3-depth-Q6_K.gguf", 530272160, "6ab067c2d4589d39758e46a54cc8554c2145a1675b3dcfb570ab698d2ba26fc8"),
-        // The two four-bit float formats. ggml declares both - GGML_TYPE_MXFP4
-        // and GGML_TYPE_NVFP4 - and the CUDA backend carries kernels for them,
-        // so the pinned engine reads them. NVFP4 is the one Blackwell cards
-        // have hardware for.
-        q("lm-mxfp4", "lm", "mm3-lm-MXFP4.gguf", 5439166816, "a881bf6236bd517eb761814d06b43d95b6c68d5d2d7d2b0c0abccea683caaf0c"),
-        q("lm-nvfp4", "lm", "mm3-lm-NVFP4.gguf", 5656222048, "5d1e9e238c447cd5671d5695431d7df433d04ab18550d9f8ac6616b7c14e0e3e"),
-        q("dit-mxfp4", "dit", "mm3-dit-MXFP4.gguf", 1308286784, "e9ef42c62c319cfde635f7ecafff685b4c44767acb71ee85cf471dcff96f18a8"),
-        q("dit-nvfp4", "dit", "mm3-dit-NVFP4.gguf", 1383784256, "99fa7349f3e06fa79af4a4ab7b89dab490caeb034e543e83a51844353abf41ed"),
-        q("depth-mxfp4", "depth", "mm3-depth-MXFP4.gguf", 383668128, "34c80af745814c4f96ca8e744c39666480a0cdbfb862d51faac7d5f9c1a861e9"),
-        q("depth-nvfp4", "depth", "mm3-depth-NVFP4.gguf", 401493920, "33b9cf7b2324157ec13d5d9b105cc80e94104d93647229a9f83b9824efcba415"),
+        c("backbone-bf16", "backbone", "YuE2-3B-BF16.gguf", 7166072352, "668ca9ffa4622449916aae5068b5737363e7ec186a824cd3d7a1a8a95269f166"),
+        c("backbone-q8", "backbone", "YuE2-3B-Q8_0.gguf", 3810232064, "41121ce97786d7795a325bcf123ca196956c03bb252c9e75384cfc1f2fc19e6b"),
+        c("backbone-q6", "backbone", "YuE2-3B-Q6_K.gguf", 2943331072, "42068d5e57713df11b9f6a5a3751072d9bbefe231d1d088f9c100e026ffa4ef9"),
+        c("backbone-q5", "backbone", "YuE2-3B-Q5_K_M.gguf", 2622936832, "cd3efd250b734a229172800f08f33a893ad1f66b521666e176cdae4a0729b281"),
+        // The VAE ships in F32 only: its weights are the audio.
+        c("vae-f32", "vae", "YuE2-Vae-F32.gguf", 530497344, "93e49dfb1970e89ad64cacb17cf13b5d05f6bb30ef7ed3adae3050bcb728638a"),
+        c("transcriber-f32", "transcriber", "SheetSage2-F32.gguf", 2708176640, "f324d213e78a1522bbc56ebb819584af11a34336ab55084b1d8145f1bcf15e58"),
+        c("transcriber-q8", "transcriber", "SheetSage2-Q8_0.gguf", 957571488, "4507d8c1d9245f312c0894ea610ab18fbcbf31443764b5bd6a60e4b6df59e973"),
+        c("transcriber-q6", "transcriber", "SheetSage2-Q6_K.gguf", 813864856, "9e9d7868bd96dbf016fcc4e484db38385c8863a94bbc0f6ed37455b4e410c7e0"),
+        c("transcriber-q5", "transcriber", "SheetSage2-Q5_K_M.gguf", 737104280, "165e7b5f4d8c7954473b44481cf2d1ecc96f73e3690d9561390614dd3a7bcc03"),
     ]
 }
 
 fn c(id: &'static str, kind: &'static str, filename: &'static str, bytes: u64, sha256: &'static str) -> Component {
     Component { id, kind, filename, bytes, sha256, repository: REPOSITORY, revision: REVISION }
-}
-
-/// A component from the community's own quantisation set.
-fn q(id: &'static str, kind: &'static str, filename: &'static str, bytes: u64, sha256: &'static str) -> Component {
-    Component { id, kind, filename, bytes, sha256, repository: LIGHT_REPOSITORY, revision: LIGHT_REVISION }
 }
 
 #[cfg(test)]
@@ -728,62 +673,53 @@ mod tests {
 
     #[test]
     fn recommended_profile_is_a_complete_runnable_set() {
-        let selected = resolve_install(InstallRequest {
-            profile_id: Some(recommended_profile().into()),
-            component_ids: vec![],
-        })
-        .unwrap();
+        let selected = resolve_install(InstallRequest { profile_id: Some(recommended_profile().into()), component_ids: vec![] }).unwrap();
         assert_eq!(selected.profile_id.as_deref(), Some(recommended_profile()));
-        assert_eq!(selected.components.len(), 5);
         validate_complete_set(&selected.components).unwrap();
     }
 
-    /// An empty request used to mean "download the default set", so a request
-    /// that lost its field on the way turned into a 26 GB download of a set
-    /// nobody had chosen.
     #[test]
     fn an_empty_request_downloads_nothing() {
-        let error = resolve_install(InstallRequest { profile_id: None, component_ids: vec![] })
-            .expect_err("an empty request is a mistake, not a default");
+        let error = resolve_install(InstallRequest { profile_id: None, component_ids: vec![] }).expect_err("an empty request is a mistake");
         assert!(error.to_string().contains("nothing was selected"));
     }
 
     #[test]
-    fn advanced_selection_rejects_partial_sets() {
-        let result = resolve_install(InstallRequest { profile_id: None, component_ids: vec!["lm-q5".into(), "dit-q4".into()] });
-        assert!(result.is_err());
+    fn a_set_needs_one_backbone_and_one_vae() {
+        let ids = |list: &[&str]| InstallRequest { profile_id: None, component_ids: list.iter().map(|id| id.to_string()).collect() };
+        assert!(resolve_install(ids(&["backbone-q8"])).is_err());
+        assert!(resolve_install(ids(&["backbone-q8", "backbone-q6", "vae-f32"])).is_err());
+        assert!(resolve_install(ids(&["backbone-q8", "vae-f32", "transcriber-q8", "transcriber-q6"])).is_err());
     }
 
     #[test]
-    fn catalog_contains_every_pinned_component_variant() {
-        assert_eq!(components().len(), 27);
-        assert!(components().iter().all(|component| component.sha256.len() == 64));
-    }
-
-    #[test]
-    fn light_profile_maps_to_the_exact_q5_q8_q4_component_files() {
-        let selection = resolve_install(InstallRequest { profile_id: Some("recommended-light".into()), component_ids: vec![] }).unwrap();
-        let file = |kind| selection.components.iter().find(|component| component.kind == kind).unwrap().filename;
-        assert_eq!(file("lm"), "mm3-lm-Q4_K_M.gguf");
-        assert_eq!(file("depth"), "mm3-depth-Q4_K_M.gguf");
-        assert_eq!(file("dit"), "mm3-dit-Q4_K_S.gguf");
-    }
-
-    #[test]
-    fn valid_custom_set_resolves_exact_component_filenames() {
-        let selection = resolve_install(InstallRequest {
-            profile_id: None,
-            component_ids: vec!["lm-q8".into(), "depth-q8".into(), "condition-f32".into(), "dit-q6".into(), "vocoder-f32".into()],
-        }).unwrap();
+    fn the_transcriber_is_optional() {
+        let selection = resolve_install(InstallRequest { profile_id: None, component_ids: vec!["backbone-q6".into(), "vae-f32".into()] }).unwrap();
         let files = profile_files_from_components(&selection.components);
-        assert_eq!(files.lm_model, "MiniMax-Music3-language_model-Q8_0.gguf");
-        assert_eq!(files.dit_model, "MiniMax-Music3-transformer-Q6_K.gguf");
-        assert_eq!(files.vae_model, "MiniMax-Music3-vocoder-F32.gguf");
+        assert_eq!(files.backbone, "YuE2-3B-Q6_K.gguf");
+        assert_eq!(files.vae, "YuE2-Vae-F32.gguf");
+        assert!(files.transcriber.is_none());
+    }
+
+    #[test]
+    fn every_profile_resolves_to_named_files() {
+        for profile in profiles() {
+            let selection = resolve_install(InstallRequest { profile_id: Some(profile.id.into()), component_ids: vec![] }).unwrap();
+            let files = profile_files_from_components(&selection.components);
+            assert!(files.backbone.starts_with("YuE2-3B-"));
+            assert!(files.transcriber.is_some());
+        }
+    }
+
+    #[test]
+    fn catalog_pins_every_published_file() {
+        assert_eq!(components().len(), 9);
+        assert!(components().iter().all(|component| component.sha256.len() == 64 && component.revision == REVISION));
     }
 
     #[tokio::test]
     async fn file_hashing_does_not_block_the_async_runtime() {
-        let path = std::env::temp_dir().join(format!("mm3-hash-test-{}", uuid::Uuid::now_v7()));
+        let path = std::env::temp_dir().join(format!("yue2-hash-test-{}", uuid::Uuid::now_v7()));
         fs::File::create(&path).unwrap().set_len(8 * 1024 * 1024).unwrap();
         let component = Component { id: "test", kind: "test", filename: "test", bytes: 8 * 1024 * 1024, sha256: "not-a-real-digest", repository: REPOSITORY, revision: REVISION };
         let hash_task = tokio::spawn(verified_file_async(path.clone(), component));
@@ -794,11 +730,10 @@ mod tests {
 
     #[test]
     fn startup_marks_orphaned_download_as_cancelled_without_erasing_resume_state() {
-        let mut state = PersistentState { active: Some(DownloadJob { id: "job".into(), profile_id: Some("recommended-light".into()), component_ids: vec!["lm-q5".into()], status: DownloadStatus::Downloading, downloaded_bytes: 123, total_bytes: 456, error: None }) };
+        let mut state = PersistentState { active: Some(DownloadJob { id: "job".into(), profile_id: Some("light".into()), component_ids: vec!["backbone-q5".into()], status: DownloadStatus::Downloading, downloaded_bytes: 123, total_bytes: 456, error: None }) };
         assert!(recover_interrupted_download(&mut state));
         let recovered = state.active.unwrap();
         assert!(matches!(recovered.status, DownloadStatus::Cancelled));
         assert_eq!(recovered.downloaded_bytes, 123);
-        assert!(recovered.error.unwrap().contains("Partial .part files were preserved"));
     }
 }

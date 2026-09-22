@@ -1,7 +1,6 @@
 pub mod process;
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -39,7 +38,7 @@ impl Default for StudioConfiguration {
                 ProviderSelection {
                     capability: Capability::MusicGeneration,
                     mode: ExecutionMode::Local,
-                    local_engine: Some("minimaxmusic-cpp".into()),
+                    local_engine: Some("yue2-cpp".into()),
                     cloud_model: None,
                 },
                 // Speech-to-text and prompt enhancement have no installed local
@@ -67,15 +66,6 @@ impl Default for StudioConfiguration {
             ],
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MusicGenerationRequest {
-    pub id: Uuid,
-    pub caption: String,
-    pub lyrics: String,
-    pub duration_seconds: u16,
-    pub seed: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
