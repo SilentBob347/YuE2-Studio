@@ -286,6 +286,17 @@ fn hide_own_console_window() {
     }
 }
 
+/// Tauri's own WebView2 switches, followed by whatever the user set in the
+/// variable WebView2 documents for exactly this.
+#[cfg(windows)]
+fn webview_browser_arguments() -> String {
+    let own = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
+    match std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") {
+        Ok(extra) if !extra.trim().is_empty() => format!("{own} {}", extra.trim()),
+        _ => own.to_owned(),
+    }
+}
+
 pub fn run() {
     #[cfg(windows)]
     hide_own_console_window();
@@ -340,6 +351,23 @@ pub fn run() {
 
     builder
         .setup(move |app| {
+            // The window is built here rather than from the configuration so
+            // the WebView2 arguments can be extended: Tauri passes its own, and
+            // WebView2 then ignores WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+            // entirely, so a remote-debugging port or any other documented
+            // switch set by the user would silently never arrive.
+            let window_config = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == "main")
+                .cloned()
+                .expect("the main window is declared in tauri.conf.json");
+            let window = tauri::WebviewWindowBuilder::from_config(app.handle(), &window_config)?;
+            #[cfg(windows)]
+            let window = window.additional_browser_args(&webview_browser_arguments());
+            window.build()?;
             if updater_configured {
                 spawn_update_check(app.handle().clone(), is_portable());
             }
