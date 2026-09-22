@@ -1,42 +1,38 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { karaokeReason } from '../services/karaoke';
-import { AlertTriangle, ChevronDown, CircleAlert, Dices, FolderOpen, Loader2, RotateCcw, Save, Sparkles, Square, Trash2, Wand2, Settings2 } from 'lucide-react';
-import type { Music3Request, Song } from '../types';
+import {
+  AlertTriangle, AudioLines, ChevronDown, CircleAlert, Dices, Eye, EyeOff, FileMusic, FolderOpen, Loader2,
+  Music2, RotateCcw, Save, Sparkles, Square, Upload, Wand2, Settings2, X,
+} from 'lucide-react';
+import type { Song, YueCot, YueOutputFormat, YueRequest, YueSampling } from '../types';
 import { useI18n } from '../context/I18nContext';
-import { joinCaption, randomExample, splitCaption } from '../services/examples';
+import { EXAMPLES, randomExample } from '../services/examples';
+import { ScoreView } from './ScoreView';
+import { transcribe } from '../services/transcription';
 
 /**
- * The Music3 request form.
+ * The YuE2 request form.
  *
- * The layout follows what every implementation of this model agrees on — the
- * reference client shipped with the engine, ComfyUI's native nodes and MiniMax's
- * own model card:
- *
- *   * the request is grouped by pipeline stage: prompt, LM configuration, flow
- *     matching, post-processing, components;
- *   * a field left empty means "use the engine default", which is shown as the
- *     placeholder, so the submitted request stays sparse;
- *   * the caption is a structured document — Global Metadata, Vocal Details,
- *     Arrangement — not a one-line prompt, and the lyrics carry bracketed
- *     section tags;
- *   * duration is a *maximum*: the model may end the song earlier.
- *
- * Writing that caption from a one-line idea is a text-LLM job, which this model
- * cannot do — its own language model emits audio codes. Every project solves it
- * with a separate text model, so the assistant here is an optional extra, never
- * the primary way in.
+ * Grouped the way the engine works, stage by stage: the prompt (style and
+ * lyrics), the score the autoregressive half plans before it writes codes, the
+ * semantic stage, and the acoustic side (flow matching and output). A field
+ * left empty is the engine's own default, shown as the placeholder, so the
+ * request stays sparse exactly like the engine's reference client sends it.
  */
 
 interface CreatePanelProps {
-  onGenerate: (request: Music3Request & { _tempId?: string }) => void;
+  onGenerate: (request: YueRequest & { _tempId?: string }) => void;
   isGenerating: boolean;
   activeJobCount?: number;
   initialData?: { song: Song; timestamp: number } | null;
 }
 
-type EngineDefaults = Partial<Record<string, number | string>>;
+type EngineDefaults = Partial<Record<string, unknown>> & {
+  abc_sampling?: YueSampling;
+  semantic_sampling?: YueSampling;
+};
 
-type ProfileFiles = { lm_model: string; depth_model: string; cond_model: string; dit_model: string; vae_model: string };
+type ProfileFiles = { backbone: string; vae: string; transcriber?: string | null };
 
 type SetupStatus = {
   ready?: boolean;
@@ -50,27 +46,37 @@ type SetupStatus = {
 
 type EngineCatalog = {
   defaults?: EngineDefaults;
-  models?: { lm?: string[]; depth?: string[]; cond?: string[]; dit?: string[]; vae?: string[] };
+  transcriber?: string | null;
+  max_batch?: number;
+  version?: string;
 };
 
-/** 9000 acoustic frames at 25 frames per second, as the model card states. */
+type SamplingText = Record<keyof YueSampling, string>;
+
+/** 9000 semantic frames at 25 per second, the stage's own budget. */
 const MAX_DURATION_SECONDS = 360;
-/** The tokenized caption + lyrics budget the engine enforces at submit. */
-const MAX_PROMPT_TOKENS = 5000;
+const SAMPLING_KEYS: (keyof YueSampling)[] = ['temperature', 'top_p', 'top_k', 'repetition_penalty', 'penalty_window', 'min_tokens', 'max_tokens'];
+/** A quoted chord symbol in ABC: "Am", "F/C", "G7". */
+const CHORD_SYMBOL = /"[^"\n]+"/;
+const CHORD_SYMBOLS = /"[^"\n]+"/g;
+const SECTION_TAGS = ['[Intro]', '[Verse 1]', '[Pre-Chorus]', '[Chorus]', '[Verse 2]', '[Bridge]', '[Instrumental Break]', '[Outro]'];
 
 const PROFILE_LABEL: Record<string, string> = {
-  native: 'Full Native',
-  'quality-q8': 'Q8 Quality',
-  balanced: 'Balanced',
-  'recommended-light': 'Light',
+  native: 'Full Native · BF16',
+  'quality-q8': 'Quality · Q8_0',
+  balanced: 'Balanced · Q6_K',
+  light: 'Light · Q5_K_M',
 };
 
 const CONTROL =
   'w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 outline-none transition-colors focus:border-pink-500 disabled:opacity-50 dark:border-white/10 dark:bg-black/25 dark:text-white';
-const CARD = 'rounded-xl border border-zinc-200 bg-white p-4 dark:border-white/5 dark:bg-suno-card';
 const LABEL = 'mb-1.5 block text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400';
-const TOOL =
-  'inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-600 transition-colors hover:border-pink-400 hover:text-pink-600 dark:border-white/10 dark:text-zinc-300';
+const ICON =
+  'rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-black dark:hover:bg-white/10 dark:hover:text-white disabled:opacity-40';
+const CHIP =
+  'rounded-md border border-zinc-200 px-2 py-0.5 font-mono text-[10px] text-zinc-500 transition-colors hover:border-pink-400 hover:text-pink-600 dark:border-white/10 dark:text-zinc-400';
+
+const emptySampling = (): SamplingText => ({ temperature: '', top_p: '', top_k: '', repetition_penalty: '', penalty_window: '', min_tokens: '', max_tokens: '' });
 
 const numberOrUndefined = (value: string): number | undefined => {
   const trimmed = value.trim();
@@ -79,11 +85,24 @@ const numberOrUndefined = (value: string): number | undefined => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
-/** A rough token estimate, only used to warn before the engine rejects it. */
-const estimateTokens = (text: string) => Math.ceil(text.trim().length / 3.6);
+const asText = (value: unknown) => (typeof value === 'number' || typeof value === 'string' ? String(value) : '');
 
-const ICON =
-  'rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-black dark:hover:bg-white/10 dark:hover:text-white disabled:opacity-40';
+const samplingFrom = (text: SamplingText): YueSampling | undefined => {
+  const preset: YueSampling = {};
+  for (const key of SAMPLING_KEYS) {
+    const value = numberOrUndefined(text[key]);
+    if (value !== undefined) preset[key] = value;
+  }
+  return Object.keys(preset).length ? preset : undefined;
+};
+
+const samplingText = (value: unknown): SamplingText => {
+  const text = emptySampling();
+  if (value && typeof value === 'object') {
+    for (const key of SAMPLING_KEYS) text[key] = asText((value as Record<string, unknown>)[key]);
+  }
+  return text;
+};
 
 const Field: React.FC<{ label: string; hint?: string; children: React.ReactNode }> = ({ label, hint, children }) => (
   <label className="block">
@@ -93,7 +112,6 @@ const Field: React.FC<{ label: string; hint?: string; children: React.ReactNode 
   </label>
 );
 
-/** The toggle used throughout the studio: a real switch, not a tick box. */
 const Switch: React.FC<{ checked: boolean; onChange: (value: boolean) => void; label: string; hint?: string }> = ({ checked, onChange, label, hint }) => (
   <div className="flex items-center justify-between gap-3">
     <div className="min-w-0">
@@ -104,6 +122,7 @@ const Switch: React.FC<{ checked: boolean; onChange: (value: boolean) => void; l
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={label}
       onClick={() => onChange(!checked)}
       className={`relative h-5 w-10 shrink-0 rounded-full transition-colors ${checked ? 'bg-pink-500' : 'bg-zinc-300 dark:bg-zinc-600'}`}
     >
@@ -112,12 +131,7 @@ const Switch: React.FC<{ checked: boolean; onChange: (value: boolean) => void; l
   </div>
 );
 
-/**
- * A number you drag, with the value beside it.
- *
- * An empty field means "engine default", and that has to survive: the slider
- * shows the default until it is touched, and the reset action puts it back.
- */
+/** A number you drag. Empty means "engine default", shown until touched. */
 const SliderRow: React.FC<{
   label: string;
   value: string;
@@ -128,7 +142,8 @@ const SliderRow: React.FC<{
   suffix?: string;
   onChange: (value: string) => void;
   disabled?: boolean;
-}> = ({ label, value, fallback, min, max, step, suffix, onChange, disabled }) => {
+  format?: (value: number) => string;
+}> = ({ label, value, fallback, min, max, step, suffix, onChange, disabled, format }) => {
   const current = value.trim() === '' ? fallback : Number(value);
   const shown = Number.isFinite(current) ? current : fallback;
   const decimals = step < 1 ? String(step).split('.')[1]?.length ?? 1 : 0;
@@ -137,8 +152,8 @@ const SliderRow: React.FC<{
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</span>
         <span className="text-[11px] tabular-nums text-zinc-600 dark:text-zinc-300">
-          {shown.toFixed(decimals)}{suffix ?? ''}
-          {value.trim() === '' && <span className="ml-1 text-zinc-400">·</span>}
+          {format ? format(shown) : `${shown.toFixed(decimals)}${suffix ?? ''}`}
+          {value.trim() === '' && <span className="ml-1 text-zinc-400" title="engine default">·</span>}
         </span>
       </div>
       <input
@@ -148,6 +163,7 @@ const SliderRow: React.FC<{
         step={step}
         value={shown}
         disabled={disabled}
+        aria-label={label}
         onChange={event => onChange(event.target.value)}
         className="mt-1.5 h-1 w-full cursor-pointer accent-pink-500"
       />
@@ -155,7 +171,16 @@ const SliderRow: React.FC<{
   );
 };
 
-/** A group inside Advanced: what this stage is, and what these knobs do. */
+const Card: React.FC<{ title: string; icon?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode }> = ({ title, icon, actions, children }) => (
+  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-white/5 dark:bg-suno-card">
+    <div className="flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-2 dark:border-white/5 dark:bg-white/5">
+      <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{icon}{title}</span>
+      {actions && <div className="flex items-center gap-1">{actions}</div>}
+    </div>
+    <div className="p-3">{children}</div>
+  </div>
+);
+
 const Stage: React.FC<{ title: string; hint: string; children: React.ReactNode }> = ({ title, hint, children }) => (
   <section>
     <h4 className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{title}</h4>
@@ -164,18 +189,6 @@ const Stage: React.FC<{ title: string; hint: string; children: React.ReactNode }
   </section>
 );
 
-/** A card with a titled header strip, the way the panels are built elsewhere. */
-const Card: React.FC<{ title: string; actions?: React.ReactNode; children: React.ReactNode }> = ({ title, actions, children }) => (
-  <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-white/5 dark:bg-suno-card">
-    <div className="flex items-center justify-between gap-2 border-b border-zinc-100 bg-zinc-50 px-3 py-2 dark:border-white/5 dark:bg-white/5">
-      <span className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{title}</span>
-      {actions && <div className="flex items-center gap-1">{actions}</div>}
-    </div>
-    <div className="p-3">{children}</div>
-  </div>
-);
-
-/** Grows with its content: these sections run to a thousand characters. */
 const AutoTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement> & { minRows?: number }> = ({ minRows = 3, value, ...rest }) => {
   const node = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
@@ -187,85 +200,102 @@ const AutoTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement> &
   return <textarea ref={node} value={value} rows={minRows} {...rest} />;
 };
 
-/** One labelled section of the structured caption. */
-const Pane: React.FC<{
-  label: string;
-  value: string;
-  placeholder: string;
-  onChange: (value: string) => void;
-}> = ({ label, value, placeholder, onChange }) => (
-  <div className="rounded-lg border border-zinc-200 bg-zinc-50 focus-within:border-pink-500 dark:border-white/10 dark:bg-black/25">
-    <div className="flex items-center justify-between px-2.5 pt-2">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</span>
-      <span className="text-[10px] tabular-nums text-zinc-400">{value.length}</span>
+/** Seven knobs of one autoregressive stage, each defaulting to the checkpoint. */
+const SamplingGrid: React.FC<{ value: SamplingText; defaults?: YueSampling; onChange: (value: SamplingText) => void; t: (key: never) => string }> = ({ value, defaults, onChange, t }) => {
+  const label: Record<keyof YueSampling, string> = {
+    temperature: t('samplingTemperature' as never),
+    top_p: 'Top P',
+    top_k: 'Top K',
+    repetition_penalty: t('samplingRepetitionPenalty' as never),
+    penalty_window: t('samplingPenaltyWindow' as never),
+    min_tokens: t('samplingMinTokens' as never),
+    max_tokens: t('samplingMaxTokens' as never),
+  };
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {SAMPLING_KEYS.map(key => (
+        <Field key={key} label={label[key]}>
+          <input
+            value={value[key]}
+            onChange={event => onChange({ ...value, [key]: event.target.value })}
+            placeholder={asText(defaults?.[key])}
+            inputMode="decimal"
+            className={CONTROL}
+          />
+        </Field>
+      ))}
     </div>
-    <AutoTextarea
-      value={value}
-      minRows={4}
-      onChange={event => onChange(event.target.value)}
-      placeholder={placeholder}
-      className="w-full resize-none bg-transparent px-2.5 pb-2.5 pt-1 text-sm leading-5 text-zinc-900 outline-none dark:text-white"
-    />
-  </div>
-);
+  );
+};
 
 export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerating, activeJobCount = 0, initialData }) => {
   const { t } = useI18n();
+  const tt = t as unknown as (key: string) => string;
 
   const [name, setName] = useState('');
-  // The caption is three labelled panes, the way the model was trained and the
-  // way MiniMax's own demo edits it.
-  const [globalMetadata, setGlobalMetadata] = useState('');
-  const [vocalDetails, setVocalDetails] = useState('');
-  const [arrangement, setArrangement] = useState('');
+  const [style, setStyle] = useState('');
   const [lyrics, setLyrics] = useState('');
   const [instrumental, setInstrumental] = useState(false);
-  const [randomizeSeed, setRandomizeSeed] = useState(true);
+  const [abc, setAbc] = useState('');
+  const [cot, setCot] = useState<YueCot | ''>('');
+  const [showNotation, setShowNotation] = useState(true);
 
-  // Parameters are strings so an empty field can mean "engine default".
+  // Strings, so an empty field can mean "engine default".
   const [duration, setDuration] = useState('');
-  const [lmSeed, setLmSeed] = useState('');
-  const [lmCfg, setLmCfg] = useState('');
-  const [lmTopK, setLmTopK] = useState('');
-  const [audioCodes, setAudioCodes] = useState('');
-  const [steps, setSteps] = useState('');
-  const [ditCfg, setDitCfg] = useState('');
+  const [lmBatch, setLmBatch] = useState('');
   const [synthBatch, setSynthBatch] = useState('');
-  // A track read back into the codes the engine renders from. Nothing here
-  // changes a request until a file is chosen: no file, no field, and the
-  // studio behaves exactly as it did before this existed.
+  const [steps, setSteps] = useState('');
+  const [cfgScale, setCfgScale] = useState('');
+  const [randomizeSeed, setRandomizeSeed] = useState(true);
+  const [lmSeed, setLmSeed] = useState('');
   const [seed, setSeed] = useState('');
+  const [semanticTokens, setSemanticTokens] = useState('');
+  const [abcSampling, setAbcSampling] = useState<SamplingText>(emptySampling);
+  const [semanticSampling, setSemanticSampling] = useState<SamplingText>(emptySampling);
   const [peakClip, setPeakClip] = useState('');
-  // Quality first, not "quick listen": the engine's own defaults are mp3 at
-  // 128 kbps, which throws away what the vocoder produced.
+  // The engine default of 128 kbps throws away what the VAE produced.
   const [mp3Bitrate, setMp3Bitrate] = useState('320');
-  // The engine's own default is 128 kbps, which throws away what the vocoder
-  // produced; 320 is the top the encoder offers and costs a few megabytes.
-  const [format, setFormat] = useState<Music3Request['output_format']>('mp3');
-  const [models, setModels] = useState<Record<string, string>>({});
+  const [format, setFormat] = useState<YueOutputFormat>('mp3');
 
   const [setup, setSetup] = useState<SetupStatus | null>(null);
-  // "Nobody answered" and "the engine says it has no models" are different
-  // problems, and telling the user to download 12 GB when the service is simply
-  // down is a lie.
   const [serviceDown, setServiceDown] = useState(false);
   const [catalog, setCatalog] = useState<EngineCatalog | null>(null);
   const [assistantReady, setAssistantReady] = useState(false);
-  const [assisting, setAssisting] = useState<'all' | 'lyrics' | 'prompt' | null>(null);
-  // What the assistant is doing right now, and what it has written so far.
+  const [assisting, setAssisting] = useState<'all' | 'lyrics' | 'style' | 'score' | null>(null);
   const [assistStage, setAssistStage] = useState<string | null>(null);
   const [assistModel, setAssistModel] = useState<string | null>(null);
   const [assistDraft, setAssistDraft] = useState('');
-  // What the assistant said the cover should show; sent with the request so the
-  // automatic cover uses it instead of the generic template.
+  const [assistSeconds, setAssistSeconds] = useState(0);
   const [coverPrompt, setCoverPrompt] = useState('');
-  // What the studio is doing to finished tracks: covers and karaoke timings run
-  // after generation, and used to run in complete silence.
   const [activity, setActivity] = useState<Array<{ song_id: string; title: string; kind: string; state: string; detail?: string }>>([]);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [mode, setMode] = useState<'studio' | 'simple' | 'cover'>('studio');
+  const [assistInstruction, setAssistInstruction] = useState('');
+  const [scoreInstruction, setScoreInstruction] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [examplesOpen, setExamplesOpen] = useState(false);
+  const [transcribing, setTranscribing] = useState<string | null>(null);
+  const [coverSource, setCoverSource] = useState<string>('');
+  const [coverMelodyOnly, setCoverMelodyOnly] = useState(true);
+  const promptFile = useRef<HTMLInputElement | null>(null);
+  const scoreFile = useRef<HTMLInputElement | null>(null);
+  const audioFile = useRef<HTMLInputElement | null>(null);
+  const lyricsBox = useRef<HTMLTextAreaElement | null>(null);
+
+  const ready = setup?.ready === true && setup?.engine_ready === true;
+  const defaults: EngineDefaults = catalog?.defaults ?? {};
+  const placeholder = (key: string) => asText(defaults[key]);
+  const maxBatch = Math.max(1, catalog?.max_batch ?? setup?.effective_max_batch ?? 1);
+  const transcriberReady = Boolean(catalog?.transcriber);
+  const effectiveCot: YueCot = cot || (defaults.cot as YueCot) || 'full';
+
+  const profileLabel = useMemo(() => {
+    if (setup?.selected_component_ids?.length) return t('customSet');
+    const id = setup?.selected_profile_id;
+    return id ? PROFILE_LABEL[id] ?? id : '—';
+  }, [setup, t]);
+
   useEffect(() => {
-    // Finished work changes the track on screen - a cover appears, timings
-    // arrive - so the library is told to reread it rather than waiting for the
-    // next thing that happens to reload the list.
     let finished = '';
     const read = () => void fetch('/v1/activity')
       .then(response => response.json())
@@ -274,7 +304,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         const done = entries.filter(entry => entry.state === 'done').map(entry => `${entry.song_id}:${entry.kind}`).join(',');
         if (done !== finished) {
           finished = done;
-          window.dispatchEvent(new CustomEvent('mm3:library-changed'));
+          window.dispatchEvent(new CustomEvent('yue:library-changed'));
         }
         setActivity(entries);
       })
@@ -283,26 +313,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     const timer = window.setInterval(read, 2000);
     return () => window.clearInterval(timer);
   }, []);
-  // A local model takes tens of seconds to answer. A spinner alone reads as a
-  // hung button, so the panel counts the seconds out loud.
-  const [assistSeconds, setAssistSeconds] = useState(0);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [mode, setMode] = useState<'simple' | 'studio'>('studio');
-  const [assistInstruction, setAssistInstruction] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const promptFile = useRef<HTMLInputElement | null>(null);
-
-  const ready = setup?.ready === true && setup?.engine_ready === true;
-  const defaults = catalog?.defaults ?? {};
-  const placeholder = (key: string) => (defaults[key] === undefined ? '' : String(defaults[key]));
-  const caption = joinCaption(globalMetadata, vocalDetails, arrangement);
-  const promptTokens = estimateTokens(caption) + estimateTokens(lyrics);
-
-  const profileLabel = useMemo(() => {
-    if (setup?.selected_component_ids?.length) return t('customSet');
-    const id = setup?.selected_profile_id;
-    return id ? PROFILE_LABEL[id] ?? id : '—';
-  }, [setup, t]);
 
   useEffect(() => {
     if (!assisting) return;
@@ -331,139 +341,205 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       .then(response => (response.ok ? response.json() : Promise.reject(new Error())))
       .then((body: { catalog?: EngineCatalog }) => setCatalog(body.catalog ?? null))
       .catch(() => setCatalog(null));
-  }, [setup?.engine_ready]);
+  }, [setup?.engine_ready, setup?.selected_profile_id]);
 
   useEffect(() => {
-    // Asked once at mount, the panel kept saying "configure the assistant"
-    // long after the assistant had been configured. It is asked again while it
-    // is not ready, and whenever the settings are closed.
     const read = () => void fetch('/v1/assistant/status')
       .then(response => (response.ok ? response.json() : Promise.reject(new Error())))
       .then((body: { available?: boolean }) => setAssistantReady(body.available === true))
       .catch(() => setAssistantReady(false));
     read();
     const timer = window.setInterval(read, 5000);
-    window.addEventListener('mm3:settings-changed', read);
+    window.addEventListener('yue:settings-changed', read);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener('mm3:settings-changed', read);
+      window.removeEventListener('yue:settings-changed', read);
     };
+  }, []);
+
+  /** Fills the form from a stored request: a reused track, a file, an example. */
+  const applyRequest = useCallback((request: Record<string, unknown>, title?: string) => {
+    if (title !== undefined) setName(title);
+    if (typeof request.style === 'string') setStyle(request.style);
+    if (typeof request.lyrics === 'string') setLyrics(request.lyrics);
+    setInstrumental(false);
+    setAbc(typeof request.abc === 'string' ? request.abc.trimEnd() : '');
+    setCot(request.cot === 'full' || request.cot === 'melody' || request.cot === 'off' ? request.cot : '');
+    setDuration(asText(request.duration ?? request.duration_seconds));
+    setLmBatch('');
+    setSynthBatch('');
+    setSteps(asText(request.steps));
+    setCfgScale(typeof request.cfg_scale === 'number' && request.cfg_scale >= 0 ? String(request.cfg_scale) : '');
+    const storedLmSeed = asText(request.lm_seed);
+    const storedSeed = asText(request.seed);
+    setLmSeed(storedLmSeed === '-1' ? '' : storedLmSeed);
+    setSeed(storedSeed === '-1' ? '' : storedSeed);
+    setRandomizeSeed(!(storedLmSeed && storedLmSeed !== '-1'));
+    setSemanticTokens(typeof request.semantic_tokens === 'string' ? request.semantic_tokens : '');
+    setAbcSampling(samplingText(request.abc_sampling));
+    setSemanticSampling(samplingText(request.semantic_sampling));
+    setPeakClip(asText(request.peak_clip));
+    if (request.mp3_bitrate !== undefined) setMp3Bitrate(asText(request.mp3_bitrate));
+    if (typeof request.output_format === 'string') setFormat(request.output_format as YueOutputFormat);
+    setError(null);
   }, []);
 
   useEffect(() => {
     if (!initialData?.song) return;
     const song = initialData.song;
-    setName(song.title || '');
-    const panes = splitCaption(song.style || '');
-    setGlobalMetadata(panes.globalMetadata);
-    setVocalDetails(panes.vocalDetails);
-    setArrangement(panes.arrangement);
-    setLyrics(song.lyrics || '');
-    const settings = (song.generationParams ?? {}) as EngineDefaults;
-    const asString = (key: string) => (settings[key] === undefined ? '' : String(settings[key]));
-    setDuration(asString('duration'));
-    setSteps(asString('steps'));
-    setLmCfg(asString('lm_cfg'));
-    setLmTopK(asString('lm_top_k'));
-    setDitCfg(asString('dit_cfg'));
-    setPeakClip(asString('peak_clip'));
-    setMp3Bitrate(asString('mp3_bitrate'));
-    if (typeof settings.output_format === 'string') setFormat(settings.output_format as Music3Request['output_format']);
-  }, [initialData]);
+    const settings = (song.generationParams ?? {}) as Record<string, unknown>;
+    applyRequest({ style: song.style, lyrics: song.lyrics, ...settings }, song.title || '');
+    setMode('studio');
+  }, [initialData, applyRequest]);
+
+  // A library track to cover: its recording becomes the score, and its own
+  // words start the lyric sheet when there is nothing there yet.
+  useEffect(() => {
+    const onTranscribe = (event: Event) => {
+      const detail = (event as CustomEvent<{ song: Song; melodyOnly: boolean }>).detail;
+      if (!detail?.song) return;
+      setCoverSource(detail.song.title);
+      if (detail.song.lyrics?.trim()) setLyrics(current => (current.trim() ? current : detail.song.lyrics));
+      setMode('cover');
+      void runTranscription({ songId: detail.song.id }, detail.melodyOnly);
+    };
+    window.addEventListener('yue:transcribe-song', onTranscribe);
+    return () => window.removeEventListener('yue:transcribe-song', onTranscribe);
+  });
+
+  // A score arriving from elsewhere: a transcribed library track, an edited plan.
+  useEffect(() => {
+    const onScore = (event: Event) => {
+      const detail = (event as CustomEvent<{ abc: string; cot?: YueCot; lyrics?: string; title?: string }>).detail;
+      if (!detail?.abc) return;
+      setAbc(detail.abc.trimEnd());
+      if (detail.cot) setCot(detail.cot);
+      if (detail.lyrics && !lyrics.trim()) setLyrics(detail.lyrics);
+      if (detail.title && !name.trim()) setName(detail.title);
+      setSemanticTokens('');
+      setMode('studio');
+    };
+    window.addEventListener('yue:use-score', onScore);
+    return () => window.removeEventListener('yue:use-score', onScore);
+  }, [lyrics, name]);
 
   const reset = () => {
-    setName(''); setGlobalMetadata(''); setVocalDetails(''); setArrangement(''); setLyrics(''); setInstrumental(false);
-    setDuration(''); setLmBatch(''); setLmSeed(''); setLmCfg(''); setLmTopK(''); setAudioCodes('');
-    setSteps(''); setDitCfg(''); setSynthBatch(''); setSeed('');
-    setPeakClip(''); setMp3Bitrate('320'); setFormat('mp3'); setModels({});
+    setName(''); setStyle(''); setLyrics(''); setInstrumental(false); setAbc(''); setCot('');
+    resetParameters();
+    setCoverPrompt('');
     setError(null);
   };
 
-  /** One of the official demo prompts bundled with the engine. */
-  const loadExample = () => {
-    const example = randomExample();
-    setGlobalMetadata(example.globalMetadata);
-    setVocalDetails(example.vocalDetails);
-    setArrangement(example.arrangement);
-    setLyrics(example.lyrics);
-    setDuration(String(example.duration));
-    setName(example.name);
-    setError(null);
+  const resetParameters = () => {
+    setDuration(''); setLmBatch(''); setSynthBatch(''); setSteps(''); setCfgScale('');
+    setRandomizeSeed(true); setLmSeed(''); setSeed(''); setSemanticTokens('');
+    setAbcSampling(emptySampling()); setSemanticSampling(emptySampling());
+    setPeakClip(''); setMp3Bitrate('320'); setFormat('mp3');
   };
 
-  const buildRequest = () => {
-    const request: Music3Request & { title?: string; cover_prompt?: string; audio_codes?: string; models?: Record<string, string> } = {
-      caption: caption.trim(),
-      // An instrumental has no words, whatever is still sitting in the box. The
-      // lyrics of the previous track stayed there, went to the engine and came
-      // back sung: the switch said instrumental and the track had vocals.
+  const loadExample = (id?: string) => {
+    const example = (id && EXAMPLES.find(entry => entry.id === id)) || randomExample();
+    applyRequest({ style: example.style, lyrics: example.lyrics, cot: example.cot, abc: example.abc }, example.title);
+    setExamplesOpen(false);
+  };
+
+  const buildRequest = (): YueRequest => {
+    const request: YueRequest = {
+      style: style.trim(),
+      // An instrumental has no words, whatever is still sitting in the box.
       lyrics: instrumental ? '' : lyrics.replace(/\r\n?/g, '\n').trim(),
-      duration_seconds: Math.min(numberOrUndefined(duration) ?? 60, MAX_DURATION_SECONDS),
-      steps: numberOrUndefined(steps) ?? 30,
-      seed: randomizeSeed ? undefined : numberOrUndefined(seed),
-      lm_seed: numberOrUndefined(lmSeed),
-      lm_cfg: numberOrUndefined(lmCfg) ?? 1.5,
-      lm_top_k: numberOrUndefined(lmTopK) ?? 50,
-      lm_batch_size: 1,
-      synth_batch_size: numberOrUndefined(synthBatch) ?? 1,
-      dit_cfg: numberOrUndefined(ditCfg) ?? 1.7,
-      peak_clip: numberOrUndefined(peakClip) ?? 10,
       output_format: format,
-      mp3_bitrate: numberOrUndefined(mp3Bitrate) ?? 128,
     };
+    if (abc.trim() && effectiveCot !== 'off') request.abc = abc.trim();
+    if (cot) request.cot = cot;
+    const durationValue = numberOrUndefined(duration);
+    if (durationValue !== undefined) request.duration_seconds = Math.min(Math.max(durationValue, 1), MAX_DURATION_SECONDS);
+    const lmBatchValue = numberOrUndefined(lmBatch);
+    if (lmBatchValue !== undefined) request.lm_batch_size = lmBatchValue;
+    const synthBatchValue = numberOrUndefined(synthBatch);
+    if (synthBatchValue !== undefined) request.synth_batch_size = synthBatchValue;
+    const stepsValue = numberOrUndefined(steps);
+    if (stepsValue !== undefined) request.steps = stepsValue;
+    const cfgValue = numberOrUndefined(cfgScale);
+    if (cfgValue !== undefined) request.cfg_scale = cfgValue;
+    if (!randomizeSeed) {
+      const lmSeedValue = numberOrUndefined(lmSeed);
+      const seedValue = numberOrUndefined(seed);
+      if (lmSeedValue !== undefined) request.lm_seed = lmSeedValue;
+      if (seedValue !== undefined) request.seed = seedValue;
+    }
+    if (semanticTokens.trim()) request.semantic_tokens = semanticTokens.trim();
+    const abcPreset = samplingFrom(abcSampling);
+    if (abcPreset) request.abc_sampling = abcPreset;
+    const semanticPreset = samplingFrom(semanticSampling);
+    if (semanticPreset) request.semantic_sampling = semanticPreset;
+    const peakValue = numberOrUndefined(peakClip);
+    if (peakValue !== undefined) request.peak_clip = peakValue;
+    const bitrate = numberOrUndefined(mp3Bitrate);
+    if (bitrate !== undefined && format === 'mp3') request.mp3_bitrate = bitrate;
     if (name.trim()) request.title = name.trim();
     if (coverPrompt.trim()) request.cover_prompt = coverPrompt.trim();
-    if (audioCodes.trim()) request.audio_codes = audioCodes.trim();
-    if (Object.keys(models).length === 5) request.models = models;
     return request;
   };
 
-  const savePrompt = () => {
-    const request = buildRequest();
-    const blob = new Blob([JSON.stringify(request, null, 2)], { type: 'application/json' });
+  const download = (filename: string, text: string, type: string) => {
+    const blob = new Blob([text], { type });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `${(name.trim() || 'request').replace(/[\\/:*?"<>|]/g, '')}.json`;
+    link.download = filename;
     link.click();
     URL.revokeObjectURL(link.href);
   };
 
+  const safeName = () => (name.trim() || 'request').replace(/[\\/:*?"<>|]/g, '');
+
+  const savePrompt = () => download(`${safeName()}.json`, JSON.stringify(buildRequest(), null, 2), 'application/json');
+
   const openPrompt = async (file: File) => {
     try {
       const parsed = JSON.parse(await file.text()) as Record<string, unknown>;
-      const asString = (value: unknown) => (typeof value === 'number' || typeof value === 'string' ? String(value) : '');
-      if (typeof parsed.title === 'string') setName(parsed.title);
-      if (typeof parsed.caption === 'string') {
-        const panes = splitCaption(parsed.caption);
-        setGlobalMetadata(panes.globalMetadata);
-        setVocalDetails(panes.vocalDetails);
-        setArrangement(panes.arrangement);
-      }
-      if (typeof parsed.lyrics === 'string') setLyrics(parsed.lyrics);
-      setDuration(asString(parsed.duration ?? parsed.duration_seconds));
-      setSteps(asString(parsed.steps));
-      setLmCfg(asString(parsed.lm_cfg));
-      setLmTopK(asString(parsed.lm_top_k));
-      setLmSeed(asString(parsed.lm_seed));
-      setLmBatch(asString(parsed.lm_batch_size));
-      setDitCfg(asString(parsed.dit_cfg));
-      setSynthBatch(asString(parsed.synth_batch_size));
-      setSeed(asString(parsed.seed));
-      setPeakClip(asString(parsed.peak_clip));
-      setMp3Bitrate(asString(parsed.mp3_bitrate));
-      if (typeof parsed.audio_codes === 'string') setAudioCodes(parsed.audio_codes);
-      if (typeof parsed.output_format === 'string') setFormat(parsed.output_format as Music3Request['output_format']);
-      setError(null);
+      applyRequest(parsed, typeof parsed.title === 'string' ? parsed.title : file.name.replace(/\.json$/i, ''));
     } catch {
       setError(t('promptFileInvalid'));
     }
   };
 
-  /// Optional. Nothing here is required to use the model: the manual form is
-  /// the primary path, and the buttons stay disabled until a provider is set.
-  // A run in progress can be given up on. The request is a stream that can
-  // take minutes on a reasoning model, and without this the only way out of one
-  // that went quiet was to close the studio.
+  const openScore = async (file: File) => {
+    const text = await file.text();
+    if (!/K:/.test(text)) { setError(tt('scoreFileInvalid')); return; }
+    setAbc(text.trimEnd());
+    setError(null);
+  };
+
+  const insertTag = (tag: string) => {
+    const box = lyricsBox.current;
+    const at = box?.selectionStart ?? lyrics.length;
+    const before = lyrics.slice(0, at);
+    const after = lyrics.slice(at);
+    const prefix = before && !before.endsWith('\n\n') ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+    setLyrics(`${before}${prefix}${tag}\n${after}`);
+    window.requestAnimationFrame(() => box?.focus());
+  };
+
+  /** Reads a recording into a score with SheetSage2, for a cover. */
+  const runTranscription = async (source: { file?: File; songId?: string }, melodyOnly: boolean) => {
+    setError(null);
+    setTranscribing(source.file?.name ?? source.songId ?? '');
+    try {
+      const score = await transcribe(source, melodyOnly);
+      setAbc(score.trimEnd());
+      // The model card: covers take a melody-only score in melody mode.
+      setCot(melodyOnly ? 'melody' : 'full');
+      setSemanticTokens('');
+      setShowNotation(true);
+      setMode('studio');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setTranscribing(null);
+    }
+  };
+
   const assistRun = useRef<AbortController | null>(null);
   const stopAssistant = () => {
     assistRun.current?.abort();
@@ -472,7 +548,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setAssistStage(null);
     setAssistDraft('');
   };
-  const askAssistant = async (target: 'all' | 'lyrics' | 'prompt') => {
+
+  const askAssistant = async (target: 'all' | 'lyrics' | 'style' | 'score') => {
     if (!assistantReady || assisting) return;
     const run = new AbortController();
     assistRun.current = run;
@@ -482,19 +559,13 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       const payload = JSON.stringify({
         target,
         description: name.trim(),
-        instruction: assistInstruction.trim(),
+        instruction: (target === 'score' ? scoreInstruction : assistInstruction).trim(),
         lyrics: lyrics.trim(),
-        global_metadata: globalMetadata.trim(),
-        vocal_details: vocalDetails.trim(),
-        arrangement: arrangement.trim(),
-        duration_seconds: numberOrUndefined(duration) ?? 60,
+        style: style.trim(),
+        abc: abc.trim(),
+        duration_seconds: numberOrUndefined(duration) ?? 120,
         instrumental,
       });
-
-      // Watch the same request happen: the studio reports when it goes out,
-      // when the model starts answering, and then the text as it arrives. The
-      // draft appears in front of the user instead of after a minute of
-      // nothing.
       setAssistStage('preparing');
       setAssistDraft('');
       let streamed = '';
@@ -518,7 +589,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             carry = carry.slice(split + 2);
             split = carry.indexOf('\n\n');
             if (!frame.startsWith('data:')) continue;
-            let event: { stage?: string; delta?: string; text?: string; error?: string; model?: string };
+            let event: { stage?: string; delta?: string; error?: string; model?: string };
             try {
               event = JSON.parse(frame.slice(5).trim());
             } catch {
@@ -534,9 +605,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           }
         }
       }
-
-      // The stream shows the work; the plain call returns the finished fields,
-      // already split into the panes this form has.
       const response = await fetch('/v1/assistant/write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -545,24 +613,14 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.error || String(response.status));
       if (typeof body?.lyrics === 'string') setLyrics(body.lyrics);
-      if (typeof body?.global_metadata === 'string') setGlobalMetadata(body.global_metadata);
-      if (typeof body?.vocal_details === 'string') setVocalDetails(body.vocal_details);
-      if (typeof body?.arrangement === 'string') setArrangement(body.arrangement);
-      // The model has the words and the mood in front of it, so it names the
-      // track and says what its cover should show.
-      if (typeof body?.title === 'string' && body.title.trim()) setName(body.title.trim());
+      if (typeof body?.style === 'string') setStyle(body.style);
+      if (typeof body?.abc === 'string') setAbc(body.abc.trimEnd());
+      if (typeof body?.title === 'string' && body.title.trim() && target !== 'score') setName(body.title.trim());
       if (typeof body?.cover_prompt === 'string' && body.cover_prompt.trim()) setCoverPrompt(body.cover_prompt.trim());
-      // The assistant wrote the sections, so it knows how long they take; the
-      // form's 60 seconds is a default, not a decision anyone made.
-      if (typeof body?.duration_seconds === 'number' && body.duration_seconds >= 10) {
-        setDuration(String(Math.min(360, Math.round(body.duration_seconds))));
+      if (typeof body?.duration_seconds === 'number' && body.duration_seconds >= 10 && target === 'all') {
+        setDuration(String(Math.min(MAX_DURATION_SECONDS, Math.round(body.duration_seconds))));
       }
-      // The tab stays where it was. Switching to Studio showed what the
-      // assistant had written, but it moved the user off the screen they were
-      // working on to do it, and they can look for themselves.
     } catch (reason) {
-      // Giving up on a run is not an error to report back at the person who
-      // gave up on it.
       const cancelled = reason instanceof DOMException && reason.name === 'AbortError';
       if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -575,29 +633,19 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
 
   const submit = () => {
     if (!ready) { setError(t('downloadProfileFirst')); return; }
-    if (!caption.trim()) { setError(t('captionRequired')); return; }
-    if (!lyrics.trim()) { setError(t('lyricsRequired')); return; }
-    if (promptTokens > MAX_PROMPT_TOKENS) { setError(t('promptTooLong')); return; }
+    if (!style.trim() && !lyrics.trim() && !semanticTokens.trim()) { setError(tt('styleOrLyricsRequired')); return; }
     setError(null);
     onGenerate(buildRequest());
   };
 
-  const totalTracks = numberOrUndefined(synthBatch) ?? 1;
-  const roles: Array<{ key: string; label: string; options: string[] }> = [
-    { key: 'lm_model', label: 'LM', options: catalog?.models?.lm ?? [] },
-    { key: 'depth_model', label: 'Depth', options: catalog?.models?.depth ?? [] },
-    { key: 'cond_model', label: 'Cond', options: catalog?.models?.cond ?? [] },
-    { key: 'dit_model', label: 'DiT', options: catalog?.models?.dit ?? [] },
-    { key: 'vae_model', label: 'VAE', options: catalog?.models?.vae ?? [] },
-  ];
-
-  const resetParameters = () => {
-    setDuration(''); setLmBatch(''); setLmSeed(''); setLmCfg(''); setLmTopK(''); setAudioCodes('');
-    setSteps(''); setDitCfg(''); setSynthBatch(''); setSeed(''); setRandomizeSeed(true);
-    setPeakClip(''); setMp3Bitrate('320'); setFormat('mp3'); setModels({});
-  };
-
-  const overBudget = promptTokens > MAX_PROMPT_TOKENS;
+  const songs = numberOrUndefined(lmBatch) ?? 1;
+  const variations = numberOrUndefined(synthBatch) ?? 1;
+  const totalTracks = songs * variations;
+  const durationFallback = Number(defaults.duration ?? MAX_DURATION_SECONDS);
+  const formatDuration = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
+  const scoreDisabled = effectiveCot === 'off';
+  // The model card: melody mode does not strip chord symbols by itself.
+  const melodyWithChords = effectiveCot === 'melody' && CHORD_SYMBOL.test(abc);
 
   return (
     <section className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-zinc-50 text-zinc-900 dark:bg-suno-panel dark:text-white">
@@ -606,7 +654,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <h1 className="truncate text-base font-bold">{t('createMusic')}</h1>
-              <p className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">{t('localInference')}</p>
+              <p className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">{tt('localInferenceYue')}</p>
             </div>
             <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${ready ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300' : 'bg-amber-500/10 text-amber-700 dark:text-amber-300'}`}>
               <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${ready ? 'bg-emerald-500' : 'bg-amber-500'}`} />
@@ -626,15 +674,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             </div>
           )}
 
-          <div className="flex items-center rounded-lg border border-zinc-300 bg-zinc-200 p-1 dark:border-white/5 dark:bg-black/40">
-            {(['studio', 'simple'] as const).map(value => (
+          <div className="flex items-center rounded-lg border border-zinc-300 bg-zinc-200 p-1 dark:border-white/5 dark:bg-black/40" role="tablist">
+            {(['studio', 'cover', 'simple'] as const).map(value => (
               <button
                 key={value}
                 type="button"
+                role="tab"
+                aria-selected={mode === value}
                 onClick={() => setMode(value)}
                 className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${mode === value ? 'bg-white text-black shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'}`}
               >
-                {value === 'studio' ? t('studioMode') : t('simpleMode')}
+                {value === 'studio' ? t('studioMode') : value === 'cover' ? tt('coverMode') : t('simpleMode')}
               </button>
             ))}
           </div>
@@ -643,11 +693,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             <Card title={t('songIdea')}>
               <p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">{t('assistantNeedsModel')}</p>
               <p className="mt-2 text-[11px] leading-4 text-zinc-500">{t('assistantHint')}</p>
-              {/* Telling someone to go to Settings without a way to get there
-                  is half an instruction. */}
               <button
                 type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('mm3:open-settings', { detail: 'models' }))}
+                onClick={() => window.dispatchEvent(new CustomEvent('yue:open-settings', { detail: 'models' }))}
                 className="mt-3 inline-flex items-center gap-1 rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:border-pink-400 hover:text-pink-600 dark:border-white/15 dark:text-zinc-300"
               >
                 <Settings2 size={13} />
@@ -688,6 +736,49 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             </Card>
           )}
 
+          {mode === 'cover' && (
+            <Card title={tt('coverTitle')} icon={<AudioLines size={13} />}>
+              <p className="text-xs leading-5 text-zinc-600 dark:text-zinc-300">{tt('coverIntro')}</p>
+              <ol className="mt-3 space-y-1.5 text-[11px] leading-4 text-zinc-500">
+                <li><b className="text-zinc-700 dark:text-zinc-200">1.</b> {tt('coverStep1')}</li>
+                <li><b className="text-zinc-700 dark:text-zinc-200">2.</b> {tt('coverStep2')}</li>
+                <li><b className="text-zinc-700 dark:text-zinc-200">3.</b> {tt('coverStep3')}</li>
+              </ol>
+              <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-white/5">
+                <Switch checked={coverMelodyOnly} onChange={setCoverMelodyOnly} label={tt('coverMelodyOnly')} hint={tt('coverMelodyOnlyHint')} />
+              </div>
+              {!transcriberReady && (
+                <p className="mt-3 flex gap-1.5 rounded-lg bg-amber-500/10 p-2 text-[11px] leading-4 text-amber-700 dark:text-amber-300">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  {tt('transcriberMissing')}
+                </p>
+              )}
+              <input
+                ref={audioFile}
+                type="file"
+                accept="audio/*,.mp3,.wav,.flac,.ogg,.m4a"
+                className="hidden"
+                onChange={event => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) { setCoverSource(file.name); void runTranscription({ file }, coverMelodyOnly); }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => audioFile.current?.click()}
+                disabled={!transcriberReady || transcribing !== null}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-orange-500 to-pink-600 py-2.5 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+              >
+                {transcribing !== null ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {transcribing !== null ? `${tt('transcribing')} · ${transcribing}` : tt('coverPickRecording')}
+              </button>
+              <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('coverFromLibraryHint')}</p>
+              {coverSource && !transcribing && abc && (
+                <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-300">{tt('coverScoreReady')} · {coverSource}</p>
+              )}
+            </Card>
+          )}
 
           {activity.filter(entry => entry.state !== 'done').slice(-3).map(entry => (
             <div key={`${entry.song_id}-${entry.kind}`} className="rounded-xl border border-zinc-200 bg-white px-3 py-2 text-[11px] dark:border-white/10 dark:bg-suno-card">
@@ -709,13 +800,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wide">
                 <span className="flex items-center gap-1.5 text-pink-600 dark:text-pink-300">
                   <Loader2 size={12} className="animate-spin" />
-                  {assistStage === 'preparing' && t('assistStagePreparing')}
-                  {assistStage === 'sent' && t('assistStageSent')}
-                  {assistStage === 'writing' && t('assistStageWriting')}
-                  {assistStage === 'done' && t('assistStageDone')}
-                  {!assistStage && t('assistStagePreparing')}
+                  {assistStage === 'sent' ? t('assistStageSent') : assistStage === 'writing' ? t('assistStageWriting') : assistStage === 'done' ? t('assistStageDone') : t('assistStagePreparing')}
                 </span>
-                <span className="tabular-nums text-zinc-400">{assistSeconds} {t('secondsShort')}</span>
+                <span className="flex items-center gap-2">
+                  <span className="tabular-nums text-zinc-400">{assistSeconds} {t('secondsShort')}</span>
+                  <button type="button" onClick={stopAssistant} className={ICON} title={t('cancelDownload')}><X size={13} /></button>
+                </span>
               </div>
               {assistModel && <p className="mt-1 truncate text-[11px] text-zinc-500">{assistModel}</p>}
               {assistDraft && (
@@ -726,25 +816,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             </div>
           )}
 
-          {/* Only for the icon buttons in the card headers: the big button
-              already says it in words. */}
-          {(assisting === 'lyrics' || assisting === 'prompt') && (
-            <div className="flex items-center gap-2 rounded-xl border border-pink-500/30 bg-pink-500/10 px-3 py-2 text-xs text-pink-700 dark:text-pink-200">
-              <Loader2 size={14} className="animate-spin" />
-              <span>{t('assistantWriting')} · {assistSeconds} {t('secondsShort')}</span>
-            </div>
-          )}
-
           <Card
-            title={t('captionStructured')}
+            title={tt('styleCardTitle')}
+            icon={<Music2 size={13} />}
             actions={
               <>
                 {assistantReady && (
-                  <button type="button" onClick={() => void askAssistant('prompt')} disabled={assisting !== null} className={ICON} title={t('writeCaption')}>
-                    {assisting === 'prompt' ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} className="text-pink-500" />}
+                  <button type="button" onClick={() => void askAssistant('style')} disabled={assisting !== null} className={ICON} title={tt('writeStyle')}>
+                    {assisting === 'style' ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} className="text-pink-500" />}
                   </button>
                 )}
-                <button type="button" onClick={loadExample} className={ICON} title={t('examplePrompt')}><Dices size={14} /></button>
+                <button type="button" onClick={() => setExamplesOpen(open => !open)} className={ICON} title={t('examplePrompt')} aria-expanded={examplesOpen}><Dices size={14} /></button>
                 <button type="button" onClick={() => promptFile.current?.click()} className={ICON} title={t('openPrompt')}><FolderOpen size={14} /></button>
                 <button type="button" onClick={savePrompt} className={ICON} title={t('savePrompt')}><Save size={14} /></button>
                 <button type="button" onClick={reset} className={ICON} title={t('resetPrompt')}><RotateCcw size={14} /></button>
@@ -758,33 +840,50 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               </>
             }
           >
+            {examplesOpen && (
+              <div className="mb-3 rounded-lg border border-zinc-200 bg-zinc-50 p-2 dark:border-white/10 dark:bg-black/25">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">{tt('officialExamples')} · {EXAMPLES.length}</span>
+                  <button type="button" onClick={() => loadExample()} className="inline-flex items-center gap-1 text-[11px] font-semibold text-pink-600 hover:text-pink-500 dark:text-pink-300"><Dices size={12} />{tt('randomExample')}</button>
+                </div>
+                <div className="grid max-h-52 grid-cols-2 gap-1 overflow-y-auto custom-scrollbar">
+                  {EXAMPLES.map(example => (
+                    <button
+                      key={example.id}
+                      type="button"
+                      onClick={() => loadExample(example.id)}
+                      className="truncate rounded-md px-2 py-1 text-left text-[11px] text-zinc-600 transition-colors hover:bg-white hover:text-black dark:text-zinc-300 dark:hover:bg-white/10 dark:hover:text-white"
+                      title={example.style}
+                    >
+                      {example.cover && <span className="mr-1 rounded bg-pink-500/15 px-1 text-[9px] font-bold uppercase text-pink-600 dark:text-pink-300">{tt('coverBadge')}</span>}
+                      {example.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <input
               value={name}
               onChange={event => setName(event.target.value)}
               placeholder={t('untitled')}
+              aria-label={t('untitled')}
               className="w-full border-0 bg-transparent p-0 text-lg font-bold text-zinc-900 outline-none placeholder:text-zinc-300 dark:text-white dark:placeholder:text-zinc-600"
             />
-            <p className="mb-3 mt-1 text-[11px] leading-4 text-zinc-500">{t('captionStructuredHint')}</p>
-            <div className="mb-3 border-b border-zinc-100 pb-3 dark:border-white/5">
-              <Switch checked={instrumental} onChange={setInstrumental} label={t('instrumental')} hint={t('instrumentalHint')} />
-            </div>
-            <div className="space-y-2">
-              <Pane label={t('globalMetadata')} value={globalMetadata} onChange={setGlobalMetadata} placeholder={t('globalMetadataPlaceholder')} />
-              <Pane label={t('vocalDetails')} value={vocalDetails} onChange={setVocalDetails} placeholder={t('vocalDetailsPlaceholder')} />
-              <Pane label={t('arrangementSection')} value={arrangement} onChange={setArrangement} placeholder={t('arrangementPlaceholder')} />
-            </div>
+            <AutoTextarea
+              value={style}
+              minRows={3}
+              onChange={event => setStyle(event.target.value)}
+              placeholder={tt('stylePlaceholder')}
+              aria-label={tt('styleCardTitle')}
+              className={`${CONTROL} mt-3 resize-none leading-5`}
+            />
+            <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('styleHint')}</p>
           </Card>
 
           <Card
             title={t('lyrics')}
             actions={
               <>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums ${overBudget ? 'bg-rose-500/10 text-rose-600 dark:text-rose-300' : 'bg-zinc-200/70 text-zinc-500 dark:bg-white/10 dark:text-zinc-400'}`}
-                  title={`${t('promptBudget')} — ${t('caption')}: ${estimateTokens(caption)}, ${t('lyrics')}: ${estimateTokens(lyrics)}`}
-                >
-                  {t('promptBudgetShort')} {promptTokens} / {MAX_PROMPT_TOKENS}
-                </span>
                 {assistantReady && (
                   <button type="button" onClick={() => void askAssistant('lyrics')} disabled={assisting !== null} className={ICON} title={t('writeLyrics')}>
                     {assisting === 'lyrics' ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} className="text-pink-500" />}
@@ -794,15 +893,114 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               </>
             }
           >
+            <div className="mb-3 border-b border-zinc-100 pb-3 dark:border-white/5">
+              <Switch checked={instrumental} onChange={setInstrumental} label={t('instrumental')} hint={tt('instrumentalHintYue')} />
+            </div>
+            <div className="mb-2 flex flex-wrap gap-1">
+              {SECTION_TAGS.map(tag => (
+                <button key={tag} type="button" onClick={() => insertTag(tag)} disabled={instrumental} className={CHIP}>{tag}</button>
+              ))}
+            </div>
             <AutoTextarea
               value={lyrics}
               minRows={10}
               onChange={event => setLyrics(event.target.value)}
-              placeholder={'[intro]\n\n[verse]\n…\n\n[chorus]\n…'}
+              onFocus={event => { lyricsBox.current = event.currentTarget; }}
+              disabled={instrumental}
+              placeholder={'[Verse 1]\n…\n\n[Chorus]\n…'}
+              aria-label={t('lyrics')}
               className={`${CONTROL} resize-none font-mono text-xs leading-5`}
             />
-            <p className="mt-2 text-[11px] leading-4 text-zinc-500">{t('lyricsHint')}</p>
-            {overBudget && <p className="mt-1 text-[11px] leading-4 text-rose-600 dark:text-rose-300">{t('promptTooLong')}</p>}
+            <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('lyricsHintYue')}</p>
+          </Card>
+
+          <Card
+            title={tt('scoreCardTitle')}
+            icon={<FileMusic size={13} />}
+            actions={
+              <>
+                <button type="button" onClick={() => setShowNotation(value => !value)} className={ICON} title={showNotation ? tt('hideNotation') : tt('showNotation')}>
+                  {showNotation ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+                <button type="button" onClick={() => scoreFile.current?.click()} className={ICON} title={tt('openScore')}><FolderOpen size={14} /></button>
+                <button type="button" onClick={() => abc.trim() && download(`${safeName()}.abc`, `${abc.trim()}\n`, 'text/vnd.abc')} disabled={!abc.trim()} className={ICON} title={tt('saveScore')}><Save size={14} /></button>
+                <button type="button" onClick={() => setAbc('')} disabled={!abc} className={ICON} title={tt('clearScore')}><X size={14} /></button>
+                <input
+                  ref={scoreFile}
+                  type="file"
+                  accept=".abc,text/plain"
+                  className="hidden"
+                  onChange={event => { const file = event.target.files?.[0]; if (file) void openScore(file); event.target.value = ''; }}
+                />
+              </>
+            }
+          >
+            <div className="grid grid-cols-3 gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-black/30" role="radiogroup" aria-label={tt('cotMode')}>
+              {(['full', 'melody', 'off'] as const).map(value => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={effectiveCot === value}
+                  onClick={() => setCot(value)}
+                  className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition-all ${effectiveCot === value ? 'bg-white text-black shadow-sm dark:bg-zinc-700 dark:text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
+                >
+                  {tt(value === 'full' ? 'cotFull' : value === 'melody' ? 'cotMelody' : 'cotOff')}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-[11px] leading-4 text-zinc-500">
+              {tt(effectiveCot === 'full' ? 'cotFullHint' : effectiveCot === 'melody' ? 'cotMelodyHint' : 'cotOffHint')}
+            </p>
+            {!scoreDisabled && (
+              <>
+                {showNotation && abc.trim() && (
+                  <div className="mt-3 max-h-80 overflow-auto rounded-lg border border-zinc-200 bg-white p-2 dark:border-white/10 custom-scrollbar">
+                    <ScoreView abc={abc} />
+                  </div>
+                )}
+                <AutoTextarea
+                  value={abc}
+                  minRows={5}
+                  onChange={event => setAbc(event.target.value)}
+                  placeholder={tt('scorePlaceholder')}
+                  aria-label={tt('scoreCardTitle')}
+                  spellCheck={false}
+                  className={`${CONTROL} mt-3 resize-none font-mono text-[11px] leading-4`}
+                />
+                <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('scoreHint')}</p>
+                {melodyWithChords && (
+                  <div className="mt-2 flex items-start gap-2 rounded-lg bg-amber-500/10 p-2 text-[11px] leading-4 text-amber-700 dark:text-amber-300">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                    <span className="flex-1">{tt('melodyScoreHasChords')}</span>
+                    <button type="button" onClick={() => setAbc(current => current.replace(CHORD_SYMBOLS, ''))} className="shrink-0 font-semibold underline decoration-dotted underline-offset-2">{tt('stripChords')}</button>
+                  </div>
+                )}
+                {assistantReady && abc.trim() && (
+                  <div className="mt-3 rounded-lg border border-pink-500/20 bg-pink-500/5 p-2">
+                    <span className={LABEL}>{tt('scoreEditTitle')}</span>
+                    <div className="flex gap-2">
+                      <input
+                        value={scoreInstruction}
+                        onChange={event => setScoreInstruction(event.target.value)}
+                        onKeyDown={event => { if (event.key === 'Enter' && scoreInstruction.trim()) void askAssistant('score'); }}
+                        placeholder={tt('scoreEditPlaceholder')}
+                        className={CONTROL}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void askAssistant('score')}
+                        disabled={assisting !== null || !scoreInstruction.trim()}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-pink-600 px-3 text-xs font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+                      >
+                        {assisting === 'score' ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+                        {tt('scoreEditApply')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </Card>
 
           <Card
@@ -817,53 +1015,55 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               <SliderRow
                 label={t('maxDuration')}
                 value={duration}
-                fallback={Number(defaults.duration ?? 60)}
+                fallback={durationFallback}
                 min={10}
                 max={MAX_DURATION_SECONDS}
                 step={5}
-                suffix=" s"
                 onChange={setDuration}
+                format={formatDuration}
               />
-              <p className="text-[11px] leading-4 text-zinc-500">{t('maxDurationHint')}</p>
+              <p className="text-[11px] leading-4 text-zinc-500">{tt('maxDurationHintYue')}</p>
               <SliderRow
-                label={t('ditSteps')}
+                label={tt('flowSteps')}
                 value={steps}
-                fallback={Number(defaults.steps ?? 30)}
-                min={8}
-                max={80}
+                fallback={Number(defaults.steps ?? 32)}
+                min={4}
+                max={100}
                 step={1}
                 onChange={setSteps}
               />
-              <SliderRow
-                label={t('cfgScale')}
-                value={ditCfg}
-                fallback={Number(defaults.dit_cfg ?? 1.7)}
-                min={1}
-                max={5}
-                step={0.1}
-                onChange={setDitCfg}
-              />
             </div>
-
             <div className="mt-4 space-y-3 border-t border-zinc-100 pt-4 dark:border-white/5">
-              {/* No batch slider. The engine reserves KV cache for the whole
-                  batch when it loads its weights and takes the number only as a
-                  launch flag, so a control here could not change anything about
-                  the run it appears in. */}
+              <SliderRow
+                label={tt('songsPerRequest')}
+                value={lmBatch}
+                fallback={1}
+                min={1}
+                max={Math.max(maxBatch, 1)}
+                step={1}
+                onChange={setLmBatch}
+                disabled={maxBatch <= 1}
+              />
+              {maxBatch <= 1 && <p className="text-[11px] leading-4 text-zinc-500">{tt('songsPerRequestHint')}</p>}
               <SliderRow
                 label={t('variationsBatch')}
                 value={synthBatch}
-                fallback={Number(defaults.synth_batch_size ?? 1)}
+                fallback={1}
                 min={1}
-                max={4}
+                max={9}
                 step={1}
                 onChange={setSynthBatch}
               />
               <Switch checked={randomizeSeed} onChange={setRandomizeSeed} label={t('randomizeSeed')} />
               {!randomizeSeed && (
-                <Field label={t('seedShort')}>
-                  <input value={seed} onChange={event => setSeed(event.target.value)} placeholder={placeholder('seed')} inputMode="numeric" className={CONTROL} />
-                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label={tt('lmSeedYue')}>
+                    <input value={lmSeed} onChange={event => setLmSeed(event.target.value)} placeholder="-1" inputMode="numeric" className={CONTROL} />
+                  </Field>
+                  <Field label={tt('noiseSeed')}>
+                    <input value={seed} onChange={event => setSeed(event.target.value)} placeholder="-1" inputMode="numeric" className={CONTROL} />
+                  </Field>
+                </div>
               )}
               {totalTracks > 1 && (
                 <p className="text-[11px] text-zinc-500">{t('renderCountPrefix')} <b className="text-zinc-700 dark:text-zinc-200">{totalTracks}</b></p>
@@ -876,100 +1076,67 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               type="button"
               onClick={() => setShowAdvanced(current => !current)}
               className="flex w-full items-center justify-between gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-zinc-500 transition-colors hover:text-black dark:text-zinc-400 dark:hover:text-white"
+              aria-expanded={showAdvanced}
             >
               {t('advanced')}
               <ChevronDown size={15} className={showAdvanced ? 'rotate-180 transition-transform' : 'transition-transform'} />
             </button>
             {showAdvanced && (
               <div className="space-y-4 border-t border-zinc-100 p-3 dark:border-white/5">
-                <Stage title={t('stageLm')} hint={t('stageLmHint')}>
-                  <div className="space-y-3">
-                    <SliderRow
-                      label={t('cfgScale')}
-                      value={lmCfg}
-                      fallback={Number(defaults.lm_cfg ?? 1.5)}
-                      min={1}
-                      max={5}
-                      step={0.1}
-                      onChange={setLmCfg}
-                    />
-                    <SliderRow
-                      label={t('topK')}
-                      value={lmTopK}
-                      fallback={Number(defaults.lm_top_k ?? 50)}
-                      min={1}
-                      max={200}
-                      step={1}
-                      onChange={setLmTopK}
-                    />
-                    <Field label={t('lmSeedShort')}>
-                      <input value={lmSeed} onChange={event => setLmSeed(event.target.value)} placeholder={placeholder('lm_seed')} inputMode="numeric" className={CONTROL} />
-                    </Field>
-                  </div>
+                <Stage title={tt('stageScoreSampling')} hint={tt('stageScoreSamplingHint')}>
+                  <SamplingGrid value={abcSampling} defaults={defaults.abc_sampling} onChange={setAbcSampling} t={t as never} />
                 </Stage>
 
                 <div className="border-t border-zinc-100 pt-4 dark:border-white/5">
-                  <Stage title={t('stageOutput')} hint={t('stageOutputHint')}>
-                  <SliderRow
-                    label={t('peakClipLabel')}
-                    value={peakClip}
-                    fallback={Number(defaults.peak_clip ?? 10)}
-                    min={0}
-                    max={30}
-                    step={1}
-                    onChange={setPeakClip}
-                  />
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <Field label={t('mp3Bitrate')}>
-                      <select value={mp3Bitrate || String(defaults.mp3_bitrate ?? 128)} onChange={event => setMp3Bitrate(event.target.value)} disabled={format !== 'mp3'} className={CONTROL}>
-                        {['128', '192', '256', '320'].map(rate => <option key={rate} value={rate}>{rate} kbps</option>)}
-                      </select>
+                  <Stage title={tt('stageSemantic')} hint={tt('stageSemanticHint')}>
+                    <Field label={tt('guidanceScale')} hint={tt('guidanceScaleHint')}>
+                      <input value={cfgScale} onChange={event => setCfgScale(event.target.value)} placeholder={tt('guidanceAuto')} inputMode="decimal" className={CONTROL} />
                     </Field>
-                    <Field label={t('outputFormat')}>
-                      <select value={format} onChange={event => setFormat(event.target.value as Music3Request['output_format'])} className={CONTROL}>
-                        <option value="mp3">MP3</option>
-                        <option value="wav16">WAV16</option>
-                        <option value="wav24">WAV24</option>
-                        <option value="wav32">WAV32</option>
-                      </select>
-                    </Field>
-                  </div>
-                  <p className="mt-2 text-[11px] leading-4 text-zinc-500">{t('peakClipHint')}</p>
+                    <div className="mt-3">
+                      <SamplingGrid value={semanticSampling} defaults={defaults.semantic_sampling} onChange={setSemanticSampling} t={t as never} />
+                    </div>
+                    <div className="mt-3">
+                      <Field label={tt('semanticTokens')} hint={tt('semanticTokensHint')}>
+                        <AutoTextarea
+                          value={semanticTokens}
+                          minRows={2}
+                          onChange={event => setSemanticTokens(event.target.value)}
+                          placeholder="12046,8433,22418,…"
+                          spellCheck={false}
+                          className={`${CONTROL} resize-none font-mono text-[11px]`}
+                        />
+                      </Field>
+                    </div>
                   </Stage>
                 </div>
 
                 <div className="border-t border-zinc-100 pt-4 dark:border-white/5">
-                  <Stage title={t('componentOverride')} hint={t('componentOverrideHint')}>
-                  <div className="space-y-2">
-                    {roles.map(role => (
-                      <div key={role.key} className="grid grid-cols-[64px_1fr] items-center gap-2">
-                        <span className="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400">{role.label}</span>
-                        <select
-                          value={models[role.key] ?? ''}
-                          onChange={event => setModels(current => {
-                            const next = { ...current };
-                            if (event.target.value) next[role.key] = event.target.value;
-                            else delete next[role.key];
-                            return next;
-                          })}
-                          className={CONTROL}
-                        >
-                          <option value="">
-                            {(() => {
-                              // Name the file the profile actually loads: "profile
-                              // default" beside every role told the user nothing.
-                              const inUse = setup?.profile_files?.[role.key as keyof ProfileFiles];
-                              return inUse ? `${t('profileDefault')} · ${inUse.replace('MiniMax-Music3-', '')}` : t('profileDefault');
-                            })()}
-                          </option>
-                          {role.options.map(option => <option key={option} value={option}>{option.replace('MiniMax-Music3-', '')}</option>)}
+                  <Stage title={t('stageOutput')} hint={t('stageOutputHint')}>
+                    <SliderRow
+                      label={t('peakClipLabel')}
+                      value={peakClip}
+                      fallback={Number(defaults.peak_clip ?? 10)}
+                      min={0}
+                      max={30}
+                      step={1}
+                      onChange={setPeakClip}
+                    />
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <Field label={t('mp3Bitrate')}>
+                        <select value={mp3Bitrate || String(defaults.mp3_bitrate ?? 128)} onChange={event => setMp3Bitrate(event.target.value)} disabled={format !== 'mp3'} className={CONTROL}>
+                          {['128', '192', '256', '320'].map(rate => <option key={rate} value={rate}>{rate} kbps</option>)}
                         </select>
-                      </div>
-                    ))}
-                  </div>
-                  {Object.keys(models).length > 0 && Object.keys(models).length < 5 && (
-                    <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-300">{t('componentOverridePartial')}</p>
-                  )}
+                      </Field>
+                      <Field label={t('outputFormat')}>
+                        <select value={format} onChange={event => setFormat(event.target.value as YueOutputFormat)} className={CONTROL}>
+                          <option value="mp3">MP3</option>
+                          <option value="wav16">WAV 16-bit</option>
+                          <option value="wav24">WAV 24-bit</option>
+                          <option value="wav32">WAV 32-bit float</option>
+                        </select>
+                      </Field>
+                    </div>
+                    <p className="mt-2 text-[11px] leading-4 text-zinc-500">{t('peakClipHint')}</p>
                   </Stage>
                 </div>
               </div>
@@ -979,13 +1146,13 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           <div className="flex items-center justify-between px-1 text-[11px] text-zinc-500 dark:text-zinc-400">
             <button
               type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('mm3:open-settings', { detail: 'models' }))}
+              onClick={() => window.dispatchEvent(new CustomEvent('yue:open-settings', { detail: 'models' }))}
               className="text-left hover:text-pink-500"
               title={t('changeProfileHint')}
             >
               {t('profile')}: <b className="text-zinc-700 underline decoration-dotted underline-offset-2 dark:text-zinc-200">{profileLabel}</b>
             </button>
-            <button type="button" onClick={() => void refreshSetup().catch(() => undefined)} className="hover:text-pink-500">{t('refresh')}</button>
+            {catalog?.version && <span className="font-mono text-[10px] text-zinc-400">yue2.cpp {catalog.version.split(' ')[0]}</span>}
           </div>
           {setup?.hardware?.reason && <p className="px-1 text-[10px] text-zinc-400">{setup.hardware.reason}</p>}
           {error && <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs leading-5 text-red-700 dark:text-red-200">{error}</div>}

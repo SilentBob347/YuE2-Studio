@@ -70,7 +70,7 @@ export const SearchPage: React.FC<SearchPageProps> = ({
       <div className="mx-auto max-w-5xl">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('search')}</h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          {t('searchLocalHint') || 'Searches the local Music3 library on this machine: titles, captions, lyrics and tags.'}
+          {t('searchLocalHint') || 'Searches the local library on this machine: titles, captions, lyrics and tags.'}
         </p>
 
         <div className="relative mt-5">

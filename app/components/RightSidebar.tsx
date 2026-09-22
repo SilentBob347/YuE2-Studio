@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { TRACK_ARTIST } from '../services/studio';
 import { Song } from '../types';
-import { Heart, Share2, Play, Pause, MoreHorizontal, X, Copy, Wand2, MoreVertical, Download, Repeat, Video, Music, Link as LinkIcon, Sparkles, Globe, Lock, Trash2, Edit3, Layers, ChevronDown, ClipboardCopy, ImagePlus, Loader2, Mic2 } from 'lucide-react';
+import { Heart, Share2, Play, Pause, MoreHorizontal, X, Copy, Wand2, MoreVertical, Download, Repeat, Video, Music, Link as LinkIcon, Sparkles, Globe, Lock, Trash2, Edit3, Layers, ChevronDown, ClipboardCopy, ImagePlus, Loader2, Mic2, FileMusic } from 'lucide-react';
 import { updateNativeSong } from '../services/nativeLibrary';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
@@ -10,6 +10,7 @@ import { apiUrl } from '../services/apiBase';
 import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
 import { openStems } from '../services/openStems';
+import { ScoreView } from './ScoreView';
 
 interface RightSidebarProps {
     song: Song | null;
@@ -323,7 +324,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
 
                         <div className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-xs font-bold text-white shadow-sm ring-2 ring-white dark:ring-black">
-                                M3
+                                Y2
                             </div>
                             <div className="flex flex-col">
                                 <span className="text-sm font-semibold text-zinc-900 dark:text-white">
@@ -563,63 +564,37 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                         </div>
                     </div>
 
-                    {/* Generation Parameters Accordion */}
+                    {/* Generation parameters, as the engine recorded them. */}
                     {(() => {
-                        const p = song.generationParams || {};
-                        const hasParams = song.bpm || song.keyScale || song.ditModel || p.inferenceSteps;
-                        if (!hasParams) return null;
-
+                        const p = (song.generationParams || {}) as Record<string, any>;
+                        if (!song.generationParams) return null;
+                        const cotLabel: Record<string, string> = { full: t('cotFull'), melody: t('cotMelody'), off: t('cotOff') };
                         const paramRows: [string, string | number | undefined][] = [
-                            ['Model', song.ditModel?.replace('acestep-v15-', '')],
-                            ['LM', song.lmModel ? `${song.lmModel.replace('acestep-5Hz-lm-', '')} (${song.lmBackend || 'pt'})` : undefined],
-                            ['BPM', song.bpm && song.bpm > 0 ? song.bpm : undefined],
-                            ['Key', song.keyScale],
-                            ['Time', song.timeSignature],
-                            ['Duration', song.duration && song.duration !== '0:00' ? song.duration : undefined],
-                            ['Steps', p.inferenceSteps],
-                            ['Guidance', p.guidanceScale != null ? p.guidanceScale : undefined],
-                            ['Sampler', p.samplerMode],
-                            ['Scheduler', p.schedulerType],
-                            ['Method', p.inferMethod?.toUpperCase()],
-                            ['Shift', p.shift],
-                            ['Seed', p.seed],
-                            ['Thinking', p.thinking ? 'ON' : undefined],
-                            ['ADG', p.useAdg ? 'ON' : undefined],
-                            ['CFG Interval', p.cfgIntervalStart != null && p.cfgIntervalEnd != null && (p.cfgIntervalStart > 0 || p.cfgIntervalEnd < 1) ? `${p.cfgIntervalStart}–${p.cfgIntervalEnd}` : undefined],
-                            ['Vel. Clamp', p.velocityNormThreshold > 0 ? p.velocityNormThreshold : undefined],
-                            ['Vel. EMA', p.velocityEmaFactor > 0 ? p.velocityEmaFactor : undefined],
-                            [t('coverStrength'), p.audioCoverStrength != null && p.audioCoverStrength < 1 ? p.audioCoverStrength : undefined],
-                            ['Task', p.taskType && p.taskType !== 'text2music' ? p.taskType : undefined],
-                            ['Format', p.audioFormat?.toUpperCase()],
-                            [t('genTime'), song.generationTime ? `${song.generationTime.toFixed(1)}s` : undefined],
+                            [t('profile'), song.lmModel || undefined],
+                            [t('cotMode'), p.cot ? cotLabel[p.cot] ?? p.cot : undefined],
+                            [t('maxDuration'), song.duration && song.duration !== '0:00' ? song.duration : undefined],
+                            [t('flowSteps'), p.steps],
+                            ['CFG', typeof p.cfg_scale === 'number' && p.cfg_scale >= 0 ? p.cfg_scale : undefined],
+                            [t('lmSeedYue'), p.lm_seed],
+                            [t('noiseSeed'), p.seed],
+                            [t('outputFormat'), typeof p.output_format === 'string' ? p.output_format.toUpperCase() : undefined],
+                            [t('mp3Bitrate'), p.output_format === 'mp3' && p.mp3_bitrate ? `${p.mp3_bitrate} kbps` : undefined],
+                            [t('peakClipLabel'), p.peak_clip],
                         ];
                         const visibleRows = paramRows.filter(([, v]) => v !== undefined && v !== null && v !== '');
-
+                        if (visibleRows.length === 0) return null;
                         const copyText = visibleRows.map(([k, v]) => `${k}: ${v}`).join('\n');
 
                         return (
                             <details className="group">
                                 <summary className="flex items-center justify-between cursor-pointer px-3 py-2 rounded-xl bg-zinc-100 dark:bg-white/5 hover:bg-zinc-200 dark:hover:bg-white/10 transition-colors">
                                     <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-                                        {song.ditModel && (
-                                            <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-white/10 text-zinc-700 dark:text-zinc-300 font-medium">
-                                                {song.ditModel.replace('acestep-v15-', '')}
-                                            </span>
+                                        <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-white/10 text-zinc-700 dark:text-zinc-300 font-medium">YuE2</span>
+                                        {p.cot && (
+                                            <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-zinc-400">{cotLabel[p.cot] ?? p.cot}</span>
                                         )}
-                                        {p.inferenceSteps && (
-                                            <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-zinc-400">
-                                                {p.inferenceSteps}st
-                                            </span>
-                                        )}
-                                        {p.samplerMode && p.samplerMode !== 'euler' && (
-                                            <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-white/10 text-zinc-700 dark:text-zinc-300">
-                                                {p.samplerMode}
-                                            </span>
-                                        )}
-                                        {p.schedulerType && p.schedulerType !== 'linear' && (
-                                            <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-white/10 text-zinc-700 dark:text-zinc-300">
-                                                {p.schedulerType}
-                                            </span>
+                                        {p.steps && (
+                                            <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-zinc-400">{p.steps}st</span>
                                         )}
                                     </div>
                                     <ChevronDown size={14} className="text-zinc-400 transition-transform group-open:rotate-180 flex-shrink-0 ml-2" />
@@ -698,6 +673,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                         </div>
                     </div>
 
+                    {/* The score the model planned: engraved, and one click away from the form. */}
+                    <SongScore song={song} />
+
                 </div>
             </div>
         </div>
@@ -713,3 +691,55 @@ const ActionButton: React.FC<{ icon: React.ReactNode; label?: string; active?: b
         {label && <span className="text-xs font-semibold">{label}</span>}
     </button>
 );
+
+/** The ABC score a track was performed from, engraved, with the way back into the form. */
+const SongScore: React.FC<{ song: Song }> = ({ song }) => {
+    const { t } = useI18n();
+    const [open, setOpen] = useState(true);
+    const abc = typeof (song.generationParams as Record<string, unknown> | undefined)?.abc === 'string'
+        ? String((song.generationParams as Record<string, unknown>).abc).trim()
+        : '';
+    const cot = (song.generationParams as Record<string, unknown> | undefined)?.cot;
+    if (!abc) return null;
+    return (
+        <div className="bg-white dark:bg-black/20 rounded-xl border border-zinc-200 dark:border-white/5 overflow-hidden">
+            <div className="px-4 py-3 border-b border-zinc-100 dark:border-white/5 flex items-center justify-between gap-2 bg-zinc-50 dark:bg-white/5">
+                <button type="button" onClick={() => setOpen(value => !value)} className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider">
+                    <FileMusic size={12} /> {t('scoreTab')}
+                    <ChevronDown size={12} className={open ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            const blob = new Blob([`${abc}\n`], { type: 'text/vnd.abc' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `${song.title || 'score'}.abc`;
+                            a.click();
+                            URL.revokeObjectURL(url);
+                        }}
+                        className="flex items-center gap-1 text-[10px] font-medium text-zinc-500 hover:text-black dark:hover:text-white"
+                    >
+                        <Download size={12} /> .abc
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => window.dispatchEvent(new CustomEvent('yue:use-score', {
+                            detail: { abc, cot: cot === 'melody' || cot === 'full' ? cot : 'full', lyrics: song.lyrics, title: song.title },
+                        }))}
+                        className="flex items-center gap-1 text-[10px] font-semibold text-pink-600 hover:text-pink-500 dark:text-pink-300"
+                    >
+                        <Repeat size={12} /> {t('useScore')}
+                    </button>
+                </div>
+            </div>
+            {open && (
+                <div className="max-h-[420px] overflow-auto bg-white p-2 custom-scrollbar">
+                    <ScoreView abc={abc} />
+                </div>
+            )}
+        </div>
+    );
+};

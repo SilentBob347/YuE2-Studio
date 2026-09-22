@@ -4038,6 +4038,9 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
     let result = state.music_server.result(job_id).await?;
     let tracks = engine_result::parse_multipart_result(&result.content_type, &result.body)?;
     let profile_id = state.selected_profile_id.read().await.clone();
+    // The engine's defaults fill whatever the request left out, so a stored
+    // track records every value it was made with, not only the ones typed.
+    let engine_defaults = state.music_server.props().await.ok().and_then(|props| props.get("defaults").cloned());
     let count = tracks.len();
     let mut imported = Vec::with_capacity(count);
     for (index, track) in tracks.into_iter().enumerate() {
@@ -4062,6 +4065,13 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
             _ => generation_settings = replay.clone(),
         }
         let settings = generation_settings.as_object_mut().context("generation settings are not a JSON object")?;
+        if let Some(Value::Object(defaults)) = &engine_defaults {
+            for (key, value) in defaults {
+                if !settings.contains_key(key) && !matches!(key.as_str(), "semantic_tokens" | "lm_seed" | "seed") {
+                    settings.insert(key.clone(), value.clone());
+                }
+            }
+        }
         settings.remove("semantic_tokens");
         settings.insert("lm_batch_size".into(), Value::from(1));
         settings.insert("synth_batch_size".into(), Value::from(1));
@@ -4074,8 +4084,8 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
             ),
             "seed": replay.get("seed"),
             "lm_seed": replay.get("lm_seed"),
-            "cot": replay.get("cot"),
-            "output_format": replay.get("output_format"),
+            "cot": generation_settings.get("cot"),
+            "output_format": generation_settings.get("output_format"),
             "cover_prompt": job.cover_prompt.clone(),
         });
         // Several tracks from one request share its name; number them so the

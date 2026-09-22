@@ -49,13 +49,13 @@ const PROFILE_BADGE: Record<string, string> = {
     native: 'Full',
     'quality-q8': 'Q8',
     balanced: 'Bal',
-    'recommended-light': 'Light',
+    light: 'Light',
 };
 
 const getProfileBadge = (song: Song): string => {
     if (song.ditModel === 'openrouter') return 'Cloud';
     if (song.ditModel === 'imported-audio') return 'Import';
-    return song.lmModel ? PROFILE_BADGE[song.lmModel] ?? song.lmModel : 'Music3';
+    return song.lmModel ? PROFILE_BADGE[song.lmModel] ?? song.lmModel : 'YuE2';
 };
 
 const createDragPreview = (element: HTMLElement) => {
@@ -709,7 +709,7 @@ const SongItem: React.FC<SongItemProps> = ({
                         )}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-                        <span>{song.ditModel === 'imported-audio' ? t('importedAudio') : 'MiniMax Music 3'}</span>
+                        <span>{song.ditModel === 'imported-audio' ? t('importedAudio') : 'YuE2'}</span>
                         {song.nativeReplayAvailable && <span title={t('replayAvailable')} className="rounded bg-zinc-200/70 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide dark:bg-white/10">replay</span>}
                     </div>
                     <p className="text-xs text-zinc-500 dark:text-zinc-500 line-clamp-2 pt-1 font-medium max-w-2xl">

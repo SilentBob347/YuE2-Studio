@@ -5,27 +5,32 @@ import { useI18n } from '../context/I18nContext';
 /**
  * Launch options for the local engine.
  *
- * These are `mm-server` command-line flags, and upstream reads them once at
- * startup — so saving them restarts the engine. Each one is a real flag, and
- * `--max-batch` in particular is the ceiling on how many songs a single request
- * may render, which is why the create panel clamps to it.
+ * These are `yue-server` command-line flags, read once at startup, so saving
+ * them restarts the engine. `--max-batch` is the ceiling on how many songs one
+ * request may compose, which is why the create panel clamps to it.
  */
 
 interface EngineOptions {
   keep_loaded: boolean;
+  max_batch: number | null;
   max_seq: number | null;
+  vae_core: number | null;
+  vae_halo: number | null;
   disable_flash_attention: boolean;
-  split_cfg_forwards: boolean;
   clamp_fp16: boolean;
 }
 
 const DEFAULTS: EngineOptions = {
   keep_loaded: false,
+  max_batch: null,
   max_seq: null,
+  vae_core: null,
+  vae_halo: null,
   disable_flash_attention: false,
-  split_cfg_forwards: false,
   clamp_fp16: false,
 };
+
+type NumberKey = 'max_batch' | 'max_seq' | 'vae_core' | 'vae_halo';
 
 const CONTROL =
   'w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-pink-500 dark:border-white/10 dark:bg-black/20 dark:text-white';
@@ -118,6 +123,26 @@ export const EngineSettings: React.FC = () => {
     }
   };
 
+  const numberField = (key: NumberKey, label: string, placeholder: string, hint: string, min: number, max: number, step: number) => (
+    <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+      <span className="mb-1.5 block">{label}</span>
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        placeholder={placeholder}
+        value={options[key] ?? ''}
+        onChange={event => {
+          const value = Number(event.target.value);
+          setOptions(current => ({ ...current, [key]: event.target.value === '' || !Number.isFinite(value) ? null : value }));
+        }}
+        className={CONTROL}
+      />
+      <span className="mt-1 block font-normal text-zinc-500">{hint}</span>
+    </label>
+  );
+
   return (
     <div className="space-y-3">
       <h4 className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white">
@@ -131,27 +156,9 @@ export const EngineSettings: React.FC = () => {
         onChange={value => setOptions(current => ({ ...current, keep_loaded: value }))}
       />
 
-      {/* The batch ceiling is not here and is not sent: it reserves KV cache
-          for the whole batch when the weights load - memory paid for on every
-          single-song generation, which is all but every generation - and the
-          engine takes it only as a launch flag. */}
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-          <span className="mb-1.5 block">{t('maxSeqLabel')}</span>
-          <input
-            type="number"
-            min={512}
-            step={512}
-            placeholder={t('maxSeqHint')}
-            value={options.max_seq ?? ''}
-            onChange={event => {
-              const value = Number(event.target.value);
-              setOptions(current => ({ ...current, max_seq: event.target.value === '' || !Number.isFinite(value) ? null : value }));
-            }}
-            className={CONTROL}
-          />
-          <span className="mt-1 block font-normal text-zinc-500">{t('maxSeqHint')}</span>
-        </label>
+        {numberField('max_batch', t('maxBatchLabel'), '1', t('maxBatchHint'), 1, 8, 1)}
+        {numberField('max_seq', t('maxSeqLabel'), '24576', t('maxSeqHintYue'), 4096, 24576, 1024)}
       </div>
 
       <details className="rounded-xl border border-zinc-200 p-3 dark:border-white/10">
@@ -163,12 +170,10 @@ export const EngineSettings: React.FC = () => {
             checked={options.disable_flash_attention}
             onChange={value => setOptions(current => ({ ...current, disable_flash_attention: value }))}
           />
-          <Toggle
-            label={t('splitCfgLabel')}
-            hint={t('splitCfgHint')}
-            checked={options.split_cfg_forwards}
-            onChange={value => setOptions(current => ({ ...current, split_cfg_forwards: value }))}
-          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            {numberField('vae_core', t('vaeCoreLabel'), '512', t('vaeCoreHint'), 64, 4096, 64)}
+            {numberField('vae_halo', t('vaeHaloLabel'), '16', t('vaeHaloHint'), 0, 256, 4)}
+          </div>
           <Toggle
             label={t('clampFp16Label')}
             hint={t('clampFp16Hint')}

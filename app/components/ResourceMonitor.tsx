@@ -6,7 +6,7 @@ import { useI18n } from '../context/I18nContext';
 /**
  * Live resource readout for local generation.
  *
- * Music3 inference is the heaviest thing on the machine, so the studio shows
+ * YuE2 inference is the heaviest thing on the machine, so the studio shows
  * what it is actually costing: GPU load, VRAM, temperature, power draw, system
  * RAM and the resident memory of the native engine process. Every value comes
  * from `/v1/system/resources`, which measures rather than estimates — a counter

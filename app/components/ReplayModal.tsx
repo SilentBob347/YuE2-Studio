@@ -6,10 +6,11 @@ import { useI18n } from '../context/I18nContext';
 /**
  * Deterministic re-render.
  *
- * Music3 stores the audio codes a track was decoded from. Re-submitting them
+ * YuE2 stores the semantic codes a track was rendered from. Re-submitting them
  * skips the autoregressive stage entirely: the composition and the vocal stay
- * identical while the diffusion pass runs again, so this is the way to change
- * step count, guidance or output format without generating a different song.
+ * identical while flow matching runs again, so this changes the step count,
+ * the sound seed, the number of variations or the output format without
+ * writing a different song.
  */
 
 interface ReplayModalProps {
@@ -27,9 +28,10 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, onClose, onQueue
   const numberOr = (key: string, fallback: number) =>
     typeof settings[key] === 'number' ? (settings[key] as number) : fallback;
 
-  const [steps, setSteps] = useState<number>(numberOr('steps', 30));
-  const [ditCfg, setDitCfg] = useState<number>(numberOr('dit_cfg', 1.7));
+  const [steps, setSteps] = useState<number>(numberOr('steps', 32));
+  const [variations, setVariations] = useState<number>(1);
   const [seed, setSeed] = useState<string>(typeof settings.seed === 'number' ? String(settings.seed) : '');
+  const [bitrate, setBitrate] = useState<number>(numberOr('mp3_bitrate', 320));
   const [format, setFormat] = useState<'mp3' | 'wav16' | 'wav24' | 'wav32'>(
     typeof settings.output_format === 'string' ? (settings.output_format as 'mp3') : 'mp3',
   );
@@ -47,7 +49,14 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, onClose, onQueue
       const response = await fetch('/v1/music/replay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ song_id: song.id, steps, dit_cfg: ditCfg, seed: parsedSeed, output_format: format }),
+        body: JSON.stringify({
+          song_id: song.id,
+          steps,
+          seed: parsedSeed,
+          synth_batch_size: variations,
+          output_format: format,
+          mp3_bitrate: format === 'mp3' ? bitrate : undefined,
+        }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.error || `Re-render failed (${response.status})`);
@@ -78,16 +87,16 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, onClose, onQueue
 
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              <span className="mb-1.5 block">{t('ditSteps')}</span>
-              <input type="number" min={2} max={80} value={steps} onChange={event => setSteps(Number(event.target.value) || 2)} className={CONTROL} />
+              <span className="mb-1.5 block">{t('flowSteps')}</span>
+              <input type="number" min={1} max={200} value={steps} onChange={event => setSteps(Math.max(1, Number(event.target.value) || 1))} className={CONTROL} />
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              <span className="mb-1.5 block">DiT CFG</span>
-              <input type="number" min={0.5} max={5} step={0.1} value={ditCfg} onChange={event => setDitCfg(Number(event.target.value) || 1.7)} className={CONTROL} />
+              <span className="mb-1.5 block">{t('variationsPerRender')}</span>
+              <input type="number" min={1} max={9} value={variations} onChange={event => setVariations(Math.min(9, Math.max(1, Number(event.target.value) || 1)))} className={CONTROL} />
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              <span className="mb-1.5 block">{t('ditSeed')}</span>
-              <input inputMode="numeric" value={seed} onChange={event => setSeed(event.target.value)} className={CONTROL} />
+              <span className="mb-1.5 block">{t('noiseSeed')}</span>
+              <input inputMode="numeric" value={seed} placeholder="-1" onChange={event => setSeed(event.target.value)} className={CONTROL} />
             </label>
             <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
               <span className="mb-1.5 block">{t('outputFormat')}</span>
@@ -98,6 +107,14 @@ export const ReplayModal: React.FC<ReplayModalProps> = ({ song, onClose, onQueue
                 <option value="wav32">WAV 32-bit float</option>
               </select>
             </label>
+            {format === 'mp3' && (
+              <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                <span className="mb-1.5 block">{t('mp3Bitrate')}</span>
+                <select value={bitrate} onChange={event => setBitrate(Number(event.target.value))} className={CONTROL}>
+                  {[128, 192, 256, 320].map(rate => <option key={rate} value={rate}>{rate} kbps</option>)}
+                </select>
+              </label>
+            )}
           </div>
 
           {error && (

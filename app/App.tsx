@@ -10,7 +10,7 @@ import { CoverRegenModal } from './components/CoverRegenModal';
 import { ReplayModal } from './components/ReplayModal';
 import { VideoGeneratorModal } from './components/VideoGeneratorModal';
 import { SettingsModal } from './components/SettingsModal';
-import { Song, Music3Request, Music3Job, View, Playlist } from './types';
+import { Song, YueRequest, YueJob, YueProgress, View, Playlist } from './types';
 // Resizable panel hook
 function useResizablePanel(key: string, defaultWidth: number, min: number, max: number, direction: 'left' | 'right' = 'left') {
   const [width, setWidth] = React.useState(() => {
@@ -69,7 +69,7 @@ import { StudioOffline } from './components/StudioOffline';
 import { StudioToolsPanel } from './components/StudioToolsPanel';
 import { createNativePlaylist, deleteNativeSong, loadNativeLibrarySongs, loadNativePlaylists, updateNativePlaylist } from './services/nativeLibrary';
 
-const NATIVE_LIKED_SONG_IDS_KEY = 'minimax-music3-native-liked-song-ids';
+const NATIVE_LIKED_SONG_IDS_KEY = 'yue2-studio-liked-song-ids';
 
 function loadNativeLikedSongIds(): Set<string> {
   try {
@@ -88,7 +88,7 @@ function NativeUnavailableView({ title, detail }: { title: string; detail: strin
   return (
     <div className="flex h-full min-h-0 flex-1 items-center justify-center overflow-y-auto bg-white px-6 py-10 dark:bg-suno">
       <section className="w-full max-w-xl rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6 text-center shadow-sm">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-600 dark:text-amber-400">Native Music3</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-600 dark:text-amber-400">YuE2 Studio</p>
         <h1 className="mt-2 text-xl font-bold text-zinc-950 dark:text-white">{title}</h1>
         <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{detail}</p>
       </section>
@@ -143,11 +143,11 @@ function AppContent() {
       setSettingsSection((event as CustomEvent<string>).detail);
       setShowSettingsModal(true);
     };
-    window.addEventListener('mm3:open-stems', open);
-    window.addEventListener('mm3:open-settings', openSettings);
+    window.addEventListener('yue:open-stems', open);
+    window.addEventListener('yue:open-settings', openSettings);
     return () => {
-      window.removeEventListener('mm3:open-stems', open);
-      window.removeEventListener('mm3:open-settings', openSettings);
+      window.removeEventListener('yue:open-stems', open);
+      window.removeEventListener('yue:open-settings', openSettings);
     };
   }, []);
 
@@ -491,8 +491,8 @@ function AppContent() {
   useEffect(() => {
     void refreshNativeLibrary();
     const reload = () => { void refreshNativeLibrary(); };
-    window.addEventListener('music3-library-changed', reload);
-    return () => window.removeEventListener('music3-library-changed', reload);
+    window.addEventListener('yue-library-changed', reload);
+    return () => window.removeEventListener('yue-library-changed', reload);
   }, [refreshNativeLibrary]);
 
 
@@ -848,7 +848,7 @@ function AppContent() {
     await refreshNativeLibrary();
   }, [refreshNativeLibrary]);
 
-  /// Native Music3 job phases mapped onto the studio's stage labels. mm-server
+  /// Job phases mapped onto the studio's stage labels. yue-server
   /// reports a phase rather than a percentage, so the card shows an honest
   /// stage name and an indeterminate bar instead of a fabricated progress
   /// number.
@@ -859,7 +859,7 @@ function AppContent() {
       try {
         const response = await fetch(`/v1/music/jobs/${encodeURIComponent(jobId)}`);
         if (!response.ok) throw new Error(`Job status request failed (${response.status})`);
-        const job: Music3Job = await response.json();
+        const job: YueJob = await response.json();
 
         // The stage is not set from this per-job status: mm-server reports
         // every queued job as "running", so trusting it here would light every
@@ -896,44 +896,28 @@ function AppContent() {
     setActiveJobCount(activeJobsRef.current.size);
   }, [cleanupJob, refreshSongsList, t]);
 
-  /// mm-server reports a phase, not a percentage, but its log ring counts the
-  /// autoregressive frames and the flow-matching steps. Reading that gives the
-  /// generating card a real progress bar instead of an invented one.
+  /// yue-server reports every job as "running"; the studio service reads the
+  /// engine log stage by stage and returns the running job's progress with it.
   useEffect(() => {
     if (activeJobCount === 0) return;
     let cancelled = false;
+    const stageLabel: Record<YueProgress['stage'], string> = {
+      score: 'stageScore',
+      semantic: 'stageSemanticProgress',
+      acoustic: 'stageAcoustic',
+      decode: 'stageDecode',
+      transcribe: 'stageTranscribe',
+    };
 
     const poll = async () => {
       try {
         const response = await fetch('/v1/engine/logs');
         if (!response.ok) return;
-        const body: { lines?: string[] } = await response.json();
-        const lines = body.lines ?? [];
-        let progress: number | undefined;
-        let stage: string | undefined;
-        for (let index = lines.length - 1; index >= 0; index -= 1) {
-          const frame = /\[AR\] Frame (\d+)\/(\d+)/.exec(lines[index]);
-          if (frame) {
-            // The autoregressive pass is roughly the first half of the work,
-            // the diffusion pass the second; both are reported by the engine.
-            progress = (Number(frame[1]) / Number(frame[2])) * 0.5;
-            stage = 'stageGeneratingAudio';
-            break;
-          }
-          const step = /\[DiT\] .*?(\d+)\/(\d+)/.exec(lines[index]);
-          if (step) {
-            progress = 0.5 + (Number(step[1]) / Number(step[2])) * 0.5;
-            stage = 'stageGeneratingAudio';
-            break;
-          }
-        }
-        if (cancelled || progress === undefined) return;
-        // The engine renders one job at a time, strictly in the order they were
-        // submitted, and its log reports that one job's frames. mm-server marks
-        // every queued job "running" all the same, so applying this to each
-        // generating song gave them all the same bar - the exact report. Only
-        // the oldest still-generating song is actually being worked on; the rest
-        // wait at nought.
+        const body: { progress?: YueProgress | null } = await response.json();
+        const progress = body.progress;
+        if (cancelled || !progress || progress.stage === 'transcribe') return;
+        // The engine renders one job at a time in submission order, so only
+        // the oldest generating card is the one being worked on.
         setSongs(prev => {
           const generating = prev.filter(song => song.isGenerating && song.jobId);
           if (generating.length === 0) return prev;
@@ -942,7 +926,7 @@ function AppContent() {
           );
           return prev.map(song => {
             if (!song.isGenerating || !song.jobId) return song;
-            if (song.id === active.id) return { ...song, progress, stage: stage ?? song.stage };
+            if (song.id === active.id) return { ...song, progress: progress.fraction, stage: stageLabel[progress.stage] };
             return { ...song, progress: 0, stage: 'stageWaitingInQueue' };
           });
         });
@@ -952,28 +936,28 @@ function AppContent() {
     };
 
     void poll();
-    const timer = window.setInterval(poll, 2000);
+    const timer = window.setInterval(poll, 1500);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [activeJobCount]);
 
-  const handleGenerate = async (params: Music3Request & { _tempId?: string }) => {
+  const handleGenerate = async (params: YueRequest & { _tempId?: string }) => {
     const tempId = params._tempId || `temp_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     if (!params._tempId) {
       setSongs(prev => [{
         id: tempId,
         title: params.title?.trim() || t('generating') || 'Generating...',
         lyrics: params.lyrics || '',
-        style: params.caption || '',
+        style: params.style || '',
         coverUrl: '',
         duration: '--:--',
         createdAt: new Date(),
         isGenerating: true,
         stage: 'stageWaitingInQueue',
-        tags: ['music3'],
+        tags: ['yue2'],
       }, ...prev]);
     } else {
       setSongs(prev => prev.map(song => song.id === tempId
-        ? { ...song, title: params.title?.trim() || song.title, style: params.caption || song.style, lyrics: params.lyrics || song.lyrics }
+        ? { ...song, title: params.title?.trim() || song.title, style: params.style || song.style, lyrics: params.lyrics || song.lyrics }
         : song));
     }
 
@@ -985,9 +969,9 @@ function AppContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
-      const job: Music3Job & { error?: string; message?: string } = await response.json().catch(() => ({}) as Music3Job);
+      const job: YueJob & { error?: string; message?: string } = await response.json().catch(() => ({}) as YueJob);
       if (!response.ok || job.status === 'failed') {
-        throw new Error(job.message || job.error || `Music3 rejected this request (${response.status})`);
+        throw new Error(job.message || job.error || `The engine rejected this request (${response.status})`);
       }
       setSongs(prev => prev.map(song => song.id === tempId ? { ...song, jobId: job.id } : song));
       beginPollingJob(job.id, tempId);
@@ -1209,9 +1193,23 @@ function AppContent() {
   // Covers and karaoke timings finish after the track is already on screen.
   useEffect(() => {
     const reload = () => void refreshNativeLibrary();
-    window.addEventListener('mm3:library-changed', reload);
-    return () => window.removeEventListener('mm3:library-changed', reload);
+    window.addEventListener('yue:library-changed', reload);
+    return () => window.removeEventListener('yue:library-changed', reload);
   }, [refreshNativeLibrary]);
+
+  // A track sent to be covered opens the form it lands in.
+  useEffect(() => {
+    const open = () => {
+      setCurrentView('create');
+      if (window.innerWidth < 768) setMobileShowList(false);
+    };
+    window.addEventListener('yue:transcribe-song', open);
+    window.addEventListener('yue:use-score', open);
+    return () => {
+      window.removeEventListener('yue:transcribe-song', open);
+      window.removeEventListener('yue:use-score', open);
+    };
+  }, []);
 
   // Render Layout Logic
   const renderContent = () => {

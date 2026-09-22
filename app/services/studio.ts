@@ -6,4 +6,4 @@
  * on this machine by the same engine, and that is the name written into the
  * MP3's artist tag - so the app and the file say the same thing.
  */
-export const TRACK_ARTIST = 'MiniMax Music 3';
+export const TRACK_ARTIST = 'YuE2';

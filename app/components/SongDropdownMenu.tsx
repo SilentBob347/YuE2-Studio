@@ -15,6 +15,7 @@ import {
     Loader2,
     Mic2,
     Scissors,
+    FileMusic,
 } from 'lucide-react';
 
 interface SongDropdownMenuProps {
@@ -236,6 +237,20 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                     onClick={() => handleAction(onSeparateStems)}
                     disabled={!song.audioUrl}
                 />
+            )}
+            {song.audioUrl && (
+                <>
+                    <MenuItem
+                        icon={<FileMusic size={14} />}
+                        label={`${t('transcribeToScore')}: ${t('transcribeMelody')}`}
+                        onClick={() => handleAction(() => window.dispatchEvent(new CustomEvent('yue:transcribe-song', { detail: { song, melodyOnly: true } })))}
+                    />
+                    <MenuItem
+                        icon={<FileMusic size={14} />}
+                        label={`${t('transcribeToScore')}: ${t('transcribeFull')}`}
+                        onClick={() => handleAction(() => window.dispatchEvent(new CustomEvent('yue:transcribe-song', { detail: { song, melodyOnly: false } })))}
+                    />
+                </>
             )}
             {onReusePrompt && (
                 <MenuItem

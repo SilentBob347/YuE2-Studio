@@ -10,13 +10,13 @@ import {
   componentsByKind,
   completeCustomComponentIds,
   selectedComponentBytes,
-  type Music3Component,
-} from '../services/music3ModelCatalog';
+  type ModelComponent,
+} from '../services/modelCatalog';
 
 /**
  * First run.
  *
- * The engine needs five components and refuses an incomplete set, so the page
+ * The engine needs a backbone and a VAE (SheetSage2 optional), so the page
  * is built around that: one row per role, one quantisation chosen inside each,
  * everything preselected for the detected card and marked installed or
  * missing. The optional extras - a writing assistant, karaoke timings - are
@@ -60,7 +60,7 @@ type Profile = {
   total_bytes: number;
 };
 
-type Catalog = { engine_id: string; recommended_profile_id: string; profiles: Profile[]; components: Music3Component[] };
+type Catalog = { engine_id: string; recommended_profile_id: string; profiles: Profile[]; components: ModelComponent[] };
 
 type OptionalAsset = { id: string; label: string; bytes: number; note: string; installed: boolean; kind: 'model' | 'runtime'; vram_gb?: number | null };
 type SetProgress = { bytes: number; installed_bytes: number; ready: boolean; files: number };
@@ -743,7 +743,7 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
 
           <div className="space-y-3 p-4">
             {/* The ready-made sets, before the per-role choice: most people want
-                "the one my card can run", not five separate decisions. */}
+                "the one my card can run", not a decision per role. */}
             {(catalog?.profiles ?? []).filter((profile) => profile.installable).length > 0 && (
               <div className="space-y-2">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{t('readyMadeSets')}</p>
@@ -755,7 +755,7 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
                     // a name cut off after twenty characters.
                     const parts = profile.components
                       .map((id) => catalog?.components.find((entry) => entry.id === id))
-                      .filter((component): component is Music3Component => Boolean(component))
+                      .filter((component): component is ModelComponent => Boolean(component))
                       .map((component) => `${componentKindLabel(component.kind)} ${componentPrecision(component)}`);
                     return (
                       <button
@@ -823,7 +823,7 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
                       disabled={active?.status === 'downloading'}
                       className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-900 focus:border-pink-500 focus:outline-none disabled:opacity-50 dark:border-white/10 dark:bg-black/20 dark:text-white"
                     >
-                      <option value="">{t('chooseComponent')}</option>
+                      <option value="">{group.optional ? t('noTranscriber') : t('chooseComponent')}</option>
                       {group.components.map((component) => (
                         <option key={component.id} value={component.id}>
                           {componentPrecision(component)} — {bytes(component.bytes)}{installedIds.includes(component.id) ? ` · ${t('installed')}` : ''}
@@ -866,7 +866,7 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
                   <FolderOpen size={13} />
                   {t('openFolder')}
                 </button>
-                {/* Anyone who has run Music3 elsewhere already has these files.
+                {/* Anyone who has run yue2.cpp by hand already has these files.
                     Downloading ten gigabytes again to get them is a waste of a
                     line and a disk. */}
                 <button

@@ -8,5 +8,5 @@ import { Song } from '../types';
  * application to switch pages, and the tools page picks the track up.
  */
 export function openStems(song: Song): void {
-  window.dispatchEvent(new CustomEvent('mm3:open-stems', { detail: song.id }));
+  window.dispatchEvent(new CustomEvent('yue:open-stems', { detail: song.id }));
 }

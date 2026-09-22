@@ -200,7 +200,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, initialSec
             {section === 'about' && (
               <div className="max-w-lg space-y-6 text-sm text-zinc-600 dark:text-zinc-400">
                 <div className="space-y-1">
-                  <p className="text-zinc-900 dark:text-white">MiniMax Music3 Studio · {t('version')} 2.0.0</p>
+                  <p className="text-zinc-900 dark:text-white">YuE2 Studio · {t('version')} {__APP_VERSION__}</p>
                   <p>{t('localAIMusicGenerator')}</p>
                   <p className="text-xs text-zinc-400 dark:text-zinc-500">{t('poweredBy')}</p>
                 </div>
@@ -238,10 +238,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, initialSec
                 <div className="space-y-2 border-t border-zinc-200 pt-4 dark:border-zinc-700/50">
                   <p className="font-medium text-zinc-900 dark:text-white">{t('thisStudio')}</p>
                   <div className="flex flex-wrap gap-2">
-                    <a href="https://github.com/timoncool/MiniMax-Music3-Studio" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-700">
-                      <Github size={14} />MiniMax Music3 Studio
+                    <a href="https://github.com/timoncool/YuE2-Studio" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-700">
+                      <Github size={14} />YuE2 Studio
                     </a>
-                    <a href="https://github.com/timoncool/MiniMax-Music3-Studio/issues" target="_blank" rel="noopener noreferrer" className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-600 dark:text-zinc-200">{t('reportIssues')}</a>
+                    <a href="https://github.com/timoncool/YuE2-Studio/issues" target="_blank" rel="noopener noreferrer" className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 dark:border-zinc-600 dark:text-zinc-200">{t('reportIssues')}</a>
                   </div>
                 </div>
               </div>

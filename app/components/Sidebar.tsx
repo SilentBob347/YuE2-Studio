@@ -122,16 +122,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <aside className={`fixed inset-y-0 left-0 z-50 flex h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-zinc-200 bg-white py-4 transition-[width,transform] duration-300 dark:border-white/5 dark:bg-suno-sidebar md:relative md:inset-auto ${isOpen ? 'w-[min(20rem,calc(100vw-2.5rem))] md:w-[200px]' : 'w-[72px]'}`}>
         <div className="mb-6 flex min-w-0 items-center justify-between gap-2 px-3">
           <div className="flex min-w-0 items-center gap-3">
-            {/* The studio mark: three ascending bars in the accent ramp, the
-                same shape as the application icon. */}
-            <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] shadow-lg transition-transform hover:scale-105" onClick={() => onNavigate('create')} title="MiniMax Music 3 Studio">
+            {/* The studio mark: the application icon. */}
+            <button type="button" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] shadow-lg transition-transform hover:scale-105" onClick={() => onNavigate('create')} title="YuE2 Studio">
               {/* The application's own icon, so the window and the taskbar
                   show the same mark. */}
-              <img src="/brand/m3.png" alt="" className="h-10 w-10 rounded-[11px]" />
+              <img src="/brand/yue2.png" alt="" className="h-10 w-10 rounded-[11px]" />
             </button>
             {isOpen && (
-              <span className="min-w-0 text-[13px] font-bold leading-[1.15] text-zinc-900 dark:text-white" title="MiniMax Music 3 Studio">
-                MiniMax Music 3
+              <span className="min-w-0 text-[13px] font-bold leading-[1.15] text-zinc-900 dark:text-white" title="YuE2 Studio">
+                YuE2 Studio
               </span>
             )}
           </div>
