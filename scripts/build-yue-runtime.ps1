@@ -131,6 +131,18 @@ foreach ($target in $shippedTargets) {
 }
 Get-ChildItem -Path $binDirectory -Filter '*.dll' -File | Copy-Item -Destination $resolvedOutputDirectory -Force
 
+# The Visual C++ runtime travels with the engine, app-local as Microsoft's
+# redistribution terms allow, so a clean machine needs no system install.
+$vsRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Get-VcVars64))))
+$redist = Get-ChildItem -Path (Join-Path $vsRoot 'VC\Redist\MSVC') -Directory | Where-Object { $_.Name -match '^\d' } | Sort-Object { [version]$_.Name } | Select-Object -Last 1
+if (-not $redist) { throw 'The Visual C++ redistributable folder was not found in this Visual Studio.' }
+$crt = Get-ChildItem -Path (Join-Path $redist.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' | Select-Object -First 1
+$openmp = Get-ChildItem -Path (Join-Path $redist.FullName 'x64') -Directory -Filter 'Microsoft.VC*.OpenMP' | Select-Object -First 1
+foreach ($library in @((Join-Path $crt.FullName 'msvcp140.dll'), (Join-Path $crt.FullName 'vcruntime140.dll'), (Join-Path $crt.FullName 'vcruntime140_1.dll'), (Join-Path $openmp.FullName 'vcomp140.dll'))) {
+    if (-not (Test-Path $library)) { throw "Visual C++ runtime library missing: $library" }
+    Copy-Item $library $resolvedOutputDirectory -Force
+}
+
 # What was staged, so a release can tell whether it must rebuild.
 $stamp = [pscustomobject]@{
     commit = $engineSource.commit

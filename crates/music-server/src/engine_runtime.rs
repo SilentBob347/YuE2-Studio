@@ -18,7 +18,9 @@ use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
+#[cfg(test)]
+use anyhow::Context;
 
 use crate::downloads::{Asset, AssetKind, Downloader};
 
@@ -37,8 +39,6 @@ pub const REQUIRED_LIBRARIES: [&str; 2] = ["cublas64_13.dll", "cublasLt64_13.dll
 pub const VC_RUNTIME_LIBRARIES: [&str; 4] =
     ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "vcomp140.dll"];
 
-/// Microsoft's own permanent link to the current x64 redistributable.
-const VC_REDIST_URL: &str = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
 
 pub const ASSETS: &[Asset] = &[Asset {
     id: "engine-cuda-cublas",
@@ -92,7 +92,18 @@ impl EngineRuntime {
     /// but no redistributable has nothing to download and still cannot start
     /// the engine.
     pub fn is_ready(&self, cuda: bool) -> bool {
-        self.missing(cuda).is_empty() && vc_runtime_present()
+        self.missing(cuda).is_empty() && self.vc_runtime_missing().is_empty()
+    }
+
+    /// The Visual C++ runtime ships inside the engine bundle, app-local as
+    /// Microsoft permits, so the studio never installs anything into the
+    /// system. A machine that has it on its search path is fine either way.
+    pub fn vc_runtime_missing(&self) -> Vec<&'static str> {
+        VC_RUNTIME_LIBRARIES
+            .iter()
+            .copied()
+            .filter(|library| !self.downloader.root().join(library).is_file() && !is_on_the_search_path(library))
+            .collect()
     }
 
     /// What is still missing, so a caller can report the size before starting.
@@ -113,52 +124,11 @@ impl EngineRuntime {
 
     /// Fetches whatever is missing and waits for it.
     pub async fn install_missing(&self, cuda: bool) -> Result<()> {
-        ensure_vc_runtime().await?;
+        let absent = self.vc_runtime_missing();
+        if !absent.is_empty() {
+            bail!("the engine bundle is incomplete: {} missing beside yue-server.exe; reinstall the studio", absent.join(", "));
+        }
         self.downloader.install_all("engine", &self.missing(cuda)).await
-    }
-}
-
-/// Whether the Visual C++ runtime the engine needs is already installed.
-///
-/// Almost every Windows machine has it - some game or application put it there
-/// years ago - so this is checked, not assumed in either direction.
-pub fn vc_runtime_present() -> bool {
-    VC_RUNTIME_LIBRARIES.iter().all(|library| is_on_the_search_path(library))
-}
-
-/// Installs Microsoft's redistributable when, and only when, it is missing.
-///
-/// This is the ordinary way an application ships against the Visual C++
-/// runtime: Microsoft publishes one installer at a permanent link, and it is
-/// run once. It asks for administrator rights, shows its own progress, and
-/// returns 3010 when it wants a restart - which is a success, not a failure.
-pub async fn ensure_vc_runtime() -> Result<()> {
-    if !cfg!(windows) || vc_runtime_present() {
-        return Ok(());
-    }
-    let installer = std::env::temp_dir().join("vc_redist.x64.exe");
-    let bytes = reqwest::get(VC_REDIST_URL)
-        .await
-        .context("download the Visual C++ redistributable")?
-        .error_for_status()
-        .context("download the Visual C++ redistributable")?
-        .bytes()
-        .await
-        .context("read the Visual C++ redistributable")?;
-    std::fs::write(&installer, &bytes).with_context(|| format!("write {}", installer.display()))?;
-
-    let status = tokio::task::spawn_blocking(move || {
-        std::process::Command::new(&installer).args(["/install", "/passive", "/norestart"]).status()
-    })
-    .await
-    .context("run the Visual C++ redistributable")?
-    .context("run the Visual C++ redistributable")?;
-    match status.code() {
-        // 0: installed. 1638: a newer one is already there. 3010: installed,
-        // wants a restart it will not get from us and does not need.
-        Some(0) | Some(1638) | Some(3010) => Ok(()),
-        Some(code) => bail!("the Visual C++ redistributable installer ended with {code}"),
-        None => bail!("the Visual C++ redistributable installer was interrupted"),
     }
 }
 

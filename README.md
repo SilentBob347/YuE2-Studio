@@ -101,9 +101,12 @@ The same screens in the language you read: [Русский](https://timoncool.gi
 3. **Create** — write a style and lyrics, or load one of the examples, and press Create.
    The engine starts by itself and the song lands in your library with its score.
 
-The installed version updates itself: a new release is offered inside the studio and
-installed in place. The portable version keeps everything — models, songs, settings —
-inside its own folder.
+Everything the studio owns stays in its own folder: models, songs, settings, logs,
+temporary files and the WebView2 profile, beside `YuE2-Studio.exe`. That holds for the
+portable archive and for an installation into any folder the studio can write to;
+deleting the folder removes the studio. Only an installation into a read-only location
+such as Program Files falls back to `%LOCALAPPDATA%\YuE2 Studio`. The installed version
+updates itself: a new release is offered inside the studio and installed in place.
 
 ## Models
 
@@ -126,8 +129,10 @@ All files come from [Serveurperso/YuE2-GGUF](https://huggingface.co/Serveurperso
 pinned to revision `64b030e`, and are checked by size and SHA-256. They are written to, and
 can be dropped into by hand at:
 
-- **Installed:** `%LOCALAPPDATA%\YuE2 Studio\models\yue2-cpp\`
-- **Portable:** `<the folder you unzipped>\data\models\yue2-cpp\`
+- `<the studio's folder>\data\models\yue2-cpp\` — the portable folder, or the folder
+  you installed into
+- `%LOCALAPPDATA%\YuE2 Studio\models\yue2-cpp\` — only for an installation into a
+  read-only location
 
 A file placed by hand with the exact catalogue name is recognised and never downloaded again.
 
@@ -156,12 +161,12 @@ yue-server.exe → ggml.dll, ggml-base.dll            shipped inside the app
   ├─ ggml-cuda.dll     → cublas64_13.dll, cublasLt64_13.dll (downloaded once), nvcuda.dll (NVIDIA driver)
   ├─ ggml-vulkan.dll   → vulkan-1.dll (every AMD, Intel and NVIDIA driver)
   └─ ggml-cpu-*.dll    nine builds, from SSE4.2 to AVX-512; the best one for the processor is picked
-  + vcruntime140.dll, msvcp140.dll                   Visual C++ runtime
+  + msvcp140, vcruntime140, vcruntime140_1, vcomp140   Visual C++ runtime, shipped app-local
 ```
 
-**Shipped inside the app.** `yue-server.exe` and every `ggml*.dll`, built from the pinned
-yue2.cpp commit with all backends, live in `resources\yue2-cpp\` beside the main
-executable. Settings → Local engine chooses the compute device: Auto (CUDA on NVIDIA,
+**Shipped inside the app.** `yue-server.exe`, every `ggml*.dll`, built from the pinned
+yue2.cpp commit with all backends, and the Visual C++ runtime it needs live in
+`resources\yue2-cpp\` beside the main executable. Nothing is installed into Windows. Settings → Local engine chooses the compute device: Auto (CUDA on NVIDIA,
 Vulkan on AMD and Intel, the processor without a GPU), or CUDA, Vulkan or the processor
 explicitly. On Vulkan the studio turns on the engine's FP16 clamp: without it AMD Radeon
 integrated graphics rendered pure silence and the engine crashed encoding it.
@@ -171,7 +176,6 @@ integrated graphics rendered pure silence and the engine crashed encoding it.
 | File(s) | Where from | Size | Why |
 | --- | --- | --- | --- |
 | `cublas64_13.dll`, `cublasLt64_13.dll` | NVIDIA's redistributable [`libcublas-windows-x86_64-13.5.1.27-archive.zip`](https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-13.5.1.27-archive.zip) | 391 MB (zip) | The CUDA linear algebra `ggml-cuda.dll` is linked against; too large, and under NVIDIA's licence, to bundle. |
-| Visual C++ 2015–2022 runtime | Microsoft's [`vc_redist.x64.exe`](https://aka.ms/vs/17/release/vc_redist.x64.exe) | small | Installed only when the DLLs are missing. |
 
 A machine with the CUDA 13 toolkit already has cuBLAS on its `PATH` and downloads nothing.
 Behind a proxy, take the two DLLs from the archive's `bin\` folder and drop them next to

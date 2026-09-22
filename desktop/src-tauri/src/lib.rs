@@ -63,6 +63,13 @@ fn studio_data_directory() -> PathBuf {
     std::env::temp_dir().join("yue2-studio")
 }
 
+/// A portable copy, or an installation into a folder it can write to: then the
+/// data, the temporary files and the WebView2 profile all live beside the
+/// executable, and deleting the folder deletes the studio.
+fn keeps_everything_beside_itself() -> bool {
+    studio_data_directory().starts_with(executable_directory())
+}
+
 /// Sets the same deterministic roots before the Axum bridge is spawned. Its
 /// environment is inherited by the bridge and the subsequently started native
 /// engine, so both always refer to one model library.
@@ -71,8 +78,9 @@ fn configure_studio_runtime_paths() {
 
     // Temporary files count as leaving traces too: the engine, the downloader
     // and ffmpeg all write through the system temporary directory, and a
-    // portable copy has no business filling the system drive with them.
-    if is_portable() {
+    // studio that keeps its data beside itself has no business filling the
+    // system drive with them.
+    if keeps_everything_beside_itself() {
         let temporary = executable_directory().join("temp");
         let _ = std::fs::create_dir_all(&temporary);
         for variable in ["TEMP", "TMP"] {
@@ -282,7 +290,7 @@ pub fn run() {
     #[cfg(windows)]
     hide_own_console_window();
 
-    if is_portable() && std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
+    if keeps_everything_beside_itself() && std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
         // The process is still single-threaded here, before Tauri or its
         // worker threads are created, so updating its child WebView environment
         // cannot race with an environment read.
