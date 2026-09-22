@@ -4,7 +4,7 @@ param(
     [string]$Version,
     [string]$ReleaseNotes = "",
     [ValidateSet('auto', 'cuda', 'vulkan', 'all')]
-    [string]$RuntimeBackend = 'cuda'
+    [string]$RuntimeBackend = 'all'
 )
 
 $ErrorActionPreference = 'Stop'

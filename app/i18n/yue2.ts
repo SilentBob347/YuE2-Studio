@@ -134,6 +134,16 @@ const en = {
   composingScore: "Composing…",
   composeScoreHint: "Only the score, from the style and lyrics, without singing: read and edit it, then create.",
   composeScoreCancel: "Click again to stop.",
+  computeBackendLabel: "Compute device",
+  computeBackend_auto: "Auto",
+  computeBackend_cuda: "CUDA",
+  computeBackend_vulkan: "Vulkan",
+  computeBackend_cpu: "Processor",
+  computeBackendHint_auto: "The best device found: CUDA on an NVIDIA card, Vulkan on AMD and Intel, the processor when there is no GPU.",
+  computeBackendHint_cuda: "NVIDIA only, and the fastest there. Needs cuBLAS, downloaded once on the first start.",
+  computeBackendHint_vulkan: "Any modern GPU - AMD, Intel or NVIDIA - through its own driver, nothing to download.",
+  computeBackendHint_cpu: "Works everywhere, but a song takes many times longer than on a GPU.",
+  karaokeNoWords: "No sung words could be heard in this track, so there is nothing to time. The vocal may be too buried or unclear, or the track may be instrumental.",
 } as const;
 
 export type Yue2Strings = { readonly [K in keyof typeof en]: string };
@@ -268,6 +278,16 @@ const ru: Yue2Strings = {
   composingScore: "Сочиняю…",
   composeScoreHint: "Только партитура по стилю и тексту, без пения: прочитайте, поправьте, потом создавайте.",
   composeScoreCancel: "Нажмите ещё раз, чтобы остановить.",
+  computeBackendLabel: "Устройство вычислений",
+  computeBackend_auto: "Авто",
+  computeBackend_cuda: "CUDA",
+  computeBackend_vulkan: "Vulkan",
+  computeBackend_cpu: "Процессор",
+  computeBackendHint_auto: "Лучшее найденное устройство: CUDA на картах NVIDIA, Vulkan на AMD и Intel, процессор, если видеокарты нет.",
+  computeBackendHint_cuda: "Только NVIDIA, и там самый быстрый. Нужен cuBLAS — скачается один раз при первом запуске.",
+  computeBackendHint_vulkan: "Любая современная видеокарта — AMD, Intel или NVIDIA — через её драйвер, ничего скачивать не нужно.",
+  computeBackendHint_cpu: "Работает везде, но песня считается во много раз дольше, чем на видеокарте.",
+  karaokeNoWords: "В треке не удалось расслышать спетых слов, поэтому таймингов нет. Вокал может быть слишком утоплен или неразборчив, либо трек инструментальный.",
 };
 
 const zh: Yue2Strings = {
@@ -400,6 +420,16 @@ const zh: Yue2Strings = {
   composingScore: "正在创作…",
   composeScoreHint: "只根据风格和歌词写出乐谱，不演唱：先阅读、修改，再创作。",
   composeScoreCancel: "再次点击即可停止。",
+  computeBackendLabel: "计算设备",
+  computeBackend_auto: "自动",
+  computeBackend_cuda: "CUDA",
+  computeBackend_vulkan: "Vulkan",
+  computeBackend_cpu: "处理器",
+  computeBackendHint_auto: "自动选择最佳设备：NVIDIA 显卡用 CUDA，AMD 和 Intel 用 Vulkan，没有显卡时用处理器。",
+  computeBackendHint_cuda: "仅限 NVIDIA，也是其上最快的方式。需要 cuBLAS，首次启动时下载一次。",
+  computeBackendHint_vulkan: "任何现代显卡（AMD、Intel 或 NVIDIA）通过自身驱动运行，无需下载。",
+  computeBackendHint_cpu: "任何机器都能运行，但一首歌比在显卡上慢很多倍。",
+  karaokeNoWords: "这首曲目中听不出唱出的歌词，因此无法生成时间轴。人声可能过于模糊或被伴奏掩盖，也可能是纯音乐。",
 };
 
 const ja: Yue2Strings = {
@@ -532,6 +562,16 @@ const ja: Yue2Strings = {
   composingScore: "作曲中…",
   composeScoreHint: "スタイルと歌詞から楽譜だけを書き、歌いません。読んで編集してから作成します。",
   composeScoreCancel: "もう一度クリックすると停止します。",
+  computeBackendLabel: "計算デバイス",
+  computeBackend_auto: "自動",
+  computeBackend_cuda: "CUDA",
+  computeBackend_vulkan: "Vulkan",
+  computeBackend_cpu: "プロセッサ",
+  computeBackendHint_auto: "最適なデバイスを自動選択：NVIDIA は CUDA、AMD と Intel は Vulkan、GPU がなければプロセッサ。",
+  computeBackendHint_cuda: "NVIDIA 専用で、そこでは最速。cuBLAS が必要で、初回起動時に一度だけダウンロードします。",
+  computeBackendHint_vulkan: "AMD、Intel、NVIDIA など最新の GPU をそのドライバーで使います。ダウンロードは不要です。",
+  computeBackendHint_cpu: "どこでも動きますが、GPU より何倍も時間がかかります。",
+  karaokeNoWords: "このトラックでは歌われた言葉が聞き取れないため、タイミングを付けられません。ボーカルが埋もれているか不明瞭か、インストゥルメンタルの可能性があります。",
 };
 
 const ko: Yue2Strings = {
@@ -664,6 +704,16 @@ const ko: Yue2Strings = {
   composingScore: "작곡 중…",
   composeScoreHint: "스타일과 가사로 악보만 쓰고 부르지는 않습니다. 읽고 고친 뒤 만드세요.",
   composeScoreCancel: "다시 누르면 멈춥니다.",
+  computeBackendLabel: "연산 장치",
+  computeBackend_auto: "자동",
+  computeBackend_cuda: "CUDA",
+  computeBackend_vulkan: "Vulkan",
+  computeBackend_cpu: "프로세서",
+  computeBackendHint_auto: "가장 좋은 장치를 고릅니다: NVIDIA는 CUDA, AMD와 Intel은 Vulkan, 그래픽카드가 없으면 프로세서.",
+  computeBackendHint_cuda: "NVIDIA 전용이며 가장 빠릅니다. cuBLAS가 필요하며 첫 실행 때 한 번 내려받습니다.",
+  computeBackendHint_vulkan: "AMD, Intel, NVIDIA 등 최신 그래픽카드를 자체 드라이버로 사용합니다. 내려받을 것이 없습니다.",
+  computeBackendHint_cpu: "어디서나 동작하지만 그래픽카드보다 몇 배 오래 걸립니다.",
+  karaokeNoWords: "이 트랙에서 불린 가사를 알아들을 수 없어 타이밍을 만들 수 없습니다. 보컬이 묻혔거나 불분명하거나 연주곡일 수 있습니다.",
 };
 
 export const yue2 = { en, ru, zh, ja, ko };

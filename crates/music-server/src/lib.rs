@@ -353,6 +353,7 @@ struct OpenRouterTranscriptionRequest {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 struct EngineOptions {
+    backend: music_engine::yue_server::ComputeBackend,
     keep_loaded: bool,
     max_batch: Option<u32>,
     max_seq: Option<u32>,
@@ -365,19 +366,48 @@ struct EngineOptions {
 impl EngineOptions {
     /// Songs one request may draw, and the `--max-batch` the engine starts
     /// with. Each song reserves a KV set, so nothing is reserved unasked.
+    /// Whether the engine will compute on CUDA and so needs cuBLAS: chosen
+    /// outright, or left to ggml on a machine with an NVIDIA card.
+    fn uses_cuda(&self) -> bool {
+        use music_engine::yue_server::ComputeBackend;
+        match self.backend {
+            ComputeBackend::Cuda => true,
+            ComputeBackend::Auto => hardware::hardware().nvidia,
+            ComputeBackend::Vulkan | ComputeBackend::Cpu => false,
+        }
+    }
+
+    /// Whether the engine will compute on Vulkan: chosen outright, or left to
+    /// ggml on a machine whose card is not NVIDIA.
+    fn uses_vulkan(&self) -> bool {
+        use music_engine::yue_server::ComputeBackend;
+        match self.backend {
+            ComputeBackend::Vulkan => true,
+            ComputeBackend::Auto => {
+                let hardware = hardware::hardware();
+                !hardware.nvidia && hardware.gpu_name.is_some()
+            }
+            ComputeBackend::Cuda | ComputeBackend::Cpu => false,
+        }
+    }
+
     fn effective_max_batch(&self) -> u32 {
         self.max_batch.unwrap_or(1).max(1)
     }
 
     fn to_engine(self) -> music_engine::yue_server::YueServerOptions {
         music_engine::yue_server::YueServerOptions {
+            backend: self.backend,
             keep_loaded: self.keep_loaded,
             max_batch: Some(self.effective_max_batch()),
             max_seq: self.max_seq,
             vae_core: self.vae_core,
             vae_halo: self.vae_halo,
             disable_flash_attention: self.disable_flash_attention,
-            clamp_fp16: self.clamp_fp16,
+            // On an AMD Radeon through Vulkan the hidden states leave the FP16
+            // range and the song comes out as pure silence, which the engine's
+            // MP3 path then crashes on; the engine's own clamp fixes it.
+            clamp_fp16: self.clamp_fp16 || self.uses_vulkan(),
         }
     }
 }
@@ -1898,17 +1928,18 @@ async fn restart_engine(state: &AppState) -> Result<(), String> {
     // is not a slow start, it is no start at all. This is the path the studio
     // actually takes on launch, so the fetch belongs here rather than only in
     // the endpoint nothing calls.
-    if !state.engine_runtime.is_ready() {
+    let options = *state.engine_options.read().await;
+    let cuda = options.uses_cuda();
+    if !state.engine_runtime.is_ready(cuda) {
         state
             .engine_runtime
-            .install_missing()
+            .install_missing(cuda)
             .await
-            .map_err(|error| format!("the engine's CUDA libraries could not be downloaded: {error}"))?;
+            .map_err(|error| format!("the engine's runtime libraries could not be installed: {error}"))?;
     }
     // The engine loads eleven gigabytes of weights the moment it starts. If
     // the writing assistant is still holding the card, it does not finish.
     free_the_card_for_the_engine(state).await;
-    let options = *state.engine_options.read().await;
     let models = selected_engine_models(state).await?;
     let config = engine_location(options)
         .resolve(models)
@@ -2366,7 +2397,7 @@ async fn compose_setup_status(state: &AppState, manager_status: model_manager::M
         fields.insert(
             "engine_runtime".into(),
             serde_json::json!({
-                "ready": state.engine_runtime.is_ready(),
+                "ready": state.engine_runtime.is_ready(state.engine_options.read().await.uses_cuda()),
                 "downloading": runtime_active.is_some(),
                 "downloaded_bytes": runtime_active.as_ref().map(|progress| progress.downloaded_bytes).unwrap_or(0),
                 "total_bytes": runtime_total,
@@ -4781,6 +4812,10 @@ mod tests {
         // engine was given is what made a request for two songs fail at once.
         assert_eq!(EngineOptions::default().to_engine().max_batch, Some(1));
         assert_eq!(EngineOptions { max_batch: Some(3), ..EngineOptions::default() }.to_engine().max_batch, Some(3));
+        let vulkan = EngineOptions { backend: music_engine::yue_server::ComputeBackend::Vulkan, ..EngineOptions::default() }.to_engine();
+        assert!(vulkan.clamp_fp16, "Vulkan runs clamp hidden states to FP16");
+        let cuda = EngineOptions { backend: music_engine::yue_server::ComputeBackend::Cuda, ..EngineOptions::default() }.to_engine();
+        assert!(!cuda.clamp_fp16);
         // The assistant is optional: it must survive a restart when configured,
         // and stay unavailable when it is not.
         assert!(restored.assistant.available());

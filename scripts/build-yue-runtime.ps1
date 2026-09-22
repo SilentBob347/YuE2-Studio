@@ -93,7 +93,10 @@ function Invoke-CMakeBuild([string]$backend) {
     # Program databases beside the binaries turn a crash offset into a line.
     $symbols = '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase -DCMAKE_EXE_LINKER_FLAGS=/DEBUG -DCMAKE_SHARED_LINKER_FLAGS=/DEBUG'
     $buildDirectoryName = "build-$backend-$CudaArchitecture"
-    $targets = ($shippedTargets | ForEach-Object { "--target $_" }) -join ' '
+    # With runtime-loaded backends nothing links against ggml-cuda, ggml-vulkan
+    # or the CPU variants, so naming yue-server alone would skip them: the
+    # all-backends build builds the whole tree, as upstream's buildall does.
+    $targets = if ($backend -eq 'all') { '' } else { ($shippedTargets | ForEach-Object { "--target $_" }) -join ' ' }
     $parallelism = [Math]::Max(1, [Environment]::ProcessorCount)
     $vcvars = Get-VcVars64
     # Ninja drives nvcc and cl directly, so the build does not depend on the

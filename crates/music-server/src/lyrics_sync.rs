@@ -61,6 +61,10 @@ impl LyricsSyncConfig {
     }
 }
 
+/// The reason the interface shows when a recogniser hears nothing sung: a
+/// code, not a sentence, so it is put in the reader's language.
+pub const NO_WORDS: &str = "karaoke.no-words";
+
 /// Where the recogniser's binaries live once unpacked. CTranslate2 loads its
 /// CUDA libraries from beside the executable, so they share one directory - the
 /// way Dub Studio arranges it, and the reason its card mode works instead of
@@ -880,7 +884,7 @@ impl LyricsSync {
             })
             .collect();
         if words.is_empty() {
-            bail!("the recogniser found no words to time");
+            bail!(NO_WORDS);
         }
         Ok(words)
     }
@@ -942,6 +946,9 @@ impl LyricsSync {
         let text = fs::read_to_string(&json).with_context(|| format!("read {}", json.display()))?;
         let words = whisper_words_from_json(&text);
         fs::remove_dir_all(&out_dir).ok();
+        if words.is_empty() {
+            bail!(NO_WORDS);
+        }
         Ok(words)
     }
 

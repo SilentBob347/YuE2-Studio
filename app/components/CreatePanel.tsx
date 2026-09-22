@@ -57,6 +57,8 @@ type SamplingText = Record<keyof YueSampling, string>;
 
 /** 9000 semantic frames at 25 per second, the stage's own budget. */
 const MAX_DURATION_SECONDS = 360;
+/** A new prompt's ceiling: 2:10. Examples and prompt files keep their own. */
+const DEFAULT_DURATION_SECONDS = 130;
 const SAMPLING_KEYS: (keyof YueSampling)[] = ['temperature', 'top_p', 'top_k', 'repetition_penalty', 'penalty_window', 'min_tokens', 'max_tokens'];
 /** A quoted chord symbol in ABC: "Am", "F/C", "G7". */
 const CHORD_SYMBOL = /"[^"\n]+"/;
@@ -244,7 +246,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [showNotation, setShowNotation] = useState(true);
 
   // Strings, so an empty field can mean "engine default".
-  const [duration, setDuration] = useState('');
+  const [duration, setDuration] = useState(String(DEFAULT_DURATION_SECONDS));
   const [lmBatch, setLmBatch] = useState('');
   const [synthBatch, setSynthBatch] = useState('');
   const [steps, setSteps] = useState('');
@@ -439,7 +441,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   };
 
   const resetParameters = () => {
-    setDuration(''); setLmBatch(''); setSynthBatch(''); setSteps(''); setCfgScale('');
+    setDuration(String(DEFAULT_DURATION_SECONDS)); setLmBatch(''); setSynthBatch(''); setSteps(''); setCfgScale('');
     setRandomizeSeed(true); setLmSeed(''); setSeed(''); setSemanticTokens('');
     setAbcSampling(emptySampling()); setSemanticSampling(emptySampling());
     setPeakClip(''); setMp3Bitrate('320'); setFormat('mp3');

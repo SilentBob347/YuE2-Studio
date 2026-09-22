@@ -83,14 +83,16 @@ impl EngineRuntime {
         self.downloader.root().to_path_buf()
     }
 
-    /// Whether the engine will find every library it imports.
+    /// Whether the engine will find every library it needs. cuBLAS counts only
+    /// when the engine will compute on CUDA: the bundled engine loads its
+    /// backends at run time, so on an AMD or Intel card, or with Vulkan chosen,
+    /// the CUDA backend is simply never loaded.
     ///
-    /// The Visual C++ runtime counts too: a machine that already has cuBLAS
+    /// The Visual C++ runtime counts always: a machine that already has cuBLAS
     /// but no redistributable has nothing to download and still cannot start
-    /// the engine, and checking only the downloads would have skipped the
-    /// install entirely.
-    pub fn is_ready(&self) -> bool {
-        self.missing().is_empty() && vc_runtime_present()
+    /// the engine.
+    pub fn is_ready(&self, cuda: bool) -> bool {
+        self.missing(cuda).is_empty() && vc_runtime_present()
     }
 
     /// What is still missing, so a caller can report the size before starting.
@@ -98,7 +100,10 @@ impl EngineRuntime {
     /// A machine that already has the libraries on its search path - a CUDA
     /// Toolkit installation - downloads nothing: the engine inherits that path
     /// and finds them there.
-    pub fn missing(&self) -> Vec<&'static Asset> {
+    pub fn missing(&self, cuda: bool) -> Vec<&'static Asset> {
+        if !cuda {
+            return Vec::new();
+        }
         ASSETS
             .iter()
             .filter(|asset| !self.downloader.is_installed(asset))
@@ -107,9 +112,9 @@ impl EngineRuntime {
     }
 
     /// Fetches whatever is missing and waits for it.
-    pub async fn install_missing(&self) -> Result<()> {
+    pub async fn install_missing(&self, cuda: bool) -> Result<()> {
         ensure_vc_runtime().await?;
-        self.downloader.install_all("engine", &self.missing()).await
+        self.downloader.install_all("engine", &self.missing(cuda)).await
     }
 }
 
@@ -387,13 +392,15 @@ mod tests {
         let asset = ASSETS.first().expect("one asset");
         assert!(!runtime.downloader().is_installed(asset));
         assert_eq!(runtime.library_dir(), root);
+        // Off CUDA the engine never loads cuBLAS, so nothing is missing.
+        assert!(runtime.missing(false).is_empty());
 
         std::fs::create_dir_all(runtime.library_dir()).unwrap();
         for library in REQUIRED_LIBRARIES {
             std::fs::write(runtime.library_dir().join(library), b"x").unwrap();
         }
         assert!(runtime.downloader().is_installed(asset));
-        assert!(runtime.is_ready());
+        assert!(runtime.is_ready(true));
         std::fs::remove_dir_all(&root).ok();
     }
 }

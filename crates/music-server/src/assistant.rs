@@ -22,24 +22,24 @@ const VALIDATION: &str = "Before answering, check your own draft: every explicit
 
 /// How YuE2 reads a style prompt, from its checkpoint and the official demo
 /// requests: the text reaches the model verbatim under a `[Tags]` header.
-const STYLE_CONTRACT: &str = r#"style: the style prompt YuE2 reads verbatim. Write it in English as comma-separated descriptors or one or two dense sentences, 15-70 words, in roughly this order: genre and subgenre; mood and energy arc; the lead vocal (gender, timbre, register, delivery) or "instrumental"; the key instruments; tempo as a BPM or a qualitative pace; the language the vocals are sung in (for example "English", "Mandarin", "Russian vocals"); the production character. Be concrete and musical - name instruments and textures, not adjectives about quality. Keep every explicit user constraint: a required vocal gender, instrument, tempo or exclusion is never reversed. Never put lyric lines, a song title or section instructions in the style."#;
+const STYLE_CONTRACT: &str = r#"style: the style prompt YuE2 reads verbatim under its [Tags] header. Write it in English as comma-separated descriptors, 12-50 words, in this order, as the model's authors write it: the language the vocals are sung in first ("English", "Mandarin", "Russian"); genre and subgenre; the lead vocal (gender, timbre, delivery) or "instrumental"; the key instruments and textures; the mood and melodic character; the tempo as "<n> BPM" last. Example: "English, warm piano pop, expressive female voice, acoustic piano, rounded bass and light drums, lyrical memorable melody, unhurried phrasing, 88 BPM". Be concrete and musical - instruments and textures, not adjectives about quality. The request has no tempo, key, negative-prompt or instruction field, so everything about the sound lives in these descriptors: never write instructions to the model ("make it...", "the song should...") or anything that is not a descriptor. Keep every explicit user constraint: a required vocal gender, instrument, tempo or exclusion is never reversed. Never put lyric lines, a song title or section instructions in the style."#;
 
 /// The lyric rules. YuE2 sings the words it is given and plans the song's
 /// length around them, so structure and density decide the result.
-const LYRICS_RULES: &str = r#"lyrics: singable lyrics organised into sections, each introduced by a tag ALONE on its own line: [Intro] [Verse 1] [Pre-Chorus] [Chorus] [Verse 2] [Bridge] [Outro], plus [Instrumental Break] or [Guitar Solo] where an instrumental passage belongs. Put a blank line between sections and never words on the same line as a tag. Size the song to its intended length: about 2 to 3 sung words per second, a verse of 4-8 lines, a chorus repeated where a real song repeats it. Keep neighbouring lines close in length so none is sung rushed. Stage directions, instruments and tempo never belong in the lyrics - they go in the style. For an instrumental, write the same section tags with no words under them. Write the lyrics in the language the user wrote their request in: a Russian idea gets Russian lyrics, a Japanese one Japanese; the style stays English but names that language."#;
+const LYRICS_RULES: &str = r#"lyrics: the words YuE2 sings, and nothing else, organised into sections. Each section opens with a tag ALONE on its own line - [Intro] [Verse] [Pre-Chorus] [Chorus] [Bridge] [Outro], numbered where it helps ([Verse 1], [Verse 2]), plus [Instrumental Break] where an instrumental passage belongs - with a blank line between sections and never words on the same line as a tag. Size the song to its intended length: about 2 to 3 sung words per second, a verse of 4-8 lines, a chorus repeated where a real song repeats it. Keep neighbouring lines close in syllable count so none is sung rushed. The lyrics carry no implementation notes: stage directions, singer cues, instruments, tempo and pronunciation marks all stay out - the model sings whatever text it is given. For an instrumental, write the section tags with no words under them. Write the lyrics in the language the user wrote their request in: a Russian idea gets Russian lyrics, a Japanese one Japanese; the style stays English but names that language first."#;
 
 const DICTION_RULE: &str = r#"
-Diction: the model sings the letters it is given. In Russian write ё as ё rather than е, and mark the stressed vowel with a combining acute - за́мок, замо́к - only where the word would otherwise be read wrong: homographs, rare words and proper names. Never accent every word. In other languages respell only the individual words that come out wrong."#;
+Diction: the model sings the letters it is given and there is no pronunciation channel. Write every word in its ordinary spelling - in Russian write ё as ё, never е - and choose words whose stress falls naturally on the long notes of the line."#;
 
 const DUET_RULE: &str = r#"
-Two voices: name both singers in the style ("male and female duet, warm baritone and airy soprano") and mark the switches in the lyrics with a short tag alone on its own line - [Male Vocals], [Female Vocals], [Both] - switching at section or couplet level, never line by line. A tag of more than two or three words gets sung aloud."#;
+Two voices: describe both singers in the style ("male and female duet, warm baritone and airy soprano"). YuE2 has no singer tags, so do not write singer cues into the lyrics; let the sections themselves - a verse each, a shared chorus - carry the exchange."#;
 
 const INSTRUMENTAL_RULE: &str = r#"
 Instrumental: say "instrumental, no vocals" in the style and name the instrument carrying the lead melody."#;
 
 /// The score YuE2 writes and reads back: ABC notation in the layout of its
 /// planning stage and of SheetSage2's transcriptions.
-const SCORE_CONTRACT: &str = r#"abc: the complete revised ABC score. Keep the layout the model writes: header lines X:1, T:, M: (metre), L: (unit length), Q: (tempo, 1/4=<bpm>), the voice declarations V: Vocal and V: Ins, and K: (key); then the song as sections, each opened by a comment line such as "% verse" or "% chorus", alternating "V: Vocal" and "V: Ins" blocks. Bars are separated by |; z is a rest and Z a whole-bar rest (Z3 for three bars); chord symbols are quoted before the note they start on ("Am"c4). Chord symbols belong only to a score in full mode: keep them if the score has them, and do not add them to a melody-only score unless asked. Every bar must add up to the metre. Make exactly the change the request asks for - reharmonise, transpose, change the tempo, lengthen or shorten a section, write a solo - and keep the rest of the score note for note. When the melody changes, keep the syllable count of the lyric lines it carries."#;
+const SCORE_CONTRACT: &str = r#"abc: the complete revised ABC score in YuE2's native dialect. Keep the source's header exactly - X:1, T:, M:, L: (keep the exported unit length), Q:1/4=<bpm>, the declarations V: Vocal and V: Ins, K: - and its layout: sections opened by comment lines ("% verse", "% chorus", "% bridge", "% interlude"), each group of one to four bars written as a "V: Vocal" block followed by a "V: Ins" block. Both voices are single melody lines; Ins is an instrumental theme or solo, never a chord staff. Harmony is written as quoted chord symbols in the Vocal voice before the note or rest they start on, including while the voice rests ("Am7"z16). Native chord qualities only: major (no suffix), m, dim, aug, 7, maj7, m7, dim7, m7b5, sus4, sus2, 6, m6, 7sus4, m(maj7), with optional slash bass (F#m7/C#); anything else (maj9, 13, alt) is not native. Durations are multiples of L from 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48 only; any other length is tied (C8-C2), a tie joins equal pitches, a rest is never tied, and a chord change inside a held note splits it with a tie ("C"E16-"Am7"E16). Every bar adds up to the metre (with L:1/32 a 4/4 bar is 32 units, 3/4 is 24); Z, Z2, Z3 are whole resting bars counted by measures, never used across a chord or key change. Accidentals last to the barline and carry across octaves by letter (after ^F, a later f in the bar is sharp too). No tuplets, grace notes, chords of stacked notes, repeat signs, slurs, decorations or w: lyric lines. A metre or key change starts a new group with matching M: or K: in both voices. Chord symbols belong to a full-mode score only: keep them if the score has them, and do not add them to a melody-only score unless asked. Make exactly the change the request asks for - reharmonise, transpose, change the tempo, lengthen or shorten a section, write a solo - and keep every other bar of both voices note for note: same pitches, onsets and durations. When the melody changes, keep the syllable count of the lyric lines it carries. A tempo change is a new Q: and the same BPM in the style."#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -120,7 +120,7 @@ pub fn instructions(request: &AssistRequest) -> (String, &'static [&'static str]
             format!(
                 "You are a music editor working on the ABC score YuE2 planned for a song; YuE2 renders whatever score you return.\n\
                  Given the current score, its style and lyrics, and a musical request, revise the score. {SCORE_CONTRACT}\n\
-                 If the request also calls for a different style - new instruments, a new genre - write the revised style too, following this: {STYLE_CONTRACT}\n\
+                 If the request changes the tempo, the instruments or the genre, write the revised style too, so the style and the score agree, following this: {STYLE_CONTRACT}\n\
                  Answer with ONLY a JSON object with keys: abc, and style only when it should change."
             ),
             &["abc"],
@@ -430,7 +430,8 @@ mod tests {
         assert!(message.contains("Current score:"));
         assert!(message.contains("K:C"));
         let (system, _) = instructions(&request(AssistTarget::Score));
-        assert!(system.contains("keep the rest of the score note for note"));
+        assert!(system.contains("keep every other bar of both voices note for note"));
+        assert!(system.contains("Native chord qualities only"));
     }
 
     #[test]
@@ -454,7 +455,8 @@ mod tests {
         russian.description = "панк-рок про ёжика в бункере".into();
         let (system, _) = instructions(&russian);
         assert!(system.contains("language the user wrote their request in"));
-        assert!(system.contains("combining acute"));
+        assert!(system.contains("write ё as ё"));
+        assert!(!system.contains("combining acute"), "YuE2 has no pronunciation channel");
     }
 
     #[test]
@@ -462,10 +464,12 @@ mod tests {
         let mut solo = request(AssistTarget::All);
         solo.style = String::new();
         solo.lyrics = String::new();
-        assert!(!instructions(&solo).0.contains("[Male Vocals]"));
+        assert!(!instructions(&solo).0.contains("Two voices:"));
         let mut duet = solo.clone();
         duet.description = "дуэт мужского и женского голоса, поп-баллада".into();
-        assert!(instructions(&duet).0.contains("[Male Vocals]"));
+        let duet_system = instructions(&duet).0;
+        assert!(duet_system.contains("Two voices:"));
+        assert!(!duet_system.contains("[Male Vocals]"), "YuE2 has no singer tags");
     }
 
     #[test]

@@ -10,7 +10,10 @@ import { useI18n } from '../context/I18nContext';
  * request may compose, which is why the create panel clamps to it.
  */
 
+type ComputeBackend = 'auto' | 'cuda' | 'vulkan' | 'cpu';
+
 interface EngineOptions {
+  backend: ComputeBackend;
   keep_loaded: boolean;
   max_batch: number | null;
   max_seq: number | null;
@@ -21,6 +24,7 @@ interface EngineOptions {
 }
 
 const DEFAULTS: EngineOptions = {
+  backend: 'auto',
   keep_loaded: false,
   max_batch: null,
   max_seq: null,
@@ -47,6 +51,7 @@ const Toggle: React.FC<{ label: string; hint: string; checked: boolean; onChange
 
 export const EngineSettings: React.FC = () => {
   const { t } = useI18n();
+  const tt = t as unknown as (key: string) => string;
   const [options, setOptions] = useState<EngineOptions>(DEFAULTS);
   const [saved, setSaved] = useState<EngineOptions>(DEFAULTS);
   const [busy, setBusy] = useState(false);
@@ -148,6 +153,25 @@ export const EngineSettings: React.FC = () => {
       <h4 className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white">
         <Cpu size={16} className="text-pink-500" /> {t('localEngine')}
       </h4>
+
+      <div className="rounded-xl border border-zinc-200 p-3 dark:border-white/10">
+        <span className="block text-sm font-medium text-zinc-800 dark:text-zinc-100">{tt('computeBackendLabel')}</span>
+        <div className="mt-2 grid grid-cols-2 gap-1 rounded-lg bg-zinc-100 p-1 sm:grid-cols-4 dark:bg-black/30" role="radiogroup" aria-label={tt('computeBackendLabel')}>
+          {(['auto', 'cuda', 'vulkan', 'cpu'] as const).map(value => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={options.backend === value}
+              onClick={() => setOptions(current => ({ ...current, backend: value }))}
+              className={`rounded-md px-2 py-1.5 text-xs font-semibold transition-all ${options.backend === value ? 'bg-white text-black shadow-sm dark:bg-zinc-700 dark:text-white' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
+            >
+              {tt(`computeBackend_${value}`)}
+            </button>
+          ))}
+        </div>
+        <span className="mt-2 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">{tt(`computeBackendHint_${options.backend}`)}</span>
+      </div>
 
       <Toggle
         label={t('keepLoadedLabel')}

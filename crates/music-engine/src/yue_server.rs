@@ -46,10 +46,37 @@ pub struct YueServerLaunchConfig {
     pub options: YueServerOptions,
 }
 
+/// The ggml backend the engine computes on. The bundled engine loads its
+/// backends at run time, so one build serves NVIDIA (CUDA), AMD and Intel
+/// (Vulkan) and the processor; `Auto` lets ggml take the best device it finds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComputeBackend {
+    #[default]
+    Auto,
+    Cuda,
+    Vulkan,
+    Cpu,
+}
+
+impl ComputeBackend {
+    /// The device name `yue-server` reads from `GGML_BACKEND`, none for `Auto`.
+    pub fn ggml_device(self) -> Option<&'static str> {
+        match self {
+            Self::Auto => None,
+            Self::Cuda => Some("CUDA0"),
+            Self::Vulkan => Some("Vulkan0"),
+            Self::Cpu => Some("CPU"),
+        }
+    }
+}
+
 /// Launch flags of `yue-server`, as its usage text documents them. They are
 /// read once at startup, so changing one restarts the engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct YueServerOptions {
+    /// The device to compute on, passed as `GGML_BACKEND`.
+    pub backend: ComputeBackend,
     /// `--keep-loaded`: keep every module resident instead of evicting
     /// between the AR, NAR and VAE stages.
     pub keep_loaded: bool,
@@ -194,6 +221,14 @@ impl YueServerSupervisor {
 
         let mut command = Command::new(&self.config.executable);
         command.args(self.config.arguments());
+        match self.config.options.backend.ggml_device() {
+            Some(device) => {
+                command.env("GGML_BACKEND", device);
+            }
+            None => {
+                command.env_remove("GGML_BACKEND");
+            }
+        }
         if let Some(directory) = self.config.executable.parent() {
             command.current_dir(directory);
         }
@@ -456,6 +491,15 @@ pub fn startup_log_tail(lines: usize) -> Vec<String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_compute_backend_names_the_device_ggml_reads() {
+        assert_eq!(ComputeBackend::Auto.ggml_device(), None);
+        assert_eq!(ComputeBackend::Cuda.ggml_device(), Some("CUDA0"));
+        assert_eq!(ComputeBackend::Vulkan.ggml_device(), Some("Vulkan0"));
+        assert_eq!(ComputeBackend::Cpu.ggml_device(), Some("CPU"));
+        assert_eq!(serde_json::to_value(ComputeBackend::Vulkan).unwrap(), "vulkan");
+    }
+
     fn fresh_directory(label: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("yue-engine-{label}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&path);
@@ -495,6 +539,7 @@ mod tests {
     #[test]
     fn options_become_the_documented_flags() {
         let arguments = YueServerOptions {
+            backend: ComputeBackend::Vulkan,
             keep_loaded: true,
             max_batch: Some(2),
             max_seq: Some(8192),
