@@ -26,6 +26,7 @@ export const STRINGS = {
     features: [
       ['Full songs', 'Up to six minutes from a style and lyrics. On an RTX 4090 with the Q8_0 set a 3:38 song renders in about 46 seconds.'],
       ['An editable score', 'The composition comes back as ABC notation, engraved as sheet music. Edit it and create again: the composition stays, the performance changes.'],
+      ['Compose the score first', 'Only the score, in seconds, before anything is sung: read it, fix it, then create. The studio’s take on yue2.cpp’s yue-plan.'],
       ['Covers', 'SheetSage2 writes the melody of any recording down as a score; YuE2 sings it with your lyrics in your style.'],
       ['Exact replay', 'Every track keeps its request and audio codes: re-render it bit for bit, or with other steps, a new sound seed, several variations.'],
       ['110 ready examples', 'The style, lyrics and score sets that ship with yue2.cpp, covers included, one click to load.'],
@@ -103,6 +104,7 @@ export const STRINGS = {
     features: [
       ['Целые песни', 'До шести минут по стилю и тексту. На RTX 4090 с набором Q8_0 песня в 3:38 рендерится примерно за 46 секунд.'],
       ['Партитура, которую можно править', 'Композиция возвращается в нотации ABC и отрисовывается нотами. Поправьте и создайте снова: композиция остаётся, меняется исполнение.'],
+      ['Сначала партитура', 'Только партитура за секунды, ещё до пения: прочитайте, поправьте, потом создавайте. Аналог yue-plan из yue2.cpp.'],
       ['Каверы', 'SheetSage2 записывает мелодию любой записи в партитуру, YuE2 поёт её с вашим текстом в вашем стиле.'],
       ['Точный повтор', 'Каждый трек хранит запрос и аудиокоды: отрендерить заново один в один или с другими шагами, новым сидом звука, несколькими вариациями.'],
       ['110 готовых примеров', 'Наборы стиля, текста и партитуры из yue2.cpp, включая каверы, — загружаются одним кликом.'],
@@ -180,6 +182,7 @@ export const STRINGS = {
     features: [
       ['完整歌曲', '根据风格和歌词生成最长六分钟的歌曲。在 RTX 4090 上使用 Q8_0 模型组，3:38 的歌曲约 46 秒完成。'],
       ['可编辑的乐谱', '作品以 ABC 记谱法返回并排版为五线谱。修改后再次创作：作品保持不变，演绎随之改变。'],
+      ['先写乐谱', '在演唱之前几秒内只写出乐谱：阅读、修改，再创作。相当于 yue2.cpp 的 yue-plan。'],
       ['翻唱', 'SheetSage2 把任意录音的旋律记成乐谱，YuE2 用你的歌词和风格演唱它。'],
       ['精确重放', '每首曲目都保存请求和音频编码：可逐位重新渲染，也可换步数、换声音种子或生成多个变体。'],
       ['110 个现成示例', 'yue2.cpp 自带的风格、歌词和乐谱组合（含翻唱），一键载入。'],
@@ -257,6 +260,7 @@ export const STRINGS = {
     features: [
       ['フルソング', 'スタイルと歌詞から最長 6 分。RTX 4090 と Q8_0 セットで 3:38 の曲が約 46 秒でレンダリングされます。'],
       ['編集できる楽譜', '曲は ABC 記譜で返され、楽譜として表示されます。編集してもう一度作成すると、曲はそのままに演奏が変わります。'],
+      ['まず楽譜だけ', '歌う前に数秒で楽譜だけを作成。読んで直してから作成します。yue2.cpp の yue-plan に相当。'],
       ['カバー', 'SheetSage2 があらゆる録音のメロディを楽譜に書き起こし、YuE2 があなたの歌詞とスタイルで歌います。'],
       ['完全な再現', '各トラックはリクエストとオーディオコードを保存。ビット単位で再レンダリング、またはステップや音のシード、バリエーションを変えて再生成できます。'],
       ['110 のサンプル', 'yue2.cpp に同梱のスタイル・歌詞・楽譜のセット（カバーを含む）をワンクリックで読み込めます。'],
@@ -334,6 +338,7 @@ export const STRINGS = {
     features: [
       ['완성곡', '스타일과 가사로 최대 6분. RTX 4090과 Q8_0 세트에서 3:38 길이의 곡이 약 46초 만에 렌더링됩니다.'],
       ['편집 가능한 악보', '곡은 ABC 표기로 돌아와 악보로 그려집니다. 고친 뒤 다시 만들면 곡은 그대로, 연주가 바뀝니다.'],
+      ['악보 먼저', '노래하기 전에 몇 초 만에 악보만 씁니다. 읽고 고친 뒤 만드세요. yue2.cpp의 yue-plan에 해당합니다.'],
       ['커버', 'SheetSage2가 어떤 녹음이든 멜로디를 악보로 받아 적고, YuE2가 내 가사와 스타일로 부릅니다.'],
       ['정확한 재현', '모든 트랙은 요청과 오디오 코드를 저장합니다. 비트 단위로 다시 렌더링하거나 스텝, 사운드 시드, 변주를 바꿔 만들 수 있습니다.'],
       ['예제 110개', 'yue2.cpp에 포함된 스타일·가사·악보 세트(커버 포함)를 한 번에 불러옵니다.'],
