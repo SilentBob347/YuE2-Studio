@@ -144,6 +144,7 @@ const en = {
   computeBackendHint_vulkan: "Through the card's own driver, nothing to download. Verified on NVIDIA; experimental on AMD and Intel.",
   computeBackendHint_cpu: "Works everywhere, but a song takes many times longer than on a GPU.",
   karaokeNoWords: "No sung words could be heard in this track, so there is nothing to time. The vocal may be too buried or unclear, or the track may be instrumental.",
+  engineWaitsForModels: "YuE2 engine waits for a model set",
 } as const;
 
 export type Yue2Strings = { readonly [K in keyof typeof en]: string };
@@ -288,6 +289,7 @@ const ru: Yue2Strings = {
   computeBackendHint_vulkan: "Через драйвер самой карты, ничего скачивать не нужно. Проверено на NVIDIA; на AMD и Intel — экспериментально.",
   computeBackendHint_cpu: "Работает везде, но песня считается во много раз дольше, чем на видеокарте.",
   karaokeNoWords: "В треке не удалось расслышать спетых слов, поэтому таймингов нет. Вокал может быть слишком утоплен или неразборчив, либо трек инструментальный.",
+  engineWaitsForModels: "Движок YuE2 ждёт модели",
 };
 
 const zh: Yue2Strings = {
@@ -430,6 +432,7 @@ const zh: Yue2Strings = {
   computeBackendHint_vulkan: "通过显卡自身驱动运行，无需下载。已在 NVIDIA 上验证；在 AMD 和 Intel 上为实验性质。",
   computeBackendHint_cpu: "任何机器都能运行，但一首歌比在显卡上慢很多倍。",
   karaokeNoWords: "这首曲目中听不出唱出的歌词，因此无法生成时间轴。人声可能过于模糊或被伴奏掩盖，也可能是纯音乐。",
+  engineWaitsForModels: "YuE2 引擎等待模型组",
 };
 
 const ja: Yue2Strings = {
@@ -572,6 +575,7 @@ const ja: Yue2Strings = {
   computeBackendHint_vulkan: "カード自身のドライバーで動作し、ダウンロードは不要です。NVIDIA で確認済み、AMD と Intel では実験的です。",
   computeBackendHint_cpu: "どこでも動きますが、GPU より何倍も時間がかかります。",
   karaokeNoWords: "このトラックでは歌われた言葉が聞き取れないため、タイミングを付けられません。ボーカルが埋もれているか不明瞭か、インストゥルメンタルの可能性があります。",
+  engineWaitsForModels: "YuE2 エンジンはモデルセット待ち",
 };
 
 const ko: Yue2Strings = {
@@ -714,6 +718,7 @@ const ko: Yue2Strings = {
   computeBackendHint_vulkan: "그래픽카드 자체 드라이버로 동작하며 내려받을 것이 없습니다. NVIDIA에서 확인했고 AMD와 Intel에서는 실험적입니다.",
   computeBackendHint_cpu: "어디서나 동작하지만 그래픽카드보다 몇 배 오래 걸립니다.",
   karaokeNoWords: "이 트랙에서 불린 가사를 알아들을 수 없어 타이밍을 만들 수 없습니다. 보컬이 묻혔거나 불분명하거나 연주곡일 수 있습니다.",
+  engineWaitsForModels: "YuE2 엔진이 모델 세트를 기다립니다",
 };
 
 export const yue2 = { en, ru, zh, ja, ko };

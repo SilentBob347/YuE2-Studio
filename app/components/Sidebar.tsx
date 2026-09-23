@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Disc, Library, Moon, Newspaper, Search, SlidersHorizontal, Sun } from 'lucide-react';
 import { View } from '../types';
 import { useI18n } from '../context/I18nContext';
+import { profileLabel } from '../services/modelCatalog';
 import { ResourceMonitor } from './ResourceMonitor';
 
 interface SidebarProps {
@@ -32,6 +33,7 @@ const StatusLine: React.FC<{ active: boolean; pending?: boolean; label: string }
 
 const SystemWidget: React.FC<{ isOpen?: boolean }> = ({ isOpen }) => {
   const { t } = useI18n();
+  const tt = t as unknown as (key: string) => string;
   const [setup, setSetup] = useState<NativeSetupStatus | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const [openRouter, setOpenRouter] = useState<{ configured?: boolean } | null>(null);
@@ -70,8 +72,11 @@ const SystemWidget: React.FC<{ isOpen?: boolean }> = ({ isOpen }) => {
   const openRouterConfigured = openRouter?.configured === true;
   const engineReady = setup?.engine_ready === true;
   const modelReady = setup?.ready === true;
-  const profile = setup?.selected_profile_id || (setup?.selected_component_ids?.length ? t('customSet') : t('noProfile'));
-  const engineLabel = unreachable ? t('engineUnavailable') : engineReady ? t('engineReachable') : t('engineStarting');
+  const profile = setup?.selected_profile_id
+    ? profileLabel(t, { id: setup.selected_profile_id, label: setup.selected_profile_id })
+    : (setup?.selected_component_ids?.length ? t('customSet') : t('noProfile'));
+  // Without a model set on disk the engine is not starting, it is waiting.
+  const engineLabel = unreachable ? t('engineUnavailable') : engineReady ? t('engineReachable') : modelReady ? t('engineStarting') : tt('engineWaitsForModels');
   const modelLabel = modelReady ? `${t('profileReady')}: ${profile}` : t('profileNotInstalled');
 
   if (!isOpen) {

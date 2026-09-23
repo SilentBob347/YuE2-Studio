@@ -621,14 +621,21 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     assistRun.current = run;
     setAssisting(target);
     setError(null);
+    // An idea in the simple mode is a new song: nothing left in the form from
+    // the last one - its words, its sound, its score - is carried into it.
+    const freshSong = mode === 'simple' && target === 'all';
+    if (freshSong) {
+      setAbc('');
+      setSemanticTokens('');
+    }
     try {
       const payload = JSON.stringify({
         target,
-        description: name.trim(),
+        description: freshSong ? '' : name.trim(),
         instruction: (target === 'score' ? scoreInstruction : assistInstruction).trim(),
-        lyrics: lyrics.trim(),
-        style: style.trim(),
-        abc: abc.trim(),
+        lyrics: freshSong ? '' : lyrics.trim(),
+        style: freshSong ? '' : style.trim(),
+        abc: freshSong ? '' : abc.trim(),
         duration_seconds: numberOrUndefined(duration) ?? 120,
         instrumental,
       });

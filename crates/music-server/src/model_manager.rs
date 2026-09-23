@@ -624,6 +624,19 @@ fn part_path(path: &Path) -> PathBuf {
     PathBuf::from(value)
 }
 
+/// The declared set whose components are exactly these, whatever order they
+/// arrive in: picking every component of a set by hand is choosing that set.
+pub fn profile_matching(component_ids: &[String]) -> Option<&'static str> {
+    let mut wanted: Vec<&str> = component_ids.iter().map(String::as_str).collect();
+    wanted.sort_unstable();
+    wanted.dedup();
+    profiles().into_iter().find_map(|profile| {
+        let mut declared = profile.components.clone();
+        declared.sort_unstable();
+        (declared == wanted).then_some(profile.id)
+    })
+}
+
 fn profiles() -> Vec<Profile> {
     vec![
         profile("light", "Light - Q5_K_M backbone (6 GB cards)", &["backbone-q5", "vae-f32", "transcriber-q5"]),
@@ -667,6 +680,15 @@ fn c(id: &'static str, kind: &'static str, filename: &'static str, bytes: u64, s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_hand_picked_set_equal_to_a_declared_one_is_that_set() {
+        let ids = |list: &[&str]| list.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+        assert_eq!(profile_matching(&ids(&["transcriber-f32", "backbone-bf16", "vae-f32"])), Some("native"));
+        assert_eq!(profile_matching(&ids(&["backbone-q8", "vae-f32", "transcriber-q8"])), Some("quality-q8"));
+        assert_eq!(profile_matching(&ids(&["backbone-q8", "vae-f32"])), None);
+        assert_eq!(profile_matching(&ids(&["backbone-q8", "vae-f32", "transcriber-f32"])), None);
+    }
 
     #[test]
     fn recommended_profile_is_a_complete_runnable_set() {

@@ -509,17 +509,22 @@ pub async fn serve() -> anyhow::Result<()> {
     let settings_path = studio_settings_path();
     let persisted = load_studio_settings(&settings_path);
     let model_manager = ModelManager::from_environment()?;
-    let selected_component_ids = persisted
+    let persisted_components = persisted
         .as_ref()
         .and_then(|settings| settings.selected_component_ids.clone())
         .filter(|ids| model_manager.installed_component_files(ids).is_ok());
-    let selected_profile_id = if selected_component_ids.is_some() {
-        None
-    } else {
-        persisted
-            .as_ref()
-            .and_then(|settings| settings.selected_profile_id.clone())
-            .or_else(|| Some(hardware::recommended_local_profile().into()))
+    let (selected_profile_id, selected_component_ids) = match persisted_components {
+        Some(ids) => match model_manager::profile_matching(&ids) {
+            Some(profile) => (Some(profile.to_owned()), None),
+            None => (None, Some(ids)),
+        },
+        None => (
+            persisted
+                .as_ref()
+                .and_then(|settings| settings.selected_profile_id.clone())
+                .or_else(|| Some(hardware::recommended_local_profile().into())),
+            None,
+        ),
     };
     let state = AppState {
         configuration: Arc::new(RwLock::new(sanitize_persisted_configuration(
@@ -3605,7 +3610,7 @@ async fn persist_completed_download_profile(state: AppState, job_id: String) {
         let Some(job) = state.model_manager.download_job(&job_id).await else { return; };
         match job.status {
             model_manager::DownloadStatus::Completed => {
-                if let Some(profile_id) = job.profile_id {
+                if let Some(profile_id) = job.profile_id.or_else(|| model_manager::profile_matching(&job.component_ids).map(str::to_owned)) {
                     *state.selected_profile_id.write().await = Some(profile_id);
                     *state.selected_component_ids.write().await = None;
                 } else if state.model_manager.installed_component_files(&job.component_ids).is_ok() {
@@ -3632,7 +3637,8 @@ async fn setup_select(
     State(state): State<AppState>,
     Json(request): Json<SetupSelectRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
-    if let Some(profile_id) = request.profile_id.clone().filter(|value| !value.trim().is_empty()) {
+    let matched = request.component_ids.as_deref().and_then(model_manager::profile_matching).map(str::to_owned);
+    if let Some(profile_id) = request.profile_id.clone().filter(|value| !value.trim().is_empty()).or(matched) {
         let known = state.model_manager.catalog().profiles.iter().any(|profile| profile.id == profile_id);
         if !known {
             return Err(api_error(StatusCode::BAD_REQUEST, format!("unknown profile {profile_id}")));
