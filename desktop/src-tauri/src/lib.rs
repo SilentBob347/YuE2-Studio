@@ -223,8 +223,13 @@ fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
         // kill-on-close job: without releasing it, the installer died with the
         // studio a moment after starting and the update never happened.
         let cleanup = app.clone();
+        // Started from the studio, the installer did not find the previous
+        // folder and installed a second copy into its default one. NSIS takes
+        // the folder as `/D=`, which must be the last argument and unquoted.
+        let install_directory = format!("/D={}", executable_directory().display());
         let updater = match app
             .updater_builder()
+            .installer_arg(install_directory)
             .on_before_exit(move || {
                 cleanup.cleanup_before_exit();
                 if !music_engine::process_group::release_children() {

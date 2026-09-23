@@ -10,7 +10,9 @@ Windows build.
 - **Updates install from inside the studio.** Pressing Install closed the studio and
   nothing changed: the installer was started inside the studio's own process group,
   which Windows ends together with the studio, so it died a moment after starting.
-  The installer is now let go before the studio exits. Versions 1.0.0 and 1.0.1 still
+  The installer is now let go before the studio exits, and it is told the folder the
+  studio lives in: started from the studio it used to miss the previous folder and put
+  a second copy into the default one. Versions 1.0.0 and 1.0.1 still
   carry the old behaviour, so from them the update is downloaded once by hand; from
   1.0.2 on the studio updates itself.
 
