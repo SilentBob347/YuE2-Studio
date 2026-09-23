@@ -240,7 +240,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [name, setName] = useState('');
   const [style, setStyle] = useState('');
   const [lyrics, setLyrics] = useState('');
-  const [instrumental, setInstrumental] = useState(false);
   const [abc, setAbc] = useState('');
   const [cot, setCot] = useState<YueCot | ''>('');
   const [showNotation, setShowNotation] = useState(true);
@@ -285,6 +284,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [composing, setComposing] = useState(false);
   const composeRun = useRef<AbortController | null>(null);
   const [coverSource, setCoverSource] = useState<string>('');
+  // The recording being covered, so it can be listened to next to its score.
+  const [coverAudio, setCoverAudio] = useState<string | null>(null);
   const [coverMelodyOnly, setCoverMelodyOnly] = useState(true);
   const promptFile = useRef<HTMLInputElement | null>(null);
   const scoreFile = useRef<HTMLInputElement | null>(null);
@@ -388,7 +389,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     if (title !== undefined) setName(title);
     if (typeof request.style === 'string') setStyle(request.style);
     if (typeof request.lyrics === 'string') setLyrics(request.lyrics);
-    setInstrumental(false);
     setAbc(typeof request.abc === 'string' ? request.abc.trimEnd() : '');
     setCot(request.cot === 'full' || request.cot === 'melody' || request.cot === 'off' ? request.cot : '');
     setDuration(asText(request.duration ?? request.duration_seconds));
@@ -419,6 +419,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setMode('studio');
   }, [initialData, applyRequest]);
 
+  useEffect(() => () => { if (coverAudio?.startsWith('blob:')) URL.revokeObjectURL(coverAudio); }, [coverAudio]);
+
   // A library track to cover: its recording becomes the score, and its own
   // words start the lyric sheet when there is nothing there yet.
   useEffect(() => {
@@ -426,6 +428,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       const detail = (event as CustomEvent<{ song: Song; melodyOnly: boolean }>).detail;
       if (!detail?.song) return;
       setCoverSource(detail.song.title);
+      setCoverAudio(detail.song.audioUrl ?? null);
       if (detail.song.lyrics?.trim()) setLyrics(current => (current.trim() ? current : detail.song.lyrics));
       setMode('cover');
       void runTranscription({ songId: detail.song.id }, detail.melodyOnly);
@@ -451,7 +454,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   }, [lyrics, name]);
 
   const reset = () => {
-    setName(''); setStyle(''); setLyrics(''); setInstrumental(false); setAbc(''); setCot('');
+    setName(''); setStyle(''); setLyrics(''); setAbc(''); setCot('');
     resetParameters();
     setCoverPrompt('');
     setError(null);
@@ -475,8 +478,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const buildRequest = (forFile = false): YueRequest => {
     const request: YueRequest = {
       style: style.trim(),
-      // An instrumental has no words, whatever is still sitting in the box.
-      lyrics: instrumental ? '' : lyrics.replace(/\r\n?/g, '\n').trim(),
+      lyrics: lyrics.replace(/\r\n?/g, '\n').trim(),
       output_format: format,
     };
     if (abc.trim() && effectiveCot !== 'off') request.abc = abc.trim();
@@ -568,7 +570,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       setCot(melodyOnly ? 'melody' : 'full');
       setSemanticTokens('');
       setShowNotation(true);
-      setMode('studio');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
@@ -588,7 +589,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       const pinned = randomizeSeed ? undefined : numberOrUndefined(lmSeed);
       const score = await composeScore({
         style: style.trim(),
-        lyrics: instrumental ? '' : lyrics.replace(/\r\n?/g, '\n').trim(),
+        lyrics: lyrics.replace(/\r\n?/g, '\n').trim(),
         cot: effectiveCot,
         lmSeed: pinned !== undefined && pinned >= 0 ? pinned : undefined,
         abcSampling: samplingFrom(abcSampling),
@@ -637,7 +638,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         style: freshSong ? '' : style.trim(),
         abc: freshSong ? '' : abc.trim(),
         duration_seconds: numberOrUndefined(duration) ?? 120,
-        instrumental,
       });
       setAssistStage('preparing');
       setAssistDraft('');
@@ -849,7 +849,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                 onChange={event => {
                   const file = event.target.files?.[0];
                   event.target.value = '';
-                  if (file) { setCoverSource(file.name); void runTranscription({ file }, coverMelodyOnly); }
+                  if (file) {
+                    setCoverSource(file.name);
+                    setCoverAudio(URL.createObjectURL(file));
+                    void runTranscription({ file }, coverMelodyOnly);
+                  }
                 }}
               />
               <button
@@ -862,6 +866,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                 {transcribing !== null ? `${tt('transcribing')} · ${transcribing}` : tt('coverPickRecording')}
               </button>
               <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('coverFromLibraryHint')}</p>
+              {coverAudio && (
+                <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-white/5">
+                  <p className="mb-1.5 truncate text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">{tt('coverListen')} · {coverSource}</p>
+                  <audio key={coverAudio} src={coverAudio} controls preload="metadata" className="h-9 w-full" />
+                </div>
+              )}
               {coverSource && !transcribing && abc && (
                 <p className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-300">{tt('coverScoreReady')} · {coverSource}</p>
               )}
@@ -988,12 +998,9 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               </>
             }
           >
-            <div className="mb-3 border-b border-zinc-100 pb-3 dark:border-white/5">
-              <Switch checked={instrumental} onChange={setInstrumental} label={t('instrumental')} hint={tt('instrumentalHintYue')} />
-            </div>
             <div className="mb-2 flex flex-wrap gap-1">
               {SECTION_TAGS.map(tag => (
-                <button key={tag} type="button" onClick={() => insertTag(tag)} disabled={instrumental} className={CHIP}>{tag}</button>
+                <button key={tag} type="button" onClick={() => insertTag(tag)} className={CHIP}>{tag}</button>
               ))}
             </div>
             <AutoTextarea
@@ -1002,7 +1009,6 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               maxRows={22}
               onChange={event => setLyrics(event.target.value)}
               onFocus={event => { lyricsBox.current = event.currentTarget; }}
-              disabled={instrumental}
               placeholder={'[Verse 1]\n…\n\n[Chorus]\n…'}
               aria-label={t('lyrics')}
               className={`${CONTROL} resize-none overflow-y-auto font-mono text-xs leading-5 custom-scrollbar`}

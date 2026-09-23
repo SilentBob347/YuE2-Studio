@@ -18,7 +18,7 @@ use serde_json::Value;
 /// The extras every whole-song draft carries.
 const EXTRA: &str = "title: a short song title, two to five words, no quotation marks, in the language of the lyrics. cover_prompt: one sentence describing a cover image for this track - a scene, not a poster; no text, no lettering, no logos. duration_seconds: how long this song, as written, runs when sung at its tempo, in seconds, between 30 and 360.";
 
-const VALIDATION: &str = "Before answering, check your own draft: every explicit user constraint kept, an instrumental request still instrumental, vocal gender not contradicted, every section opened by an English tag in square brackets on a line of its own, the vocal language named in the style, and no sentence copied from a reference. Fix what fails, then answer.";
+const VALIDATION: &str = "Before answering, check your own draft: every explicit user constraint kept, vocal gender not contradicted, every section opened by an English tag in square brackets on a line of its own, the vocal language named in the style, and no sentence copied from a reference. Fix what fails, then answer.";
 
 /// How YuE2 reads a style prompt, from its checkpoint and the official demo
 /// requests: the text reaches the model verbatim under a `[Tags]` header.
@@ -34,16 +34,13 @@ second line of the verse
 [Chorus]
 first line of the chorus
 second line of the chorus
-Size the song to its intended length: about 2 to 3 sung words per second, a verse of 4-8 lines, a chorus repeated where a real song repeats it. Keep neighbouring lines close in syllable count so none is sung rushed. The lyrics carry no implementation notes: stage directions, singer cues, instruments, tempo and pronunciation marks all stay out - the model sings whatever text it is given. For an instrumental, write the section tags with no words under them. Write the sung lines in the language the user wrote their request in: a Russian idea gets Russian lines, a Japanese one Japanese; the tags and the style stay English, and the style names that language first."#;
+Size the song to its intended length: about 2 to 3 sung words per second, a verse of 4-8 lines, a chorus repeated where a real song repeats it. Keep neighbouring lines close in syllable count so none is sung rushed. The lyrics carry no implementation notes: stage directions, singer cues, instruments, tempo and pronunciation marks all stay out - the model sings whatever text it is given. Write the sung lines in the language the user wrote their request in: a Russian idea gets Russian lines, a Japanese one Japanese; the tags and the style stay English, and the style names that language first."#;
 
 const DICTION_RULE: &str = r#"
 Diction: the model sings the letters it is given and there is no pronunciation channel. Write every word in its ordinary spelling - in Russian write ё as ё, never е - and choose words whose stress falls naturally on the long notes of the line."#;
 
 const DUET_RULE: &str = r#"
 Two voices: describe both singers in the style ("male and female duet, warm baritone and airy soprano"). YuE2 has no singer tags, so do not write singer cues into the lyrics; let the sections themselves - a verse each, a shared chorus - carry the exchange."#;
-
-const INSTRUMENTAL_RULE: &str = r#"
-Instrumental: say "instrumental, no vocals" in the style and name the instrument carrying the lead melody."#;
 
 /// The score YuE2 writes and reads back: ABC notation in the layout of its
 /// planning stage and of SheetSage2's transcriptions.
@@ -77,8 +74,6 @@ pub struct AssistRequest {
     pub abc: String,
     #[serde(default = "default_duration")]
     pub duration_seconds: f64,
-    #[serde(default)]
-    pub instrumental: bool,
 }
 
 fn default_duration() -> f64 {
@@ -152,12 +147,10 @@ pub fn instructions(request: &AssistRequest) -> (String, &'static [&'static str]
 /// to a solo song would invite a second voice.
 fn craft_notes(request: &AssistRequest) -> String {
     let mut notes = String::new();
-    if matches!(request.target, AssistTarget::All | AssistTarget::Lyrics) && !request.instrumental {
+    if matches!(request.target, AssistTarget::All | AssistTarget::Lyrics) {
         notes.push_str(DICTION_RULE);
     }
-    if request.instrumental {
-        notes.push_str(INSTRUMENTAL_RULE);
-    } else if wants_two_voices(request) {
+    if wants_two_voices(request) {
         notes.push_str(DUET_RULE);
     }
     notes
@@ -197,17 +190,16 @@ pub fn user_message(request: &AssistRequest) -> String {
     let instruction = request.instruction.trim();
     let description = request.description.trim();
     let brief = if !instruction.is_empty() { instruction } else { description };
-    let instrumental = if request.instrumental { "\nThis piece is instrumental: no sung words." } else { "" };
 
     match request.target {
         AssistTarget::Lyrics => format!(
-            "Lyrics instruction: {}\nCurrent style, keep the lyrics coherent with it:\n{}\nTarget length: about {} seconds.{instrumental}",
+            "Lyrics instruction: {}\nCurrent style, keep the lyrics coherent with it:\n{}\nTarget length: about {} seconds.",
             if brief.is_empty() { "(none - write lyrics that fit the style)" } else { brief },
             request.style.trim(),
             request.duration_seconds.round() as i64,
         ),
         AssistTarget::Style => format!(
-            "Sound instruction: {}\nCurrent lyrics, keep the style coherent with them:\n{}{instrumental}",
+            "Sound instruction: {}\nCurrent lyrics, keep the style coherent with them:\n{}",
             if brief.is_empty() { "(none - describe a sound that fits the lyrics)" } else { brief },
             request.lyrics.trim(),
         ),
@@ -228,7 +220,7 @@ pub fn user_message(request: &AssistRequest) -> String {
                 }
             }
             format!(
-                "Song description: {}{carried}{instrumental}",
+                "Song description: {}{carried}",
                 if brief.is_empty() { "(none - choose something musical and specific)" } else { brief },
             )
         }
@@ -402,7 +394,6 @@ mod tests {
             style: "synth pop, female vocal, 110 BPM".into(),
             abc: "X:1\nM:4/4\nL:1/16\nK:C\nV: Vocal\nc4d4e4f4|".into(),
             duration_seconds: 90.0,
-            instrumental: false,
         }
     }
 
@@ -478,16 +469,6 @@ mod tests {
         let duet_system = instructions(&duet).0;
         assert!(duet_system.contains("Two voices:"));
         assert!(!duet_system.contains("[Male Vocals]"), "YuE2 has no singer tags");
-    }
-
-    #[test]
-    fn an_instrumental_is_told_what_carries_the_melody() {
-        let mut instrumental = request(AssistTarget::All);
-        instrumental.instrumental = true;
-        let (system, _) = instructions(&instrumental);
-        assert!(system.contains("lead melody"));
-        assert!(!system.contains("combining acute"));
-        assert!(user_message(&instrumental).contains("instrumental"));
     }
 
     #[test]
