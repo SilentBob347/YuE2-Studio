@@ -3,6 +3,23 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-23 — 1.0.3
+
+### Fixed
+
+- **Karaoke follows the song through repeated choruses.** A line used to jump to a later
+  repeat of itself when the recogniser heard that one more clearly, and every line sung
+  in between was squeezed into a second at the end or left hanging for half a minute.
+  Lines are now placed together, in order, so each chorus keeps its own lines, a line
+  nobody heard is filled in between its neighbours, and a chorus the model sang twice in
+  a row shows its words as they are first sung.
+
+### Changed
+
+- **Covers say what they need.** The cover card now says that the words must fit the
+  transcribed melody: the original lyrics, or new ones with the same syllables in every
+  line and the stresses on the same notes.
+
 ## 2026-09-23 — 1.0.2
 
 ### Fixed
