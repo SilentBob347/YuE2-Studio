@@ -83,7 +83,7 @@ try {
 
     New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
     $bundleRoot = Join-Path $tauriRoot 'target\release\bundle'
-    $nsisInstaller = Get-ChildItem -Recurse -File (Join-Path $bundleRoot 'nsis') -Filter "*$Version*-setup.exe" | Select-Object -First 1
+    $nsisInstaller = Get-ChildItem -Recurse -File (Join-Path $bundleRoot 'nsis') -Filter "*_$($Version)_x64-setup.exe" | Select-Object -First 1
     if (-not $nsisInstaller) { throw "the NSIS installer for $Version is missing" }
     $signaturePath = "$($nsisInstaller.FullName).sig"
     if (-not (Test-Path $signaturePath)) { throw "the updater signature is missing: $signaturePath" }
