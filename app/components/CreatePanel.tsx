@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { karaokeReason } from '../services/karaoke';
 import {
   AlertTriangle, AudioLines, ChevronDown, CircleAlert, Dices, Eye, EyeOff, FileMusic, FolderOpen, Loader2,
-  Music2, RotateCcw, Save, Sparkles, Square, Upload, Wand2, Settings2, X,
+  Music2, Pause, Play, RotateCcw, Save, Sparkles, Square, Upload, Wand2, Settings2, X,
 } from 'lucide-react';
+import { AudioWaveform } from './AudioWaveform';
 import type { Song, YueCot, YueOutputFormat, YueRequest, YueSampling } from '../types';
 import { useI18n } from '../context/I18nContext';
 import { EXAMPLES, randomExample } from '../services/examples';
@@ -286,6 +287,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [coverSource, setCoverSource] = useState<string>('');
   // The recording being covered, so it can be listened to next to its score.
   const [coverAudio, setCoverAudio] = useState<string | null>(null);
+  const coverPlayer = useRef<HTMLAudioElement | null>(null);
+  const [coverPlaying, setCoverPlaying] = useState(false);
+  const [coverTime, setCoverTime] = useState(0);
+  const [coverDuration, setCoverDuration] = useState(0);
   const [coverMelodyOnly, setCoverMelodyOnly] = useState(true);
   const promptFile = useRef<HTMLInputElement | null>(null);
   const scoreFile = useRef<HTMLInputElement | null>(null);
@@ -419,7 +424,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setMode('studio');
   }, [initialData, applyRequest]);
 
-  useEffect(() => () => { if (coverAudio?.startsWith('blob:')) URL.revokeObjectURL(coverAudio); }, [coverAudio]);
+  useEffect(() => {
+    setCoverPlaying(false);
+    setCoverTime(0);
+    setCoverDuration(0);
+    return () => { if (coverAudio?.startsWith('blob:')) URL.revokeObjectURL(coverAudio); };
+  }, [coverAudio]);
 
   // A library track to cover: its recording becomes the score, and its own
   // words start the lyric sheet when there is nothing there yet.
@@ -867,9 +877,38 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               </button>
               <p className="mt-2 text-[11px] leading-4 text-zinc-500">{tt('coverFromLibraryHint')}</p>
               {coverAudio && (
-                <div className="mt-3 border-t border-zinc-100 pt-3 dark:border-white/5">
-                  <p className="mb-1.5 truncate text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">{tt('coverListen')} · {coverSource}</p>
-                  <audio key={coverAudio} src={coverAudio} controls preload="metadata" className="h-9 w-full" />
+                <div className="mt-3 flex items-center gap-3 rounded-lg border border-zinc-100 bg-zinc-50 p-2 dark:border-white/5 dark:bg-white/[0.03]">
+                  <audio
+                    key={coverAudio}
+                    ref={coverPlayer}
+                    src={coverAudio}
+                    preload="metadata"
+                    onLoadedMetadata={event => setCoverDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)}
+                    onTimeUpdate={event => setCoverTime(event.currentTarget.currentTime)}
+                    onPlay={() => setCoverPlaying(true)}
+                    onPause={() => setCoverPlaying(false)}
+                    onEnded={() => setCoverPlaying(false)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { const player = coverPlayer.current; if (player) void (player.paused ? player.play() : player.pause()); }}
+                    title={tt('coverListen')}
+                    className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-pink-600 text-white shadow-lg shadow-pink-500/20 transition-transform hover:scale-105"
+                  >
+                    {coverPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex items-center justify-between gap-2">
+                      <span className="truncate text-xs font-medium text-zinc-800 dark:text-zinc-200">{coverSource}</span>
+                      <span className="shrink-0 text-[10px] tabular-nums text-zinc-400">{formatDuration(coverTime)} / {formatDuration(coverDuration)}</span>
+                    </div>
+                    <AudioWaveform
+                      url={coverAudio}
+                      currentTime={coverTime}
+                      duration={coverDuration}
+                      onSeek={fraction => { const player = coverPlayer.current; if (player && coverDuration > 0) player.currentTime = fraction * coverDuration; }}
+                    />
+                  </div>
                 </div>
               )}
               {coverSource && !transcribing && abc && (
