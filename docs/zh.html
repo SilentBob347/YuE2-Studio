@@ -126,6 +126,14 @@ footer a { color: var(--text); }
   header { background: rgba(255,255,255,.85); }
   pre { color: #27272a; }
 }
+
+.samples { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.sample { margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.sample figcaption { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.sample b { font-size: 15px; }
+.sample span { color: var(--muted); font-size: 13px; }
+.sample code { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.sample audio { width: 100%; }
 </style>
 </head>
 <body>
@@ -171,6 +179,20 @@ footer a { color: var(--text); }
       <div class="card"><h3>写作助手</h3><p>本地 Gemma 模型或 OpenRouter 根据想法撰写风格和歌词，并按要求编辑乐谱。</p></div>
       <div class="card"><h3>逐字卡拉 OK</h3><p>每个字都带时间戳的增强 LRC，由 Parakeet 或 Whisper 对齐。</p></div>
       <div class="card"><h3>显卡分轨</h3><p>鼓、贝斯、其他、人声、吉他和钢琴，由 HT-Demucs 分离。</p></div>
+    </div>
+  </section>
+
+  <section id="samples">
+    <h2>示例</h2>
+    <p class="sub">在全新安装、推荐模型组下生成，按工作室保存的原样呈现，全部为俄语。</p>
+    <div class="samples">
+      <figure class="sample"><figcaption><b>Дача, лето, комары</b><span>根据风格和歌词生成的完整歌曲。</span><code>Russian, folk pop, warm male voice, accordion, acoustic guitar, upright bass, 104 BPM</code></figcaption><audio controls preload="none" src="samples/dacha-leto-komary.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Дача, лето, комары — джаз</b><span>翻唱：SheetSage2 记下上一首的旋律，YuE2 以爵士风格演唱。</span><code>Russian, vintage jazz swing, sultry female crooner, upright bass, brushed drums, muted trumpet, 104 BPM</code></figcaption><audio controls preload="none" src="samples/dacha-jazz-cover.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Понедельник</b><span>布鲁斯摇滚，沙哑嗓音。</span><code>Russian, blues rock, raspy male voice, overdriven electric guitar, hammond organ, shuffle drums, 96 BPM</code></figcaption><audio controls preload="none" src="samples/ponedelnik.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Бабушка на дискотеке</b><span>用保存的音频编码以 64 步重新渲染。</span><code>Russian, disco pop, sassy female voice, funky bass, string section, four on the floor drums, 120 BPM</code></figcaption><audio controls preload="none" src="samples/babushka-na-diskoteke.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Борщ на орбите</b><span>150 BPM 的斯卡朋克。</span><code>Russian, ska punk, energetic male voice, brass section, offbeat guitar, fast drums, 150 BPM</code></figcaption><audio controls preload="none" src="samples/borshch-na-orbite.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Кот-программист</b><span>合成器浪潮流行，第二版。</span><code>Russian, synthwave pop, clear expressive female voice, analog synths, punchy drum machine, 112 BPM</code></figcaption><audio controls preload="none" src="samples/kot-programmist.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Ночной вор Барсик</b><span>风格和歌词由内置助手根据一句话的想法写成。</span><code>Russian, upbeat pop-punk, energetic male vocals, driving distorted electric guitars, fast bass lines, crashing drums, rebellious and fun, 185 BPM</code></figcaption><audio controls preload="none" src="samples/barsik.mp3"></audio></figure>
     </div>
   </section>
 

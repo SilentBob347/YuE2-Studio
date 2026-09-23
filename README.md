@@ -77,6 +77,22 @@ The same screens in the language you read: [Русский](https://timoncool.gi
 [한국어](https://timoncool.github.io/YuE2-Studio/ko.html) — on the project page, or in
 [docs/screenshots](docs/screenshots).
 
+## Samples
+
+Made in the released build on an RTX 4090 with the recommended BF16 set, nothing edited
+afterwards. Listen in the browser on the [project page](https://timoncool.github.io/YuE2-Studio/#samples)
+or download the MP3s from [docs/samples](docs/samples).
+
+| Song | How it was made | Style |
+|---|---|---|
+| [Дача, лето, комары](docs/samples/dacha-leto-komary.mp3) | A full song from a style and lyrics | folk pop, warm male voice, accordion, 104 BPM |
+| [Дача, лето, комары — джаз](docs/samples/dacha-jazz-cover.mp3) | Cover: SheetSage2 wrote down the melody of the song above, YuE2 sang it as jazz | vintage jazz swing, sultry female crooner, muted trumpet |
+| [Понедельник](docs/samples/ponedelnik.mp3) | Blues rock, raspy voice | blues rock, overdriven guitar, hammond organ, 96 BPM |
+| [Бабушка на дискотеке](docs/samples/babushka-na-diskoteke.mp3) | Re-rendered from its saved audio codes with 64 solver steps | disco pop, funky bass, string section, 120 BPM |
+| [Борщ на орбите](docs/samples/borshch-na-orbite.mp3) | Ska punk | ska punk, brass section, offbeat guitar, 150 BPM |
+| [Кот-программист](docs/samples/kot-programmist.mp3) | Synthwave pop, the second take | synthwave pop, analog synths, drum machine, 112 BPM |
+| [Ночной вор Барсик](docs/samples/barsik.mp3) | Style and lyrics written by the built-in assistant from a one-line idea | pop-punk, distorted guitars, 185 BPM |
+
 ## What it needs
 
 - Windows 10/11 x64.

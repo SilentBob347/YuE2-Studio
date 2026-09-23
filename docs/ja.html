@@ -126,6 +126,14 @@ footer a { color: var(--text); }
   header { background: rgba(255,255,255,.85); }
   pre { color: #27272a; }
 }
+
+.samples { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.sample { margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.sample figcaption { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.sample b { font-size: 15px; }
+.sample span { color: var(--muted); font-size: 13px; }
+.sample code { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.sample audio { width: 100%; }
 </style>
 </head>
 <body>
@@ -171,6 +179,20 @@ footer a { color: var(--text); }
       <div class="card"><h3>作詞アシスタント</h3><p>ローカルの Gemma または OpenRouter がアイデアからスタイルと歌詞を書き、依頼に応じて楽譜を編集します。</p></div>
       <div class="card"><h3>単語単位のカラオケ</h3><p>すべての単語にタイムスタンプを持つ拡張 LRC。Parakeet または Whisper で同期。</p></div>
       <div class="card"><h3>GPU でステム分離</h3><p>ドラム、ベース、その他、ボーカル、ギター、ピアノを HT-Demucs で分離。</p></div>
+    </div>
+  </section>
+
+  <section id="samples">
+    <h2>サンプル</h2>
+    <p class="sub">クリーンインストールと推奨セットで作成し、スタジオが保存したままの音です。すべてロシア語。</p>
+    <div class="samples">
+      <figure class="sample"><figcaption><b>Дача, лето, комары</b><span>スタイルと歌詞から作ったフルソング。</span><code>Russian, folk pop, warm male voice, accordion, acoustic guitar, upright bass, 104 BPM</code></figcaption><audio controls preload="none" src="samples/dacha-leto-komary.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Дача, лето, комары — джаз</b><span>カバー：SheetSage2 が上の曲のメロディを書き起こし、YuE2 がジャズで歌いました。</span><code>Russian, vintage jazz swing, sultry female crooner, upright bass, brushed drums, muted trumpet, 104 BPM</code></figcaption><audio controls preload="none" src="samples/dacha-jazz-cover.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Понедельник</b><span>ブルースロック、しゃがれ声。</span><code>Russian, blues rock, raspy male voice, overdriven electric guitar, hammond organ, shuffle drums, 96 BPM</code></figcaption><audio controls preload="none" src="samples/ponedelnik.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Бабушка на дискотеке</b><span>保存したオーディオコードから 64 ステップで再レンダリング。</span><code>Russian, disco pop, sassy female voice, funky bass, string section, four on the floor drums, 120 BPM</code></figcaption><audio controls preload="none" src="samples/babushka-na-diskoteke.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Борщ на орбите</b><span>150 BPM のスカパンク。</span><code>Russian, ska punk, energetic male voice, brass section, offbeat guitar, fast drums, 150 BPM</code></figcaption><audio controls preload="none" src="samples/borshch-na-orbite.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Кот-программист</b><span>シンセウェイヴ・ポップ、2 テイク目。</span><code>Russian, synthwave pop, clear expressive female voice, analog synths, punchy drum machine, 112 BPM</code></figcaption><audio controls preload="none" src="samples/kot-programmist.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Ночной вор Барсик</b><span>スタイルと歌詞は内蔵アシスタントが一行のアイデアから書いたもの。</span><code>Russian, upbeat pop-punk, energetic male vocals, driving distorted electric guitars, fast bass lines, crashing drums, rebellious and fun, 185 BPM</code></figcaption><audio controls preload="none" src="samples/barsik.mp3"></audio></figure>
     </div>
   </section>
 

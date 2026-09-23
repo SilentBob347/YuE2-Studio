@@ -126,6 +126,14 @@ footer a { color: var(--text); }
   header { background: rgba(255,255,255,.85); }
   pre { color: #27272a; }
 }
+
+.samples { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.sample { margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.sample figcaption { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.sample b { font-size: 15px; }
+.sample span { color: var(--muted); font-size: 13px; }
+.sample code { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.sample audio { width: 100%; }
 </style>
 </head>
 <body>
@@ -171,6 +179,20 @@ footer a { color: var(--text); }
       <div class="card"><h3>Помощник по текстам</h3><p>Локальная Gemma или OpenRouter пишет стиль и текст по идее и правит партитуру по просьбе.</p></div>
       <div class="card"><h3>Караоке по словам</h3><p>Расширенный LRC с меткой времени на каждом слове, выравнивание Parakeet или Whisper.</p></div>
       <div class="card"><h3>Стемы на видеокарте</h3><p>Барабаны, бас, прочее, вокал, гитара и пианино — разделяет HT-Demucs.</p></div>
+    </div>
+  </section>
+
+  <section id="samples">
+    <h2>Примеры</h2>
+    <p class="sub">Сделаны на чистой установке с рекомендованным набором, как их сохранила студия. Все на русском.</p>
+    <div class="samples">
+      <figure class="sample"><figcaption><b>Дача, лето, комары</b><span>Целая песня по стилю и тексту.</span><code>Russian, folk pop, warm male voice, accordion, acoustic guitar, upright bass, 104 BPM</code></figcaption><audio controls preload="none" src="samples/dacha-leto-komary.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Дача, лето, комары — джаз</b><span>Кавер: SheetSage2 записал мелодию песни выше, YuE2 спел её джазом.</span><code>Russian, vintage jazz swing, sultry female crooner, upright bass, brushed drums, muted trumpet, 104 BPM</code></figcaption><audio controls preload="none" src="samples/dacha-jazz-cover.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Понедельник</b><span>Блюз-рок, хриплый голос.</span><code>Russian, blues rock, raspy male voice, overdriven electric guitar, hammond organ, shuffle drums, 96 BPM</code></figcaption><audio controls preload="none" src="samples/ponedelnik.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Бабушка на дискотеке</b><span>Перерендер по сохранённым аудиокодам на 64 шагах.</span><code>Russian, disco pop, sassy female voice, funky bass, string section, four on the floor drums, 120 BPM</code></figcaption><audio controls preload="none" src="samples/babushka-na-diskoteke.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Борщ на орбите</b><span>Ска-панк на 150 BPM.</span><code>Russian, ska punk, energetic male voice, brass section, offbeat guitar, fast drums, 150 BPM</code></figcaption><audio controls preload="none" src="samples/borshch-na-orbite.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Кот-программист</b><span>Синтвейв-поп, второй дубль.</span><code>Russian, synthwave pop, clear expressive female voice, analog synths, punchy drum machine, 112 BPM</code></figcaption><audio controls preload="none" src="samples/kot-programmist.mp3"></audio></figure>
+      <figure class="sample"><figcaption><b>Ночной вор Барсик</b><span>Стиль и текст написал встроенный ассистент по идее в одну строку.</span><code>Russian, upbeat pop-punk, energetic male vocals, driving distorted electric guitars, fast bass lines, crashing drums, rebellious and fun, 185 BPM</code></figcaption><audio controls preload="none" src="samples/barsik.mp3"></audio></figure>
     </div>
   </section>
 

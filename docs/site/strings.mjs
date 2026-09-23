@@ -10,6 +10,25 @@ export const SETS = [
   { vram: '5.5 GB+', size: '3.6 GB', key: 'setLight' },
 ];
 
+// Songs made with the studio on a clean install, all in Russian, all as the
+// studio rendered them (MP3, 320 kbps). Notes are per language.
+export const SAMPLES = [
+  { file: 'dacha-leto-komary.mp3', title: 'Дача, лето, комары', style: 'Russian, folk pop, warm male voice, accordion, acoustic guitar, upright bass, 104 BPM',
+    note: { en: 'Full song from a style and lyrics.', ru: 'Целая песня по стилю и тексту.', zh: '根据风格和歌词生成的完整歌曲。', ja: 'スタイルと歌詞から作ったフルソング。', ko: '스타일과 가사로 만든 완성곡.' } },
+  { file: 'dacha-jazz-cover.mp3', title: 'Дача, лето, комары — джаз', style: 'Russian, vintage jazz swing, sultry female crooner, upright bass, brushed drums, muted trumpet, 104 BPM',
+    note: { en: 'Cover: SheetSage2 wrote down the melody of the song above, YuE2 sang it as jazz.', ru: 'Кавер: SheetSage2 записал мелодию песни выше, YuE2 спел её джазом.', zh: '翻唱：SheetSage2 记下上一首的旋律，YuE2 以爵士风格演唱。', ja: 'カバー：SheetSage2 が上の曲のメロディを書き起こし、YuE2 がジャズで歌いました。', ko: '커버: SheetSage2가 위 곡의 멜로디를 받아 적고 YuE2가 재즈로 불렀습니다.' } },
+  { file: 'ponedelnik.mp3', title: 'Понедельник', style: 'Russian, blues rock, raspy male voice, overdriven electric guitar, hammond organ, shuffle drums, 96 BPM',
+    note: { en: 'Blues rock, raspy voice.', ru: 'Блюз-рок, хриплый голос.', zh: '布鲁斯摇滚，沙哑嗓音。', ja: 'ブルースロック、しゃがれ声。', ko: '블루스 록, 거친 목소리.' } },
+  { file: 'babushka-na-diskoteke.mp3', title: 'Бабушка на дискотеке', style: 'Russian, disco pop, sassy female voice, funky bass, string section, four on the floor drums, 120 BPM',
+    note: { en: 'Re-rendered from its saved audio codes with 64 solver steps.', ru: 'Перерендер по сохранённым аудиокодам на 64 шагах.', zh: '用保存的音频编码以 64 步重新渲染。', ja: '保存したオーディオコードから 64 ステップで再レンダリング。', ko: '저장된 오디오 코드로 64스텝 재렌더링.' } },
+  { file: 'borshch-na-orbite.mp3', title: 'Борщ на орбите', style: 'Russian, ska punk, energetic male voice, brass section, offbeat guitar, fast drums, 150 BPM',
+    note: { en: 'Ska punk at 150 BPM.', ru: 'Ска-панк на 150 BPM.', zh: '150 BPM 的斯卡朋克。', ja: '150 BPM のスカパンク。', ko: '150 BPM 스카 펑크.' } },
+  { file: 'kot-programmist.mp3', title: 'Кот-программист', style: 'Russian, synthwave pop, clear expressive female voice, analog synths, punchy drum machine, 112 BPM',
+    note: { en: 'Synthwave pop, the second take.', ru: 'Синтвейв-поп, второй дубль.', zh: '合成器浪潮流行，第二版。', ja: 'シンセウェイヴ・ポップ、2 テイク目。', ko: '신스웨이브 팝, 두 번째 테이크.' } },
+  { file: 'barsik.mp3', title: 'Ночной вор Барсик', style: 'Russian, upbeat pop-punk, energetic male vocals, driving distorted electric guitars, fast bass lines, crashing drums, rebellious and fun, 185 BPM',
+    note: { en: 'Style and lyrics written by the built-in assistant from a one-line idea.', ru: 'Стиль и текст написал встроенный ассистент по идее в одну строку.', zh: '风格和歌词由内置助手根据一句话的想法写成。', ja: 'スタイルと歌詞は内蔵アシスタントが一行のアイデアから書いたもの。', ko: '스타일과 가사는 내장 어시스턴트가 한 줄 아이디어로 작성했습니다.' } },
+];
+
 export const STRINGS = {
   en: {
     label: 'English',
@@ -34,6 +53,8 @@ export const STRINGS = {
       ['Word-level karaoke', 'Enhanced LRC with a timestamp on every word, aligned by Parakeet or Whisper.'],
       ['Stems on your GPU', 'Drums, bass, other, vocals, guitar and piano, separated by HT-Demucs.'],
     ],
+    samplesTitle: 'Songs made with it',
+    samplesSub: 'Rendered on a clean install with the recommended set, as the studio saved them. All in Russian.',
     shotsTitle: 'Screenshots',
     shotsSub: 'The studio itself, in this language.',
     shots: [
@@ -112,6 +133,8 @@ export const STRINGS = {
       ['Караоке по словам', 'Расширенный LRC с меткой времени на каждом слове, выравнивание Parakeet или Whisper.'],
       ['Стемы на видеокарте', 'Барабаны, бас, прочее, вокал, гитара и пианино — разделяет HT-Demucs.'],
     ],
+    samplesTitle: 'Примеры',
+    samplesSub: 'Сделаны на чистой установке с рекомендованным набором, как их сохранила студия. Все на русском.',
     shotsTitle: 'Скриншоты',
     shotsSub: 'Сама студия — на этом языке.',
     shots: [
@@ -190,6 +213,8 @@ export const STRINGS = {
       ['逐字卡拉 OK', '每个字都带时间戳的增强 LRC，由 Parakeet 或 Whisper 对齐。'],
       ['显卡分轨', '鼓、贝斯、其他、人声、吉他和钢琴，由 HT-Demucs 分离。'],
     ],
+    samplesTitle: '示例',
+    samplesSub: '在全新安装、推荐模型组下生成，按工作室保存的原样呈现，全部为俄语。',
     shotsTitle: '截图',
     shotsSub: '工作室本身，使用此语言。',
     shots: [
@@ -268,6 +293,8 @@ export const STRINGS = {
       ['単語単位のカラオケ', 'すべての単語にタイムスタンプを持つ拡張 LRC。Parakeet または Whisper で同期。'],
       ['GPU でステム分離', 'ドラム、ベース、その他、ボーカル、ギター、ピアノを HT-Demucs で分離。'],
     ],
+    samplesTitle: 'サンプル',
+    samplesSub: 'クリーンインストールと推奨セットで作成し、スタジオが保存したままの音です。すべてロシア語。',
     shotsTitle: 'スクリーンショット',
     shotsSub: 'この言語で表示したスタジオそのもの。',
     shots: [
@@ -346,6 +373,8 @@ export const STRINGS = {
       ['단어 단위 가라오케', '모든 단어에 타임스탬프가 있는 확장 LRC, Parakeet 또는 Whisper로 정렬.'],
       ['GPU 스템 분리', '드럼, 베이스, 기타 소리, 보컬, 기타, 피아노를 HT-Demucs로 분리.'],
     ],
+    samplesTitle: '샘플',
+    samplesSub: '새로 설치한 스튜디오와 권장 세트로 만들었고, 스튜디오가 저장한 그대로입니다. 모두 러시아어.',
     shotsTitle: '스크린샷',
     shotsSub: '이 언어로 본 스튜디오 그대로.',
     shots: [

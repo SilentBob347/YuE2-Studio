@@ -4,7 +4,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ORDER, SETS, STRINGS } from '../docs/site/strings.mjs';
+import { ORDER, SAMPLES, SETS, STRINGS } from '../docs/site/strings.mjs';
 
 const REPO = 'https://github.com/timoncool/YuE2-Studio';
 const SITE = 'https://timoncool.github.io/YuE2-Studio/';
@@ -31,6 +31,9 @@ function page(lang) {
     .join('\n');
   const shots = s.shots
     .map(([name, caption]) => `      <figure><img src="screenshots/${lang}-${name}.png" alt="${escape(caption)}" loading="lazy" /><figcaption>${escape(caption)}</figcaption></figure>`)
+    .join('\n');
+  const samples = SAMPLES
+    .map((sample) => `      <figure class="sample"><figcaption><b>${escape(sample.title)}</b><span>${escape(sample.note[lang])}</span><code>${escape(sample.style)}</code></figcaption><audio controls preload="none" src="samples/${sample.file}"></audio></figure>`)
     .join('\n');
   const sets = SETS
     .map((set) => `          <tr><td>${set.vram}</td><td>${escape(s[set.key])}</td><td>${set.size}</td></tr>`)
@@ -90,6 +93,14 @@ ${nav}
     <p class="sub">${escape(s.featuresSub)}</p>
     <div class="grid">
 ${cards(s.features)}
+    </div>
+  </section>
+
+  <section id="samples">
+    <h2>${escape(s.samplesTitle)}</h2>
+    <p class="sub">${escape(s.samplesSub)}</p>
+    <div class="samples">
+${samples}
     </div>
   </section>
 

@@ -108,3 +108,11 @@ footer a { color: var(--text); }
   header { background: rgba(255,255,255,.85); }
   pre { color: #27272a; }
 }
+
+.samples { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }
+.sample { margin: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.sample figcaption { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.sample b { font-size: 15px; }
+.sample span { color: var(--muted); font-size: 13px; }
+.sample code { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.sample audio { width: 100%; }
