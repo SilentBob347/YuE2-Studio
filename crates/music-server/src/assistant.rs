@@ -18,7 +18,7 @@ use serde_json::Value;
 /// The extras every whole-song draft carries.
 const EXTRA: &str = "title: a short song title, two to five words, no quotation marks, in the language of the lyrics. cover_prompt: one sentence describing a cover image for this track - a scene, not a poster; no text, no lettering, no logos. duration_seconds: how long this song, as written, runs when sung at its tempo, in seconds, between 30 and 360.";
 
-const VALIDATION: &str = "Before answering, check your own draft: every explicit user constraint kept, an instrumental request still instrumental, vocal gender not contradicted, every section tag alone on its own line, the vocal language named in the style, and no sentence copied from a reference. Fix what fails, then answer.";
+const VALIDATION: &str = "Before answering, check your own draft: every explicit user constraint kept, an instrumental request still instrumental, vocal gender not contradicted, every section opened by an English tag in square brackets on a line of its own, the vocal language named in the style, and no sentence copied from a reference. Fix what fails, then answer.";
 
 /// How YuE2 reads a style prompt, from its checkpoint and the official demo
 /// requests: the text reaches the model verbatim under a `[Tags]` header.
@@ -26,7 +26,15 @@ const STYLE_CONTRACT: &str = r#"style: the style prompt YuE2 reads verbatim unde
 
 /// The lyric rules. YuE2 sings the words it is given and plans the song's
 /// length around them, so structure and density decide the result.
-const LYRICS_RULES: &str = r#"lyrics: the words YuE2 sings, and nothing else, organised into sections. Each section opens with a tag ALONE on its own line - [Intro] [Verse] [Pre-Chorus] [Chorus] [Bridge] [Outro], numbered where it helps ([Verse 1], [Verse 2]), plus [Instrumental Break] where an instrumental passage belongs - with a blank line between sections and never words on the same line as a tag. Size the song to its intended length: about 2 to 3 sung words per second, a verse of 4-8 lines, a chorus repeated where a real song repeats it. Keep neighbouring lines close in syllable count so none is sung rushed. The lyrics carry no implementation notes: stage directions, singer cues, instruments, tempo and pronunciation marks all stay out - the model sings whatever text it is given. For an instrumental, write the section tags with no words under them. Write the lyrics in the language the user wrote their request in: a Russian idea gets Russian lyrics, a Japanese one Japanese; the style stays English but names that language first."#;
+const LYRICS_RULES: &str = r#"lyrics: the words YuE2 sings, and nothing else, organised into sections. Every section starts with its tag in square brackets, in English, on a line of its own, and its lines follow below it, with a blank line between sections. The tags are [Intro], [Verse 1], [Verse 2], [Pre-Chorus], [Chorus], [Bridge], [Instrumental Break] and [Outro]; never write a section name in words or in brackets of another kind, and never in the language of the song. The shape looks like this:
+[Verse 1]
+first line of the verse
+second line of the verse
+
+[Chorus]
+first line of the chorus
+second line of the chorus
+Size the song to its intended length: about 2 to 3 sung words per second, a verse of 4-8 lines, a chorus repeated where a real song repeats it. Keep neighbouring lines close in syllable count so none is sung rushed. The lyrics carry no implementation notes: stage directions, singer cues, instruments, tempo and pronunciation marks all stay out - the model sings whatever text it is given. For an instrumental, write the section tags with no words under them. Write the sung lines in the language the user wrote their request in: a Russian idea gets Russian lines, a Japanese one Japanese; the tags and the style stay English, and the style names that language first."#;
 
 const DICTION_RULE: &str = r#"
 Diction: the model sings the letters it is given and there is no pronunciation channel. Write every word in its ordinary spelling - in Russian write ё as ё, never е - and choose words whose stress falls naturally on the long notes of the line."#;
