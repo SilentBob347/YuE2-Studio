@@ -1754,7 +1754,35 @@ async fn update_library_song(State(state):State<AppState>,Path(id):Path<String>,
     tag_stored_song(&state, &id).await;
     Ok(Json(song))
 }
-async fn delete_library_song(State(state):State<AppState>,Path(id):Path<String>)->Result<StatusCode,(StatusCode,Json<ApiError>)>{if state.library.delete_song(&id).map_err(|e|api_error(StatusCode::INTERNAL_SERVER_ERROR,e.to_string()))?{Ok(StatusCode::NO_CONTENT)}else{Err(api_error(StatusCode::NOT_FOUND,"Song not found".into()))}}
+async fn delete_library_song(State(state):State<AppState>,Path(id):Path<String>)->Result<StatusCode,(StatusCode,Json<ApiError>)>{
+    let song = state.library.get_song(&id).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if !state.library.delete_song(&id).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))? {
+        return Err(api_error(StatusCode::NOT_FOUND, "Song not found".into()));
+    }
+    if let Some(song) = song {
+        for path in song_files(&state, &song) {
+            if let Err(error) = std::fs::remove_file(&path) {
+                eprintln!("[ERROR] delete song {id}: could not remove {}: {error}", path.display());
+            }
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The files in the media folder that belong to one song: its audio, its
+/// stems and its cover. Anything outside the media folder is not ours to remove.
+fn song_files(state: &AppState, song: &library::Song) -> Vec<PathBuf> {
+    let media = state.library.media_dir();
+    let mut files: Vec<PathBuf> = separation::STEMS.iter().map(|stem| stem_path(state, &song.id, stem)).collect();
+    if let Some(audio) = song.audio_path.as_deref().map(PathBuf::from) {
+        files.push(audio);
+    }
+    if let Some((cover, _)) = state.library.cover_path_for_song(song) {
+        files.push(cover);
+    }
+    files.retain(|path| path.parent() == Some(media) && path.is_file());
+    files
+}
 async fn library_playlists(State(state):State<AppState>)->Result<Json<Vec<library::Playlist>>,(StatusCode,Json<ApiError>)>{state.library.list_playlists().map(Json).map_err(|e|api_error(StatusCode::INTERNAL_SERVER_ERROR,e.to_string()))}
 async fn create_library_playlist(State(state):State<AppState>,Json(input):Json<library::PlaylistInput>)->Result<(StatusCode,Json<library::Playlist>),(StatusCode,Json<ApiError>)>{state.library.create_playlist(input).map(|p|(StatusCode::CREATED,Json(p))).map_err(|e|api_error(StatusCode::BAD_REQUEST,e.to_string()))}
 async fn library_playlist(State(state):State<AppState>,Path(id):Path<String>)->Result<Json<library::Playlist>,(StatusCode,Json<ApiError>)>{state.library.get_playlist(&id).map_err(|e|api_error(StatusCode::INTERNAL_SERVER_ERROR,e.to_string()))?.map(Json).ok_or_else(||api_error(StatusCode::NOT_FOUND,"Playlist not found".into()))}

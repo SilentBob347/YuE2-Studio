@@ -3,6 +3,25 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-23 — 1.0.1
+
+### Added
+
+- **Listen to the recording you cover.** The cover card shows the chosen track with a
+  waveform player: play, pause, click the waveform to seek. After transcription the
+  studio stays in Cover mode, with the score right below.
+
+### Changed
+
+- **No Instrumental switch.** YuE2 is trained on songs with vocals and sings whatever it
+  is given: with empty lyrics it makes words up. The switch promised something the model
+  does not do, so it is gone.
+
+### Fixed
+
+- **Deleting a song frees its disk space.** Its audio, its six stems and its cover are
+  removed with it; before, they stayed in the media folder.
+
 ## 2026-09-23 — 1.0.0
 
 The first release of YuE2 Studio: the studio of MiniMax Music3 Studio, rebuilt around
