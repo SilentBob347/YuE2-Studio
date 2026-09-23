@@ -3,6 +3,17 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-23 — 1.0.2
+
+### Fixed
+
+- **Updates install from inside the studio.** Pressing Install closed the studio and
+  nothing changed: the installer was started inside the studio's own process group,
+  which Windows ends together with the studio, so it died a moment after starting.
+  The installer is now let go before the studio exits. Versions 1.0.0 and 1.0.1 still
+  carry the old behaviour, so from them the update is downloaded once by hand; from
+  1.0.2 on the studio updates itself.
+
 ## 2026-09-23 — 1.0.1
 
 ### Added

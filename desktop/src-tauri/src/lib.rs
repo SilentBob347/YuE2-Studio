@@ -219,7 +219,20 @@ fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
     use tauri_plugin_updater::UpdaterExt;
 
     tauri::async_runtime::spawn(async move {
-        let updater = match app.updater() {
+        // The installer is a child of this process, which sits in its own
+        // kill-on-close job: without releasing it, the installer died with the
+        // studio a moment after starting and the update never happened.
+        let cleanup = app.clone();
+        let updater = match app
+            .updater_builder()
+            .on_before_exit(move || {
+                cleanup.cleanup_before_exit();
+                if !music_engine::process_group::release_children() {
+                    eprintln!("[ERROR] could not release the update installer from the studio's job");
+                }
+            })
+            .build()
+        {
             Ok(updater) => updater,
             Err(_) => return,
         };
