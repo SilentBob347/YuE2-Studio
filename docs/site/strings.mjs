@@ -13,6 +13,16 @@ export const SETS = [
 // Songs made with the studio on a clean install, all in Russian, all as the
 // studio rendered them (MP3, 320 kbps). Notes are per language.
 export const SAMPLES = [
+  { file: 'houseplant-party.mp3', title: 'Houseplant Party', style: 'English, funk disco, groovy male voice, slap bass, wah guitar, brass stabs, four on the floor drums, playful, 118 BPM',
+    note: { en: 'English funk disco.', ru: 'Фанк-диско на английском.', zh: '英语放克迪斯科。', ja: '英語のファンク・ディスコ。', ko: '영어 펑크 디스코.' } },
+  { file: 'my-truck-talks-back.mp3', title: 'My Truck Talks Back', style: 'English, country, warm male baritone, acoustic guitar, pedal steel, fiddle, brushed drums, easygoing, 96 BPM',
+    note: { en: 'Country with pedal steel and fiddle.', ru: 'Кантри со слайд-гитарой и скрипкой.', zh: '带踏板钢吉他和小提琴的乡村音乐。', ja: 'ペダルスチールとフィドルのカントリー。', ko: '페달 스틸과 피들이 들어간 컨트리.' } },
+  { file: 'la-siesta.mp3', title: 'La Siesta', style: 'Spanish, latin pop, bright female voice, nylon guitar, congas, piano montuno, bass, sunny danceable, 102 BPM',
+    note: { en: 'Latin pop in Spanish.', ru: 'Латин-поп на испанском.', zh: '西班牙语拉丁流行。', ja: 'スペイン語のラテン・ポップ。', ko: '스페인어 라틴 팝.' } },
+  { file: 'delivery-rider.mp3', title: '外卖小哥', style: 'Mandarin, city pop, smooth male voice, electric piano, funky bass, clean guitar, drum machine, warm night mood, 108 BPM',
+    note: { en: 'Mandarin city pop.', ru: 'Сити-поп на китайском.', zh: '中文城市流行。', ja: '中国語のシティ・ポップ。', ko: '중국어 시티 팝.' } },
+  { file: 'monday-samurai.mp3', title: '月曜日のサムライ', style: 'Japanese, j-rock, energetic female voice, distorted electric guitars, driving bass, fast drums, anime opening, 168 BPM',
+    note: { en: 'Japanese rock in the style of an anime opening.', ru: 'Японский рок в духе опенинга аниме.', zh: '动漫片头风格的日本摇滚。', ja: 'アニメのオープニング風 J-ROCK。', ko: '애니메이션 오프닝 스타일의 J-록.' } },
   { file: 'dacha-leto-komary.mp3', title: 'Дача, лето, комары', style: 'Russian, folk pop, warm male voice, accordion, acoustic guitar, upright bass, 104 BPM',
     note: { en: 'Full song from a style and lyrics.', ru: 'Целая песня по стилю и тексту.', zh: '根据风格和歌词生成的完整歌曲。', ja: 'スタイルと歌詞から作ったフルソング。', ko: '스타일과 가사로 만든 완성곡.' } },
   { file: 'dacha-jazz-cover.mp3', title: 'Дача, лето, комары — джаз', style: 'Russian, vintage jazz swing, sultry female crooner, upright bass, brushed drums, muted trumpet, 104 BPM',
