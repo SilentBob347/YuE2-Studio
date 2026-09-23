@@ -173,7 +173,7 @@ footer a { color: var(--text); }
       <div class="card"><h3>完整歌曲</h3><p>根据风格和歌词生成最长六分钟的歌曲。在 RTX 4090 上使用 Q8_0 模型组，3:38 的歌曲约 46 秒完成。</p></div>
       <div class="card"><h3>可编辑的乐谱</h3><p>作品以 ABC 记谱法返回并排版为五线谱。修改后再次创作：作品保持不变，演绎随之改变。</p></div>
       <div class="card"><h3>先写乐谱</h3><p>在演唱之前几秒内只写出乐谱：阅读、修改，再创作。相当于 yue2.cpp 的 yue-plan。</p></div>
-      <div class="card"><h3>翻唱</h3><p>SheetSage2 把任意录音的旋律记成乐谱，YuE2 用你的歌词和风格演唱它。</p></div>
+      <div class="card"><h3>翻唱</h3><p>SheetSage2 把录音的旋律记成乐谱，YuE2 用你的风格演唱。歌词必须贴合这段旋律：用原词，或每行音节数相同、重音落在同样音符上的新词，否则演唱会偏离旋律。</p></div>
       <div class="card"><h3>精确重放</h3><p>每首曲目都保存请求和音频编码：可逐位重新渲染，也可换步数、换声音种子或生成多个变体。</p></div>
       <div class="card"><h3>110 个现成示例</h3><p>yue2.cpp 自带的风格、歌词和乐谱组合（含翻唱），一键载入。</p></div>
       <div class="card"><h3>写作助手</h3><p>本地 Gemma 模型或 OpenRouter 根据想法撰写风格和歌词，并按要求编辑乐谱。</p></div>
@@ -184,7 +184,7 @@ footer a { color: var(--text); }
 
   <section id="samples">
     <h2>示例</h2>
-    <p class="sub">在全新安装、推荐模型组下生成，按工作室保存的原样呈现，全部为俄语。</p>
+    <p class="sub">在全新安装、推荐模型组下生成，按工作室保存的原样呈现，包括英语、西班牙语、中文、日语和俄语。</p>
     <div class="samples">
       <figure class="sample"><figcaption><b>Houseplant Party</b><span>英语放克迪斯科。</span><code>English, funk disco, groovy male voice, slap bass, wah guitar, brass stabs, four on the floor drums, playful, 118 BPM</code></figcaption><audio controls preload="none" src="samples/houseplant-party.mp3"></audio></figure>
       <figure class="sample"><figcaption><b>My Truck Talks Back</b><span>带踏板钢吉他和小提琴的乡村音乐。</span><code>English, country, warm male baritone, acoustic guitar, pedal steel, fiddle, brushed drums, easygoing, 96 BPM</code></figcaption><audio controls preload="none" src="samples/my-truck-talks-back.mp3"></audio></figure>

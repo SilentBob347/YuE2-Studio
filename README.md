@@ -41,9 +41,12 @@ runtime path is Python.
   composition stays, the performance changes. Or switch to melody-only, or no score at all.
 - **Compose the score first** — write only the score from the style and lyrics, without
   singing it (the studio's take on yue2.cpp's `yue-plan`), read and fix it, then create.
-- **Covers** — SheetSage2 listens to any recording and writes its melody as a score; YuE2
-  then sings that melody with your lyrics in your style. A track from your library can be
-  transcribed from its menu.
+- **Covers** — SheetSage2 listens to a recording and writes its melody as a score; YuE2
+  then sings that melody in your style. The words have to fit the melody: the original
+  lyrics work best, new ones need the same syllables line by line with the stresses on
+  the same notes, or the singing drifts off the tune — lines stretch, pause and slide into
+  the wrong section. Transcription mistakes carry into the cover too. A track from your
+  library can be transcribed from its menu.
 - **Exact replay** — every track keeps its request and its audio codes, so it can be
   re-rendered bit for bit, or re-rendered with other steps, a new sound seed, several
   variations, or another output format, without composing again.

@@ -10,7 +10,7 @@ export const SETS = [
   { vram: '5.5 GB+', size: '3.6 GB', key: 'setLight' },
 ];
 
-// Songs made with the studio on a clean install, all in Russian, all as the
+// Songs made with the studio on a clean install, in five languages, all as the
 // studio rendered them (MP3, 320 kbps). Notes are per language.
 export const SAMPLES = [
   { file: 'houseplant-party.mp3', title: 'Houseplant Party', style: 'English, funk disco, groovy male voice, slap bass, wah guitar, brass stabs, four on the floor drums, playful, 118 BPM',
@@ -56,7 +56,7 @@ export const STRINGS = {
       ['Full songs', 'Up to six minutes from a style and lyrics. On an RTX 4090 with the Q8_0 set a 3:38 song renders in about 46 seconds.'],
       ['An editable score', 'The composition comes back as ABC notation, engraved as sheet music. Edit it and create again: the composition stays, the performance changes.'],
       ['Compose the score first', 'Only the score, in seconds, before anything is sung: read it, fix it, then create. The studio’s take on yue2.cpp’s yue-plan.'],
-      ['Covers', 'SheetSage2 writes the melody of any recording down as a score; YuE2 sings it with your lyrics in your style.'],
+      ['Covers', 'SheetSage2 writes a recording’s melody down as a score, and YuE2 sings it in your style. The words must fit that melody: the original lyrics, or new ones with the same syllables line by line and the stresses on the same notes, otherwise the singing drifts off the tune.'],
       ['Exact replay', 'Every track keeps its request and audio codes: re-render it bit for bit, or with other steps, a new sound seed, several variations.'],
       ['110 ready examples', 'The style, lyrics and score sets that ship with yue2.cpp, covers included, one click to load.'],
       ['A writing assistant', 'A local Gemma model or OpenRouter writes the style and lyrics from an idea and edits the score on request.'],
@@ -64,7 +64,7 @@ export const STRINGS = {
       ['Stems on your GPU', 'Drums, bass, other, vocals, guitar and piano, separated by HT-Demucs.'],
     ],
     samplesTitle: 'Songs made with it',
-    samplesSub: 'Rendered on a clean install with the recommended set, as the studio saved them. All in Russian.',
+    samplesSub: 'Rendered on a clean install with the recommended set, as the studio saved them. In English, Spanish, Mandarin, Japanese and Russian.',
     shotsTitle: 'Screenshots',
     shotsSub: 'The studio itself, in this language.',
     shots: [
@@ -136,7 +136,7 @@ export const STRINGS = {
       ['Целые песни', 'До шести минут по стилю и тексту. На RTX 4090 с набором Q8_0 песня в 3:38 рендерится примерно за 46 секунд.'],
       ['Партитура, которую можно править', 'Композиция возвращается в нотации ABC и отрисовывается нотами. Поправьте и создайте снова: композиция остаётся, меняется исполнение.'],
       ['Сначала партитура', 'Только партитура за секунды, ещё до пения: прочитайте, поправьте, потом создавайте. Аналог yue-plan из yue2.cpp.'],
-      ['Каверы', 'SheetSage2 записывает мелодию любой записи в партитуру, YuE2 поёт её с вашим текстом в вашем стиле.'],
+      ['Каверы', 'SheetSage2 записывает мелодию записи в партитуру, YuE2 поёт её в вашем стиле. Слова должны ложиться на эту мелодию: оригинальный текст или новый с тем же числом слогов в каждой строке и ударениями на тех же нотах, иначе пение съезжает с мелодии.'],
       ['Точный повтор', 'Каждый трек хранит запрос и аудиокоды: отрендерить заново один в один или с другими шагами, новым сидом звука, несколькими вариациями.'],
       ['110 готовых примеров', 'Наборы стиля, текста и партитуры из yue2.cpp, включая каверы, — загружаются одним кликом.'],
       ['Помощник по текстам', 'Локальная Gemma или OpenRouter пишет стиль и текст по идее и правит партитуру по просьбе.'],
@@ -144,7 +144,7 @@ export const STRINGS = {
       ['Стемы на видеокарте', 'Барабаны, бас, прочее, вокал, гитара и пианино — разделяет HT-Demucs.'],
     ],
     samplesTitle: 'Примеры',
-    samplesSub: 'Сделаны на чистой установке с рекомендованным набором, как их сохранила студия. Все на русском.',
+    samplesSub: 'Сделаны на чистой установке с рекомендованным набором, как их сохранила студия. На английском, испанском, китайском, японском и русском.',
     shotsTitle: 'Скриншоты',
     shotsSub: 'Сама студия — на этом языке.',
     shots: [
@@ -216,7 +216,7 @@ export const STRINGS = {
       ['完整歌曲', '根据风格和歌词生成最长六分钟的歌曲。在 RTX 4090 上使用 Q8_0 模型组，3:38 的歌曲约 46 秒完成。'],
       ['可编辑的乐谱', '作品以 ABC 记谱法返回并排版为五线谱。修改后再次创作：作品保持不变，演绎随之改变。'],
       ['先写乐谱', '在演唱之前几秒内只写出乐谱：阅读、修改，再创作。相当于 yue2.cpp 的 yue-plan。'],
-      ['翻唱', 'SheetSage2 把任意录音的旋律记成乐谱，YuE2 用你的歌词和风格演唱它。'],
+      ['翻唱', 'SheetSage2 把录音的旋律记成乐谱，YuE2 用你的风格演唱。歌词必须贴合这段旋律：用原词，或每行音节数相同、重音落在同样音符上的新词，否则演唱会偏离旋律。'],
       ['精确重放', '每首曲目都保存请求和音频编码：可逐位重新渲染，也可换步数、换声音种子或生成多个变体。'],
       ['110 个现成示例', 'yue2.cpp 自带的风格、歌词和乐谱组合（含翻唱），一键载入。'],
       ['写作助手', '本地 Gemma 模型或 OpenRouter 根据想法撰写风格和歌词，并按要求编辑乐谱。'],
@@ -224,7 +224,7 @@ export const STRINGS = {
       ['显卡分轨', '鼓、贝斯、其他、人声、吉他和钢琴，由 HT-Demucs 分离。'],
     ],
     samplesTitle: '示例',
-    samplesSub: '在全新安装、推荐模型组下生成，按工作室保存的原样呈现，全部为俄语。',
+    samplesSub: '在全新安装、推荐模型组下生成，按工作室保存的原样呈现，包括英语、西班牙语、中文、日语和俄语。',
     shotsTitle: '截图',
     shotsSub: '工作室本身，使用此语言。',
     shots: [
@@ -296,7 +296,7 @@ export const STRINGS = {
       ['フルソング', 'スタイルと歌詞から最長 6 分。RTX 4090 と Q8_0 セットで 3:38 の曲が約 46 秒でレンダリングされます。'],
       ['編集できる楽譜', '曲は ABC 記譜で返され、楽譜として表示されます。編集してもう一度作成すると、曲はそのままに演奏が変わります。'],
       ['まず楽譜だけ', '歌う前に数秒で楽譜だけを作成。読んで直してから作成します。yue2.cpp の yue-plan に相当。'],
-      ['カバー', 'SheetSage2 があらゆる録音のメロディを楽譜に書き起こし、YuE2 があなたの歌詞とスタイルで歌います。'],
+      ['カバー', 'SheetSage2 が録音のメロディを楽譜に書き起こし、YuE2 があなたのスタイルで歌います。歌詞はそのメロディに合っている必要があります。元の歌詞か、各行の音節数とアクセントの位置が同じ新しい歌詞でないと、歌がメロディからずれていきます。'],
       ['完全な再現', '各トラックはリクエストとオーディオコードを保存。ビット単位で再レンダリング、またはステップや音のシード、バリエーションを変えて再生成できます。'],
       ['110 のサンプル', 'yue2.cpp に同梱のスタイル・歌詞・楽譜のセット（カバーを含む）をワンクリックで読み込めます。'],
       ['作詞アシスタント', 'ローカルの Gemma または OpenRouter がアイデアからスタイルと歌詞を書き、依頼に応じて楽譜を編集します。'],
@@ -304,7 +304,7 @@ export const STRINGS = {
       ['GPU でステム分離', 'ドラム、ベース、その他、ボーカル、ギター、ピアノを HT-Demucs で分離。'],
     ],
     samplesTitle: 'サンプル',
-    samplesSub: 'クリーンインストールと推奨セットで作成し、スタジオが保存したままの音です。すべてロシア語。',
+    samplesSub: 'クリーンインストールと推奨セットで作成し、スタジオが保存したままの音です。英語、スペイン語、中国語、日本語、ロシア語。',
     shotsTitle: 'スクリーンショット',
     shotsSub: 'この言語で表示したスタジオそのもの。',
     shots: [
@@ -376,7 +376,7 @@ export const STRINGS = {
       ['완성곡', '스타일과 가사로 최대 6분. RTX 4090과 Q8_0 세트에서 3:38 길이의 곡이 약 46초 만에 렌더링됩니다.'],
       ['편집 가능한 악보', '곡은 ABC 표기로 돌아와 악보로 그려집니다. 고친 뒤 다시 만들면 곡은 그대로, 연주가 바뀝니다.'],
       ['악보 먼저', '노래하기 전에 몇 초 만에 악보만 씁니다. 읽고 고친 뒤 만드세요. yue2.cpp의 yue-plan에 해당합니다.'],
-      ['커버', 'SheetSage2가 어떤 녹음이든 멜로디를 악보로 받아 적고, YuE2가 내 가사와 스타일로 부릅니다.'],
+      ['커버', 'SheetSage2가 녹음의 멜로디를 악보로 받아 적고, YuE2가 내 스타일로 부릅니다. 가사는 그 멜로디에 맞아야 합니다. 원래 가사나 줄마다 음절 수와 강세 위치가 같은 새 가사가 아니면 노래가 멜로디에서 벗어납니다.'],
       ['정확한 재현', '모든 트랙은 요청과 오디오 코드를 저장합니다. 비트 단위로 다시 렌더링하거나 스텝, 사운드 시드, 변주를 바꿔 만들 수 있습니다.'],
       ['예제 110개', 'yue2.cpp에 포함된 스타일·가사·악보 세트(커버 포함)를 한 번에 불러옵니다.'],
       ['작사 도우미', '로컬 Gemma 또는 OpenRouter가 아이디어로 스타일과 가사를 쓰고 요청에 따라 악보를 편집합니다.'],
@@ -384,7 +384,7 @@ export const STRINGS = {
       ['GPU 스템 분리', '드럼, 베이스, 기타 소리, 보컬, 기타, 피아노를 HT-Demucs로 분리.'],
     ],
     samplesTitle: '샘플',
-    samplesSub: '새로 설치한 스튜디오와 권장 세트로 만들었고, 스튜디오가 저장한 그대로입니다. 모두 러시아어.',
+    samplesSub: '새로 설치한 스튜디오와 권장 세트로 만들었고, 스튜디오가 저장한 그대로입니다. 영어, 스페인어, 중국어, 일본어, 러시아어.',
     shotsTitle: '스크린샷',
     shotsSub: '이 언어로 본 스튜디오 그대로.',
     shots: [

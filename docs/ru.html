@@ -173,7 +173,7 @@ footer a { color: var(--text); }
       <div class="card"><h3>Целые песни</h3><p>До шести минут по стилю и тексту. На RTX 4090 с набором Q8_0 песня в 3:38 рендерится примерно за 46 секунд.</p></div>
       <div class="card"><h3>Партитура, которую можно править</h3><p>Композиция возвращается в нотации ABC и отрисовывается нотами. Поправьте и создайте снова: композиция остаётся, меняется исполнение.</p></div>
       <div class="card"><h3>Сначала партитура</h3><p>Только партитура за секунды, ещё до пения: прочитайте, поправьте, потом создавайте. Аналог yue-plan из yue2.cpp.</p></div>
-      <div class="card"><h3>Каверы</h3><p>SheetSage2 записывает мелодию любой записи в партитуру, YuE2 поёт её с вашим текстом в вашем стиле.</p></div>
+      <div class="card"><h3>Каверы</h3><p>SheetSage2 записывает мелодию записи в партитуру, YuE2 поёт её в вашем стиле. Слова должны ложиться на эту мелодию: оригинальный текст или новый с тем же числом слогов в каждой строке и ударениями на тех же нотах, иначе пение съезжает с мелодии.</p></div>
       <div class="card"><h3>Точный повтор</h3><p>Каждый трек хранит запрос и аудиокоды: отрендерить заново один в один или с другими шагами, новым сидом звука, несколькими вариациями.</p></div>
       <div class="card"><h3>110 готовых примеров</h3><p>Наборы стиля, текста и партитуры из yue2.cpp, включая каверы, — загружаются одним кликом.</p></div>
       <div class="card"><h3>Помощник по текстам</h3><p>Локальная Gemma или OpenRouter пишет стиль и текст по идее и правит партитуру по просьбе.</p></div>
@@ -184,7 +184,7 @@ footer a { color: var(--text); }
 
   <section id="samples">
     <h2>Примеры</h2>
-    <p class="sub">Сделаны на чистой установке с рекомендованным набором, как их сохранила студия. Все на русском.</p>
+    <p class="sub">Сделаны на чистой установке с рекомендованным набором, как их сохранила студия. На английском, испанском, китайском, японском и русском.</p>
     <div class="samples">
       <figure class="sample"><figcaption><b>Houseplant Party</b><span>Фанк-диско на английском.</span><code>English, funk disco, groovy male voice, slap bass, wah guitar, brass stabs, four on the floor drums, playful, 118 BPM</code></figcaption><audio controls preload="none" src="samples/houseplant-party.mp3"></audio></figure>
       <figure class="sample"><figcaption><b>My Truck Talks Back</b><span>Кантри со слайд-гитарой и скрипкой.</span><code>English, country, warm male baritone, acoustic guitar, pedal steel, fiddle, brushed drums, easygoing, 96 BPM</code></figcaption><audio controls preload="none" src="samples/my-truck-talks-back.mp3"></audio></figure>
