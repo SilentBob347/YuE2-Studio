@@ -8,6 +8,7 @@ import { useI18n } from '../context/I18nContext';
 import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
 import { openStems } from '../services/openStems';
+import { downloadSongAudio } from '../services/songDownload';
 import { captionSummary } from '../services/examples';
 import { getCurrentLrcIndex, parseLrc } from '../services/lrc-parser';
 
@@ -146,18 +147,9 @@ export const Player: React.FC<PlayerProps> = ({
     }, [karaokeLines, currentTime]);
 
     const handleDownload = async () => {
-        if (!currentSong?.audioUrl) return;
+        if (!currentSong) return;
         try {
-            const response = await fetch(currentSong.audioUrl);
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `${currentSong.title || 'song'}.mp3`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            URL.revokeObjectURL(url);
+            await downloadSongAudio(currentSong);
         } catch (error) {
             console.error('Download failed:', error);
         }

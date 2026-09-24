@@ -1,0 +1,152 @@
+//! Processing a finished track: noise reduction, the Spectral Lifter, vocal
+//! naturalising and mastering to a reference, in that order.
+//!
+//! A run never touches the track. It leaves a preview beside the library, to be
+//! heard against the original and then kept as a version or thrown away; a kept
+//! version plays in place of the original, which stays on disk and can be
+//! chosen again at any time.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{bail, Context, Result};
+use audio_post::{denoise, lifter, mastering, naturalize, quality, Stereo};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// What to do to a track. A stage left out is skipped.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProcessRequest {
+    #[serde(default)]
+    pub denoise: Option<denoise::DenoiseSettings>,
+    #[serde(default)]
+    pub lifter: Option<lifter::LifterSettings>,
+    #[serde(default)]
+    pub naturalize: Option<naturalize::NaturalizeSettings>,
+    #[serde(default)]
+    pub master: Option<MasterSource>,
+}
+
+/// The reference a track is mastered to: another song of the library, or a
+/// file uploaded for the purpose.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum MasterSource {
+    Song { song_id: String },
+    Upload { upload_id: String },
+}
+
+impl ProcessRequest {
+    pub fn stages(&self) -> Vec<&'static str> {
+        let mut stages = Vec::new();
+        if self.denoise.is_some() {
+            stages.push("denoise");
+        }
+        if self.lifter.is_some() {
+            stages.push("lifter");
+        }
+        if self.naturalize.is_some() {
+            stages.push("naturalize");
+        }
+        if self.master.is_some() {
+            stages.push("master");
+        }
+        stages
+    }
+}
+
+/// The run in progress or the last one, as the interface polls it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessRun {
+    pub song_id: String,
+    pub stages: Vec<&'static str>,
+    /// The stage working now, once started.
+    pub stage: Option<&'static str>,
+    pub done: bool,
+    pub error: Option<String>,
+    /// The preview's file name inside the processing folder, when ready.
+    #[serde(skip)]
+    pub preview: Option<String>,
+    pub preview_ready: bool,
+    pub request: ProcessRequest,
+    pub quality_before: Option<quality::QualityReport>,
+    pub quality_after: Option<quality::QualityReport>,
+}
+
+/// Where previews and uploaded references wait, inside the media folder.
+pub fn workspace(media: &Path) -> PathBuf {
+    media.join("processing")
+}
+
+/// A name that is a plain file of the workspace, never a path out of it.
+pub fn workspace_file(media: &Path, name: &str) -> Option<PathBuf> {
+    if name.is_empty() || name.contains(['/', '\\', ':']) || name.starts_with('.') {
+        return None;
+    }
+    let path = workspace(media).join(name);
+    path.is_file().then_some(path)
+}
+
+/// Runs the stages on `source`, calling `on_stage` as each begins.
+pub fn run(source: &Path, reference: Option<&Path>, request: &ProcessRequest, on_stage: impl Fn(&'static str)) -> Result<(Stereo, quality::QualityReport, quality::QualityReport)> {
+    let mut audio = crate::audio_pcm::decode_stereo(source)?;
+    let before = quality::evaluate(&audio);
+    if let Some(settings) = &request.denoise {
+        on_stage("denoise");
+        audio = denoise::denoise(&audio, settings);
+    }
+    if let Some(settings) = &request.lifter {
+        on_stage("lifter");
+        audio = lifter::lift(&audio, settings);
+    }
+    if let Some(settings) = &request.naturalize {
+        on_stage("naturalize");
+        audio = naturalize::naturalize(&audio, settings);
+    }
+    if request.master.is_some() {
+        on_stage("master");
+        let reference = reference.context("mastering needs a reference track")?;
+        let reference = crate::audio_pcm::decode_stereo(reference)?;
+        audio = mastering::master(&audio, &reference, &mastering::MasteringConfig::default())?;
+    }
+    if request.stages().is_empty() {
+        bail!("choose at least one kind of processing");
+    }
+    let after = quality::evaluate(&audio);
+    Ok((audio, before, after))
+}
+
+/// The processing settings a kept version records, for showing and repeating.
+pub fn settings_record(request: &ProcessRequest, reference_title: Option<&str>) -> Value {
+    let mut value = serde_json::to_value(request).unwrap_or(Value::Null);
+    if let (Some(title), Some(object)) = (reference_title, value.as_object_mut()) {
+        object.insert("reference_title".into(), Value::String(title.to_string()));
+    }
+    value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stages_follow_the_request_in_processing_order() {
+        let request = ProcessRequest {
+            master: Some(MasterSource::Song { song_id: "x".into() }),
+            denoise: Some(Default::default()),
+            ..Default::default()
+        };
+        assert_eq!(request.stages(), vec!["denoise", "master"]);
+        let parsed: ProcessRequest =
+            serde_json::from_value(serde_json::json!({"lifter": {"shimmer_reduction_db": 3.0}, "master": {"type": "upload", "upload_id": "u"}})).unwrap();
+        assert_eq!(parsed.stages(), vec!["lifter", "master"]);
+        assert_eq!(parsed.lifter.unwrap().shimmer_reduction_db, 3.0);
+    }
+
+    #[test]
+    fn workspace_names_cannot_leave_the_folder() {
+        let media = std::env::temp_dir();
+        assert!(workspace_file(&media, "../library.sqlite").is_none());
+        assert!(workspace_file(&media, "a\\b.wav").is_none());
+        assert!(workspace_file(&media, "").is_none());
+    }
+}

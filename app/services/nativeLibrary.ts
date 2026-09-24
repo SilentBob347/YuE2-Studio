@@ -14,6 +14,23 @@ interface NativeLibrarySong {
   replay_request?: unknown | null;
   audio_codes?: unknown | null;
   created_at: string;
+  updated_at?: string;
+}
+
+function audioVersions(metadata: Record<string, unknown>): import('../types').SongVersion[] | undefined {
+  const list = metadata.audio_versions;
+  if (!Array.isArray(list) || list.length === 0) return undefined;
+  return list.flatMap(item => {
+    if (!item || typeof item !== 'object') return [];
+    const entry = item as Record<string, unknown>;
+    if (typeof entry.id !== 'string') return [];
+    return [{
+      id: entry.id,
+      label: typeof entry.label === 'string' ? entry.label : '',
+      createdAt: typeof entry.created_at === 'string' ? entry.created_at : '',
+      settings: entry.settings && typeof entry.settings === 'object' ? (entry.settings as Record<string, unknown>) : undefined,
+    }];
+  });
 }
 
 interface NativePlaylist {
@@ -76,7 +93,11 @@ export function mapNativeLibrarySong(song: NativeLibrarySong): Song {
     })(),
     createdAt: nativeDate(song.created_at),
     tags,
-    audioUrl: song.audio_path ? apiUrl(`/v1/library/media/${encodeURIComponent(song.id)}`) : undefined,
+    // The address changes with the record, so a switched version is fetched
+    // again instead of replayed from the browser's cache.
+    audioUrl: song.audio_path
+      ? apiUrl(`/v1/library/media/${encodeURIComponent(song.id)}${song.updated_at ? `?v=${encodeURIComponent(song.updated_at)}` : ''}`)
+      : undefined,
     isPublic: false,
     ditModel: song.engine_id,
     lmModel: song.profile_id || undefined,
@@ -88,6 +109,8 @@ export function mapNativeLibrarySong(song: NativeLibrarySong): Song {
     // Karaoke timings, when someone has made them. The video studio and the
     // LRC download have always read this field.
     lrcContent: stringMetadata(metadata, 'lrc'),
+    audioVersions: audioVersions(metadata),
+    activeVersion: stringMetadata(metadata, 'active_version'),
   };
 }
 

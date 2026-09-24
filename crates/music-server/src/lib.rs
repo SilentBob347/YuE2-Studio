@@ -1,4 +1,5 @@
 mod adapters;
+mod processing;
 mod auto_title;
 mod tagging;
 mod cover_prompt;
@@ -79,6 +80,8 @@ struct AppState {
     separation_run: Arc<RwLock<Option<SeparationRun>>>,
     /// LoRA adapters for the local engine, and the example catalogue.
     adapters: Arc<adapters::AdapterLibrary>,
+    /// The processing run in progress or the last one, with its preview.
+    processing_run: Arc<RwLock<Option<processing::ProcessRun>>>,
 }
 
 #[derive(Clone)]
@@ -573,6 +576,7 @@ pub async fn serve() -> anyhow::Result<()> {
             &studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")),
             PRIMARY_MUSIC_ENGINE_ID,
         )),
+        processing_run: Arc::new(RwLock::new(None)),
         selected_profile_id: Arc::new(RwLock::new(selected_profile_id)),
         selected_component_ids: Arc::new(RwLock::new(selected_component_ids)),
         settings_path,
@@ -637,6 +641,14 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/adapters/cancel", post(cancel_adapter_download))
         .route("/v1/adapters/catalog/{id}", post(install_catalog_adapter))
         .route("/v1/adapters/{id}", axum::routing::patch(update_adapter).delete(delete_adapter))
+        .route("/v1/library/songs/{id}/process", post(start_processing))
+        .route("/v1/library/songs/{id}/version", axum::routing::put(select_song_version))
+        .route("/v1/library/songs/{id}/versions/{version}", axum::routing::delete(remove_song_version))
+        .route("/v1/processing", get(read_processing))
+        .route("/v1/processing/preview", get(processing_preview))
+        .route("/v1/processing/keep", post(keep_processing))
+        .route("/v1/processing/discard", post(discard_processing))
+        .route("/v1/processing/reference", post(upload_processing_reference))
         .route("/v1/library/songs/{id}/stems", get(read_stems).post(start_separation))
         .route("/v1/library/songs/{id}/stems/{stem}", get(read_stem_audio))
         .route("/v1/library/songs/{id}/cover/auto", post(draw_cover_now))
@@ -751,7 +763,12 @@ async fn library_media(State(state): State<AppState>, Path(song_id): Path<String
     {
         tag_stored_song(&state, &song_id).await;
     }
-    let bytes = tokio::fs::read(&path).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("read song audio: {error}")))?;
+    serve_audio_file(&path, &headers).await
+}
+
+/// An audio file with single byte-range support, which `<audio>` seeking needs.
+async fn serve_audio_file(path: &std::path::Path, headers: &HeaderMap) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
+    let bytes = tokio::fs::read(path).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("read song audio: {error}")))?;
     let content_type = match path.extension().and_then(|extension| extension.to_str()).map(|extension| extension.to_ascii_lowercase()).as_deref() {
         Some("mp3") => "audio/mpeg",
         Some("wav") => "audio/wav",
@@ -1272,6 +1289,223 @@ async fn update_adapter(
 async fn delete_adapter(State(state): State<AppState>, Path(id): Path<String>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
     state.adapters.remove(&id).map_err(|e| api_error(StatusCode::NOT_FOUND, e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Starts processing a track into a preview. One run at a time: the stages are
+/// quick, and a second request would only race the first for the preview.
+async fn start_processing(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<processing::ProcessRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    if state.processing_run.read().await.as_ref().is_some_and(|run| !run.done) {
+        return Err(api_error(StatusCode::CONFLICT, "a track is already being processed".into()));
+    }
+    if request.stages().is_empty() {
+        return Err(api_error(StatusCode::BAD_REQUEST, "choose at least one kind of processing".into()));
+    }
+    let song = state
+        .library
+        .get_song(&id)
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
+    let source = state
+        .library
+        .media_path_for_song(&song)
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "this track has no stored audio".into()))?;
+    let media = state.library.media_dir().to_path_buf();
+    let reference = match &request.master {
+        None => None,
+        Some(processing::MasterSource::Song { song_id }) => {
+            let reference_song = state
+                .library
+                .get_song(song_id)
+                .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+                .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "the reference track is not in the library".into()))?;
+            Some(
+                state
+                    .library
+                    .media_path_for_song(&reference_song)
+                    .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "the reference track has no stored audio".into()))?,
+            )
+        }
+        Some(processing::MasterSource::Upload { upload_id }) => Some(
+            processing::workspace_file(&media, upload_id)
+                .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "the uploaded reference is gone; upload it again".into()))?,
+        ),
+    };
+
+    // a new run replaces the last preview nobody kept
+    let stale = state.processing_run.read().await.as_ref().and_then(|run| run.preview.clone());
+    if let Some(name) = stale.and_then(|name| processing::workspace_file(&media, &name)) {
+        let _ = std::fs::remove_file(name);
+    }
+    *state.processing_run.write().await = Some(processing::ProcessRun {
+        song_id: id.clone(),
+        stages: request.stages(),
+        stage: None,
+        done: false,
+        error: None,
+        preview: None,
+        preview_ready: false,
+        request: request.clone(),
+        quality_before: None,
+        quality_after: None,
+    });
+
+    let background = state.clone();
+    tokio::task::spawn_blocking(move || {
+        let handle = tokio::runtime::Handle::current();
+        let outcome = (|| -> anyhow::Result<(String, audio_post::quality::QualityReport, audio_post::quality::QualityReport)> {
+            let (audio, before, after) = processing::run(&source, reference.as_deref(), &request, |stage| {
+                let state = background.clone();
+                handle.spawn(async move {
+                    if let Some(run) = state.processing_run.write().await.as_mut() {
+                        run.stage = Some(stage);
+                    }
+                });
+            })?;
+            let folder = processing::workspace(&media);
+            std::fs::create_dir_all(&folder)?;
+            let name = format!("{}-{}.wav", id, &uuid::Uuid::now_v7().simple().to_string()[..8]);
+            audio_pcm::write_wav24(&folder.join(&name), &audio)?;
+            Ok((name, before, after))
+        })();
+        handle.block_on(async {
+            if let Some(run) = background.processing_run.write().await.as_mut() {
+                run.done = true;
+                match outcome {
+                    Ok((name, before, after)) => {
+                        run.preview = Some(name);
+                        run.preview_ready = true;
+                        run.quality_before = Some(before);
+                        run.quality_after = Some(after);
+                    }
+                    Err(error) => run.error = Some(format!("{error:#}")),
+                }
+            }
+        });
+    });
+    Ok(Json(serde_json::json!({ "started": true })))
+}
+
+async fn read_processing(State(state): State<AppState>) -> Json<Value> {
+    Json(serde_json::json!({ "run": state.processing_run.read().await.clone() }))
+}
+
+async fn processing_preview(State(state): State<AppState>, headers: HeaderMap) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
+    let name = state.processing_run.read().await.as_ref().and_then(|run| run.preview.clone());
+    let path = name
+        .and_then(|name| processing::workspace_file(state.library.media_dir(), &name))
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "there is no processed preview".into()))?;
+    serve_audio_file(&path, &headers).await
+}
+
+#[derive(Debug, Deserialize)]
+struct KeepProcessingRequest {
+    /// What the version is called in the track's version list.
+    label: String,
+}
+
+/// Keeps the preview as a version of its track, playing from now on.
+async fn keep_processing(
+    State(state): State<AppState>,
+    Json(input): Json<KeepProcessingRequest>,
+) -> Result<Json<library::Song>, (StatusCode, Json<ApiError>)> {
+    let run = state.processing_run.read().await.clone().filter(|run| run.preview_ready);
+    let run = run.ok_or_else(|| api_error(StatusCode::NOT_FOUND, "there is no processed preview to keep".into()))?;
+    let media = state.library.media_dir().to_path_buf();
+    let preview = run
+        .preview
+        .as_deref()
+        .and_then(|name| processing::workspace_file(&media, name))
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "the preview file is gone".into()))?;
+    let filename = format!("{}-v{}-{}.wav", run.song_id, &uuid::Uuid::now_v7().simple().to_string()[..8], run.stages.join("-"));
+    std::fs::rename(&preview, media.join(&filename)).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("store the version: {error}")))?;
+    let reference_title = match &run.request.master {
+        Some(processing::MasterSource::Song { song_id }) => state.library.get_song(song_id).ok().flatten().map(|song| song.title),
+        _ => None,
+    };
+    let settings = processing::settings_record(&run.request, reference_title.as_deref());
+    let song = state
+        .library
+        .add_song_version(&run.song_id, &filename, input.label.trim(), settings)
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
+    *state.processing_run.write().await = None;
+    Ok(Json(song))
+}
+
+async fn discard_processing(State(state): State<AppState>) -> Json<Value> {
+    let run = state.processing_run.write().await.take();
+    if let Some(path) = run.and_then(|run| run.preview).and_then(|name| processing::workspace_file(state.library.media_dir(), &name)) {
+        let _ = std::fs::remove_file(path);
+    }
+    Json(serde_json::json!({ "discarded": true }))
+}
+
+/// Stores a reference recording for mastering. It waits in the processing
+/// folder, not the library: a reference is a tool, not a song.
+async fn upload_processing_reference(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    while let Some(field) = multipart.next_field().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read the upload: {e}")))? {
+        if field.name() != Some("audio") {
+            continue;
+        }
+        let original = field.file_name().unwrap_or("reference").to_owned();
+        let extension = std::path::Path::new(&original)
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .filter(|value| matches!(value.as_str(), "mp3" | "wav" | "flac" | "ogg" | "m4a"))
+            .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "the reference must be MP3, WAV, FLAC, OGG or M4A".into()))?;
+        let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read the upload: {e}")))?;
+        let folder = processing::workspace(state.library.media_dir());
+        std::fs::create_dir_all(&folder).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let upload_id = format!("reference-{}.{extension}", uuid::Uuid::now_v7().simple());
+        std::fs::write(folder.join(&upload_id), &bytes).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        return Ok(Json(serde_json::json!({ "upload_id": upload_id, "name": original })));
+    }
+    Err(api_error(StatusCode::BAD_REQUEST, "no audio part in the upload".into()))
+}
+
+#[derive(Debug, Deserialize)]
+struct SelectVersionRequest {
+    /// `original`, or the id of one of the track's versions.
+    version: String,
+}
+
+async fn select_song_version(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<SelectVersionRequest>,
+) -> Result<Json<library::Song>, (StatusCode, Json<ApiError>)> {
+    let song = state
+        .library
+        .select_song_version(&id, &input.version)
+        .map_err(|error| api_error(StatusCode::BAD_REQUEST, error.to_string()))?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
+    tag_stored_song(&state, &id).await;
+    Ok(Json(song))
+}
+
+async fn remove_song_version(
+    State(state): State<AppState>,
+    Path((id, version)): Path<(String, String)>,
+) -> Result<Json<library::Song>, (StatusCode, Json<ApiError>)> {
+    let (song, file) = state
+        .library
+        .remove_song_version(&id, &version)
+        .map_err(|error| api_error(StatusCode::BAD_REQUEST, error.to_string()))?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
+    if let Some(file) = file {
+        if let Err(error) = std::fs::remove_file(&file) {
+            eprintln!("[ERROR] remove version {version} of {id}: {error}");
+        }
+    }
+    Ok(Json(song))
 }
 
 async fn read_stems(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
@@ -1883,6 +2117,17 @@ fn song_files(state: &AppState, song: &library::Song) -> Vec<PathBuf> {
     if let Some(audio) = song.audio_path.as_deref().map(PathBuf::from) {
         files.push(audio);
     }
+    // a processed track owns its original and every version besides the one playing
+    if let Some(original) = song.metadata.get("original_audio_path").and_then(Value::as_str) {
+        files.push(PathBuf::from(original));
+    }
+    for version in song.metadata.get("audio_versions").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(file) = version.get("file").and_then(Value::as_str) {
+            files.push(media.join(file));
+        }
+    }
+    files.sort();
+    files.dedup();
     if let Some((cover, _)) = state.library.cover_path_for_song(song) {
         files.push(cover);
     }

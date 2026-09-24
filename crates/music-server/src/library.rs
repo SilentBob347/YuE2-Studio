@@ -194,6 +194,63 @@ impl Library {
   self.save_song(&song)?;
   Ok(Some(song))
  }
+ /// Adds a processed version of a track, stored in the media folder, and makes
+ /// it the one that plays. The original's file is remembered on the first
+ /// version, so a track can always go back to what it was generated as. Kept in
+ /// the metadata, like the karaoke timings, so no migration is needed.
+ pub fn add_song_version(&self,id:&str,filename:&str,label:&str,settings:serde_json::Value)->Result<Option<Song>>{
+  let Some(mut song)=self.get_song(id)? else{return Ok(None)};
+  let path=self.media_file(filename).with_context(||format!("version file {filename} is not in the media folder"))?;
+  let mut metadata=match song.metadata.take(){serde_json::Value::Object(map)=>map,_=>serde_json::Map::new()};
+  if !metadata.contains_key("original_audio_path"){
+   metadata.insert("original_audio_path".into(),song.audio_path.clone().map(serde_json::Value::String).unwrap_or(serde_json::Value::Null));
+  }
+  let version_id=uuid::Uuid::now_v7().to_string();
+  let entry=serde_json::json!({"id":version_id,"label":label,"file":filename,"created_at":now(),"settings":settings});
+  match metadata.get_mut("audio_versions").and_then(|v|v.as_array_mut()){
+   Some(list)=>list.push(entry),
+   None=>{metadata.insert("audio_versions".into(),serde_json::Value::Array(vec![entry]));}
+  }
+  metadata.insert("active_version".into(),serde_json::Value::String(version_id));
+  song.metadata=serde_json::Value::Object(metadata);
+  song.audio_path=Some(path.to_string_lossy().into_owned());
+  song.updated_at=now();
+  self.save_song(&song)?;
+  Ok(Some(song))
+ }
+ /// Plays the original (`"original"`) or one of the versions.
+ pub fn select_song_version(&self,id:&str,version:&str)->Result<Option<Song>>{
+  let Some(mut song)=self.get_song(id)? else{return Ok(None)};
+  let original=song.metadata.get("original_audio_path").and_then(|v|v.as_str()).map(str::to_owned);
+  let audio=if version=="original"{
+   original.context("this track has no other version")?
+  }else{
+   let file=song.metadata.get("audio_versions").and_then(|v|v.as_array()).and_then(|list|list.iter().find(|v|v.get("id").and_then(|x|x.as_str())==Some(version))).and_then(|v|v.get("file")).and_then(|v|v.as_str()).map(str::to_owned).context("no such version")?;
+   self.media_file(&file).context("the version's file is missing")?.to_string_lossy().into_owned()
+  };
+  if let Some(fields)=song.metadata.as_object_mut(){fields.insert("active_version".into(),serde_json::Value::String(version.to_owned()));}
+  song.audio_path=Some(audio);
+  song.updated_at=now();
+  self.save_song(&song)?;
+  Ok(Some(song))
+ }
+ /// Forgets a version; when it was playing, the original plays again.
+ /// Returns the file to remove.
+ pub fn remove_song_version(&self,id:&str,version:&str)->Result<Option<(Song,Option<PathBuf>)>>{
+  let Some(song)=self.get_song(id)? else{return Ok(None)};
+  let active=song.metadata.get("active_version").and_then(|v|v.as_str())==Some(version);
+  let mut song=if active{self.select_song_version(id,"original")?.context("the track went away")?}else{song};
+  let mut file=None;
+  if let Some(list)=song.metadata.get_mut("audio_versions").and_then(|v|v.as_array_mut()){
+   if let Some(index)=list.iter().position(|v|v.get("id").and_then(|x|x.as_str())==Some(version)){
+    file=list[index].get("file").and_then(|v|v.as_str()).and_then(|name|self.media_file(name));
+    list.remove(index);
+   }
+  }
+  song.updated_at=now();
+  self.save_song(&song)?;
+  Ok(Some((song,file)))
+ }
  pub fn update_song(&self,id:&str,input:SongInput)->Result<Option<Song>>{let Some(mut song)=self.get_song(id)? else{return Ok(None)};song.title=input.title;if input.audio_path.is_some(){song.audio_path=input.audio_path};song.caption=input.caption;song.lyrics=input.lyrics;song.metadata=input.metadata;song.generation_settings=input.generation_settings;song.engine_id=input.engine_id;song.profile_id=input.profile_id;if input.replay_request.is_some(){song.replay_request=input.replay_request};if input.audio_codes.is_some(){song.audio_codes=input.audio_codes};song.source=input.source;song.updated_at=now();self.save_song(&song)?;Ok(Some(song))}
  pub fn delete_song(&self,id:&str)->Result<bool>{Ok(self.connection.lock().unwrap().execute("DELETE FROM songs WHERE id=?",[id])?>0)}
  fn save_song(&self,s:&Song)->Result<()> {self.connection.lock().unwrap().execute("INSERT INTO songs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,audio_path=excluded.audio_path,caption=excluded.caption,lyrics=excluded.lyrics,metadata_json=excluded.metadata_json,generation_settings_json=excluded.generation_settings_json,engine_id=excluded.engine_id,profile_id=excluded.profile_id,replay_request_json=excluded.replay_request_json,audio_codes_json=excluded.audio_codes_json,source=excluded.source,updated_at=excluded.updated_at",params![s.id,s.title,s.audio_path,s.caption,s.lyrics,s.metadata.to_string(),s.generation_settings.to_string(),s.engine_id,s.profile_id,s.replay_request.as_ref().map(|v|v.to_string()),s.audio_codes.as_ref().map(|v|v.to_string()),s.source,s.created_at,s.updated_at])?;Ok(())}

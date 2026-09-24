@@ -3,6 +3,7 @@ members = [
   "crates/music-core",
   "crates/music-server",
   "crates/music-engine",
+  "crates/audio-post",
 ]
 resolver = "2"
 

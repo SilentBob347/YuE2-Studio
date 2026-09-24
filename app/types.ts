@@ -31,6 +31,17 @@ export interface Song {
   timeSignature?: string;
   /** The track carries its semantic stream, so POST /v1/music/replay can re-render it. */
   nativeReplayAvailable?: boolean;
+  /** Processed versions kept beside the original; the active one plays. */
+  audioVersions?: SongVersion[];
+  /** `original`, a version id, or absent for a track never processed. */
+  activeVersion?: string;
+}
+
+export interface SongVersion {
+  id: string;
+  label: string;
+  createdAt: string;
+  settings?: Record<string, unknown>;
 }
 
 export interface Playlist {

@@ -8,6 +8,7 @@ import { LibraryView } from './components/LibraryView';
 import { CreatePlaylistModal, AddToPlaylistModal } from './components/PlaylistModals';
 import { CoverRegenModal } from './components/CoverRegenModal';
 import { ReplayModal } from './components/ReplayModal';
+import { ProcessingModal } from './components/ProcessingModal';
 import { VideoGeneratorModal } from './components/VideoGeneratorModal';
 import { SettingsModal } from './components/SettingsModal';
 import { Song, YueRequest, YueJob, YueProgress, View, Playlist } from './types';
@@ -149,13 +150,19 @@ function AppContent() {
       const view = (event as CustomEvent<View>).detail;
       if (view) setCurrentView(view);
     };
+    const process = (event: Event) => {
+      const song = (event as CustomEvent<Song>).detail;
+      if (song) setSongToProcess(song);
+    };
     window.addEventListener('yue:open-stems', open);
     window.addEventListener('yue:open-settings', openSettings);
     window.addEventListener('yue:navigate', navigate);
+    window.addEventListener('yue:process-song', process);
     return () => {
       window.removeEventListener('yue:open-stems', open);
       window.removeEventListener('yue:open-settings', openSettings);
       window.removeEventListener('yue:navigate', navigate);
+      window.removeEventListener('yue:process-song', process);
     };
   }, []);
 
@@ -306,6 +313,7 @@ function AppContent() {
   // and RightSidebar. Updates songs.cover_url via /api/songs/:id/regen-cover.
   const [songForCoverRegen, setSongForCoverRegen] = useState<Song | null>(null);
   const [songForReplay, setSongForReplay] = useState<Song | null>(null);
+  const [songToProcess, setSongToProcess] = useState<Song | null>(null);
   const [songForVideo, setSongForVideo] = useState<Song | null>(null);
 
   // Settings Modal
@@ -1487,6 +1495,13 @@ function AppContent() {
         song={songForVideo}
         onClose={() => setSongForVideo(null)}
       />
+      {songToProcess && (
+        <ProcessingModal
+          song={songToProcess}
+          onClose={() => setSongToProcess(null)}
+          onKept={() => { void refreshNativeLibrary(); }}
+        />
+      )}
       {songForReplay && (
         <ReplayModal
           song={songForReplay}

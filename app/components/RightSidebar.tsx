@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { TRACK_ARTIST } from '../services/studio';
 import { Song } from '../types';
 import { Heart, Share2, Play, Pause, MoreHorizontal, X, Copy, Wand2, MoreVertical, Download, Repeat, Video, Music, Link as LinkIcon, Sparkles, Globe, Lock, Trash2, Edit3, Layers, ChevronDown, ClipboardCopy, ImagePlus, Loader2, Mic2, FileMusic } from 'lucide-react';
-import { updateNativeSong } from '../services/nativeLibrary';
+import { mapNativeLibrarySong, updateNativeSong } from '../services/nativeLibrary';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
 import { openExternal } from '../services/externalLinks';
@@ -12,6 +12,7 @@ import { AlbumCover } from './AlbumCover';
 import { openStems } from '../services/openStems';
 import { ScoreView } from './ScoreView';
 import { localized, useAdapterLibrary, usesFromSettings } from '../services/adapters';
+import { downloadSongAudio } from '../services/songDownload';
 
 interface RightSidebarProps {
     song: Song | null;
@@ -33,6 +34,65 @@ interface RightSidebarProps {
 /// Times the track's own lyrics with whichever recogniser is configured. The
 /// button only appears once karaoke has been switched on in Settings, so an
 /// untouched studio shows nothing about it at all.
+/** The original and the processed versions of a track; the chosen one plays everywhere. */
+const SongVersions: React.FC<{ song: Song; onChanged: (song: Song) => void }> = ({ song, onChanged }) => {
+    const { t } = useI18n();
+    const [busy, setBusy] = useState<string | null>(null);
+    const versions = song.audioVersions ?? [];
+    if (versions.length === 0) return null;
+    const active = song.activeVersion ?? 'original';
+
+    const apply = async (request: Promise<Response>, key: string) => {
+        setBusy(key);
+        try {
+            const response = await request;
+            const body = await response.json().catch(() => null);
+            if (!response.ok || !body) throw new Error(body?.error || `HTTP ${response.status}`);
+            onChanged(mapNativeLibrarySong(body));
+            window.dispatchEvent(new CustomEvent('yue:library-changed'));
+        } catch (problem) {
+            window.dispatchEvent(new CustomEvent('yue:toast', { detail: { message: problem instanceof Error ? problem.message : String(problem), type: 'error' } }));
+        } finally {
+            setBusy(null);
+        }
+    };
+    const select = (version: string) =>
+        apply(fetch(`/v1/library/songs/${encodeURIComponent(song.id)}/version`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ version }),
+        }), version);
+    const remove = (version: string) =>
+        apply(fetch(`/v1/library/songs/${encodeURIComponent(song.id)}/versions/${encodeURIComponent(version)}`, { method: 'DELETE' }), `remove-${version}`);
+
+    const rows = [{ id: 'original', label: t('versionOriginal') }, ...versions.map(v => ({ id: v.id, label: v.label || v.id }))];
+    return (
+        <div className="rounded-xl bg-zinc-100 p-2 dark:bg-white/5">
+            <p className="px-1 pb-1.5 text-[11px] font-bold uppercase tracking-wide text-zinc-500">{t('versionsTitle')}</p>
+            {rows.map(row => (
+                <div key={row.id} className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${active === row.id ? 'bg-pink-500/10' : ''}`}>
+                    <button
+                        type="button"
+                        onClick={() => active !== row.id && void select(row.id)}
+                        disabled={busy !== null}
+                        className="flex min-w-0 flex-1 items-start gap-2 text-left text-xs leading-4 text-zinc-800 dark:text-zinc-200"
+                    >
+                        {busy === row.id ? <Loader2 size={12} className="animate-spin text-pink-500" /> : (
+                            <span className={`mt-0.5 h-3 w-3 shrink-0 rounded-full border ${active === row.id ? 'border-pink-500 bg-pink-500' : 'border-zinc-400'}`} />
+                        )}
+                        <span className="line-clamp-2 break-words" title={row.label}>{row.label}</span>
+                    </button>
+                    {row.id !== 'original' && (
+                        <button type="button" onClick={() => void remove(row.id)} disabled={busy !== null} className="text-zinc-400 hover:text-rose-500" title={t('versionDelete')}>
+                            <Trash2 size={12} />
+                        </button>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+};
+
 const KaraokeAction: React.FC<{ song: Song; onDone?: (lrc: string) => void }> = ({ song, onDone }) => {
     const { t } = useI18n();
     const [available, setAvailable] = useState(false);
@@ -398,18 +458,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                                 className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
                                 title={t('downloadAudio')}
                                 onClick={async () => {
-                                    if (!song.audioUrl) return;
                                     try {
-                                        const response = await fetch(song.audioUrl);
-                                        const blob = await response.blob();
-                                        const url = URL.createObjectURL(blob);
-                                        const link = document.createElement('a');
-                                        link.href = url;
-                                        link.download = `${song.title || 'song'}.mp3`;
-                                        document.body.appendChild(link);
-                                        link.click();
-                                        document.body.removeChild(link);
-                                        URL.revokeObjectURL(url);
+                                        await downloadSongAudio(song);
                                     } catch (error) {
                                         console.error('Download failed:', error);
                                     }
@@ -640,6 +690,8 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                     })()}
 
                     {/* Karaoke: make the timings, then the file can be saved. */}
+                    <SongVersions song={song} onChanged={(next) => onSongUpdate?.(next)} />
+
                     <KaraokeAction song={song} onDone={(lrc) => onSongUpdate?.({ ...song, lrcContent: lrc })} />
 
                     {/* Download LRC */}
