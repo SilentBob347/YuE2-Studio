@@ -1,5 +1,29 @@
 [
   {
+    "id": "yue2-studio-1-1",
+    "date": "2026-09-24",
+    "title": {
+      "en": "YuE2 Studio 1.1: LoRA, training and sound processing",
+      "ru": "YuE2 Studio 1.1: LoRA, обучение и обработка звука",
+      "zh": "YuE2 Studio 1.1：LoRA、训练与声音处理",
+      "ja": "YuE2 Studio 1.1：LoRA、学習、サウンド処理",
+      "ko": "YuE2 Studio 1.1: LoRA, 학습, 사운드 처리"
+    },
+    "body": {
+      "en": "LoRA arrive: styles, artists, sound and sliders, each with its own strength for the composition and for the sound. Take them from the built-in catalogue, find them on Hugging Face right on the LoRA page or paste a link, or import your own files. Instrumental is back, this time for real: with the Instrumental LoRA the vocal stem of a song drops to silence while drums and bass stay as they were. New sound processing for finished tracks: noise reduction, Spectral Lifter, vocal naturalizer and mastering to a reference track, heard before and after, kept as versions next to the untouched original. MP3 is now made by LAME, the reference encoder, straight from the model's lossless output. Train your own LoRA right in the studio: 5–20 songs of one artist or style, HOT-Step's trainer and its tuned recipe with lyric timing (Russian included), every setting editable, the finished checkpoints in the LoRA library in one click. The assistant fills in the lyrics by ear, and datasets move between this studio and MiniMax Music3 Studio. Processing also runs your own VST3 plugins in a chain, each set up in its own window.",
+      "ru": "Появились LoRA: стили, артисты, звучание и слайдеры, у каждой своя сила для композиции и для звука. Их можно взять из встроенного каталога, найти на Hugging Face прямо на странице LoRA или вставить ссылку, а можно импортировать свои файлы. Инструментал вернулся, теперь по-настоящему: с LoRA «Инструментал» вокальная дорожка песни уходит в тишину, а барабаны и бас остаются прежними. Новая обработка готовых треков: шумоподавление, Spectral Lifter, очеловечивание вокала и мастеринг по эталонному треку, с прослушиванием «до/после» и сохранением версиями рядом с нетронутым оригиналом. MP3 теперь делает LAME, эталонный кодировщик, прямо из выхода модели без потерь. Свою LoRA теперь можно обучить прямо в студии: 5–20 песен одного артиста или стиля, тренер HOT-Step с его выверенным рецептом и таймингом текста (русский тоже), все настройки можно менять, готовые точки уходят в библиотеку LoRA одним кликом. Текст песен ассистент заполняет на слух, а датасеты переносятся между этой студией и MiniMax Music3 Studio. В обработке — ещё и ваши VST3-плагины цепочкой, каждый настраивается в своём окне.",
+      "zh": "新增 LoRA：风格、艺人、音色和滑块，每个都可分别设置对作曲和声音的强度。可以从内置目录获取，在 LoRA 页面直接搜索 Hugging Face 或粘贴链接，也可以导入自己的文件。纯音乐回来了，这次是真的：使用「纯音乐」LoRA 后，歌曲的人声分轨降为静音，鼓和贝斯保持不变。新增成品处理：降噪、Spectral Lifter、人声自然化和按参考曲目母带处理，可对比前后试听，并作为版本保存在未改动的原曲旁边。MP3 现在由参考级编码器 LAME 直接从模型的无损输出编码。 现在可以直接在工作室里训练自己的 LoRA：同一歌手或风格的 5–20 首歌，使用 HOT-Step 的训练器及其调好的配方和歌词对齐（包括俄语），所有设置都可修改，训练出的检查点一键加入 LoRA 库。助手会听写歌词，数据集可在本工作室与 MiniMax Music3 Studio 之间迁移。处理功能还支持串联你自己的 VST3 插件，每个插件在自己的窗口中设置。",
+      "ja": "LoRA に対応しました。スタイル、アーティスト、音色、スライダーがあり、作曲と音それぞれに強さを設定できます。内蔵カタログから入手するか、LoRA ページで Hugging Face を直接検索、またはリンクを貼り付け、自分のファイルを読み込むこともできます。インストが今度こそ本当に戻りました。「インスト」LoRA を使うと曲のボーカルステムが無音になり、ドラムとベースはそのままです。完成曲の新しいサウンド処理：ノイズ除去、Spectral Lifter、ボーカルの自然化、リファレンス曲に合わせたマスタリング。前後を聴き比べ、手を付けていない原曲の隣にバージョンとして保存できます。MP3 はモデルのロスレス出力から、リファレンスエンコーダー LAME で直接作成されるようになりました。 スタジオ内で自分の LoRA を学習できるようになりました。同じアーティストやスタイルの 5〜20 曲、HOT-Step のトレーナーと調整済みレシピ、歌詞のタイミング合わせ（ロシア語も対応）。設定はすべて変更でき、できたチェックポイントはワンクリックで LoRA ライブラリへ。歌詞はアシスタントが聞き取って入力し、データセットはこのスタジオと MiniMax Music3 Studio の間で移せます。処理では自分の VST3 プラグインもチェーンで使え、それぞれ専用ウィンドウで設定します。",
+      "ko": "LoRA가 추가되었습니다. 스타일, 아티스트, 사운드, 슬라이더가 있으며 각각 작곡과 사운드에 대한 강도를 따로 정할 수 있습니다. 내장 카탈로그에서 받거나, LoRA 페이지에서 Hugging Face를 바로 검색하거나 링크를 붙여넣고, 직접 가진 파일을 가져올 수도 있습니다. 연주곡이 이번에는 제대로 돌아왔습니다. '연주곡' LoRA를 쓰면 곡의 보컬 스템이 무음이 되고 드럼과 베이스는 그대로 남습니다. 완성곡을 위한 새 사운드 처리: 노이즈 감소, Spectral Lifter, 보컬 자연화, 레퍼런스 곡 기준 마스터링을 전후 비교로 들어보고, 손대지 않은 원본 옆에 버전으로 저장합니다. MP3는 이제 기준 인코더 LAME이 모델의 무손실 출력에서 바로 만듭니다. 이제 스튜디오에서 직접 나만의 LoRA를 학습할 수 있습니다. 한 아티스트나 스타일의 곡 5–20개, HOT-Step의 트레이너와 다듬어진 레시피, 가사 타이밍 정렬(러시아어 포함). 모든 설정을 바꿀 수 있고, 완성된 체크포인트는 한 번의 클릭으로 LoRA 라이브러리에 들어갑니다. 가사는 어시스턴트가 듣고 채우며, 데이터셋은 이 스튜디오와 MiniMax Music3 Studio 사이를 오갑니다. 처리에서는 내 VST3 플러그인도 체인으로 쓸 수 있고, 각각 자체 창에서 설정합니다."
+    },
+    "tags": [
+      "YuE2",
+      "1.1",
+      "LoRA",
+      "training"
+    ]
+  },
+  {
     "id": "yue2-studio-1-0-1",
     "date": "2026-09-23",
     "title": {
