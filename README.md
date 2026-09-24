@@ -62,6 +62,21 @@ runtime path is Python.
 - **Word-level karaoke** — enhanced LRC with a timestamp on every word, aligned by Parakeet
   or Whisper. Your lyrics are kept; only the timing is borrowed.
 - **Six stems on the GPU** — drums, bass, other, vocals, guitar and piano with HT-Demucs.
+- **LoRA** — LoRA and LoKr files for either half of the model, the composition or the
+  sound, each with its own strength, picked in the create form. A catalogue of ready ones
+  with their authors credited, and a search on Hugging Face that downloads what you pick.
+- **Train your own LoRA** — an optional tab on the LoRA page: 5–20 songs of one artist or
+  style become a LoRA on your own card with HOT-Step's trainer and its tuned recipe (LoKr,
+  Prodigy, a stop when the composition half drifts too far from the base, lyric timing
+  from a forced aligner that also reads Cyrillic). Every setting of the recipe is
+  editable. The assistant fills in lyrics by ear, datasets move between this studio and
+  MiniMax Music3 Studio as a folder, and each saved checkpoint goes into the LoRA library
+  in one click.
+- **Audio processing** — noise reduction, the Spectral Lifter, a vocal naturaliser, your
+  own VST3 plugins in a chain, and mastering to a reference track. Compare before and
+  after while it plays, then keep the result as a version of the track or throw it away.
+- **MP3 made by the studio** — the engine renders 32-bit float and the studio encodes the
+  MP3 with LAME, so nothing is lost before the encoder.
 - **A library of plain files** — search, playlists, cover art from prompt templates, MP3s
   exported with title, lyrics and cover in their ID3 tags. Interface in English, Russian,
   Chinese, Japanese and Korean.
@@ -114,6 +129,9 @@ or download the MP3s from [docs/samples](docs/samples).
   - Without a GPU the engine falls back to the processor, which works but is many times
     slower.
 - 4–10 GB of disk for one model set.
+- Training a LoRA (optional): an NVIDIA RTX 30-series card or newer with 11 GB of VRAM
+  and about 8 GB more disk for the trainer and its weights, downloaded only when you open
+  training.
 
 ## Quick start
 
@@ -211,7 +229,9 @@ Behind a proxy, take the two DLLs from the archive's `bin\` folder and drop them
 React UI ─┐
           ├─ YuE2-Studio.exe   (Tauri window + Rust/Axum service on 127.0.0.1:8791)
 Rust axum ┘        │
-                   └─ yue2.cpp `yue-server`   (C++/CUDA, GGUF, 127.0.0.1:18087)
+                   ├─ yue2.cpp `yue-server`   (C++/CUDA, GGUF, 127.0.0.1:18087)
+                   ├─ music-train.exe         (HOT-Step ace-train, LoRA training, optional)
+                   └─ vst-host.exe            (HOT-Step VST3 host, a process of its own)
 ```
 
 The service is compiled into the desktop binary. It supervises the engine process, restarts

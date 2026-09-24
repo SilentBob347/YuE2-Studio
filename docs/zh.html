@@ -179,6 +179,9 @@ footer a { color: var(--text); }
       <div class="card"><h3>写作助手</h3><p>本地 Gemma 模型或 OpenRouter 根据想法撰写风格和歌词，并按要求编辑乐谱。</p></div>
       <div class="card"><h3>逐字卡拉 OK</h3><p>每个字都带时间戳的增强 LRC，由 Parakeet 或 Whisper 对齐。</p></div>
       <div class="card"><h3>显卡分轨</h3><p>鼓、贝斯、其他、人声、吉他和钢琴，由 HT-Demucs 分离。</p></div>
+      <div class="card"><h3>LoRA</h3><p>作用于作曲或音色的 LoRA 与 LoKr，各自设置强度。内置现成目录，也可在 Hugging Face 搜索并下载所选。</p></div>
+      <div class="card"><h3>训练你自己的 LoRA</h3><p>用同一歌手或风格的 5–20 首歌，在你的显卡上以 HOT-Step 的训练器和配方训练 LoRA。每项设置都可修改，数据集可在本工作室与 MiniMax Music3 Studio 之间迁移。</p></div>
+      <div class="card"><h3>音频处理</h3><p>降噪、Spectral Lifter、人声自然化、你自己的 VST3 插件，以及参考母带处理。对比处理前后，保存为版本或丢弃。</p></div>
     </div>
   </section>
 
@@ -253,6 +256,8 @@ footer a { color: var(--text); }
           <tr><td>卡拉 OK 时间轴 — Parakeet 或 Whisper</td><td>你的电脑</td><td>可选</td></tr>
           <tr><td>分轨 — HT-Demucs</td><td>显卡或 CPU</td><td>可选</td></tr>
           <tr><td>写作助手</td><td>本地 Gemma 或 OpenRouter</td><td>可选</td></tr>
+          <tr><td>LoRA 训练 — HOT-Step ace-train</td><td>NVIDIA RTX 30 或更新，11 GB 显存</td><td>8 GB，可选</td></tr>
+          <tr><td>VST3 宿主 — HOT-Step</td><td>你的电脑，独立进程</td><td>内置</td></tr>
         </tbody>
       </table>
     </div>

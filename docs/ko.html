@@ -179,6 +179,9 @@ footer a { color: var(--text); }
       <div class="card"><h3>작사 도우미</h3><p>로컬 Gemma 또는 OpenRouter가 아이디어로 스타일과 가사를 쓰고 요청에 따라 악보를 편집합니다.</p></div>
       <div class="card"><h3>단어 단위 가라오케</h3><p>모든 단어에 타임스탬프가 있는 확장 LRC, Parakeet 또는 Whisper로 정렬.</p></div>
       <div class="card"><h3>GPU 스템 분리</h3><p>드럼, 베이스, 기타 소리, 보컬, 기타, 피아노를 HT-Demucs로 분리.</p></div>
+      <div class="card"><h3>LoRA</h3><p>작곡 또는 사운드에 적용하는 LoRA와 LoKr, 각각 강도를 따로 설정합니다. 준비된 카탈로그와 고른 것을 내려받는 Hugging Face 검색이 있습니다.</p></div>
+      <div class="card"><h3>나만의 LoRA</h3><p>한 아티스트나 스타일의 곡 5–20개로 HOT-Step의 트레이너와 레시피를 써서 내 GPU에서 LoRA를 학습합니다. 모든 설정을 바꿀 수 있고, 데이터셋은 이 스튜디오와 MiniMax Music3 Studio 사이를 오갑니다.</p></div>
+      <div class="card"><h3>오디오 처리</h3><p>노이즈 제거, Spectral Lifter, 보컬 자연화, 내 VST3 플러그인, 레퍼런스 마스터링. 처리 전후를 비교하고 버전으로 남기거나 버립니다.</p></div>
     </div>
   </section>
 
@@ -253,6 +256,8 @@ footer a { color: var(--text); }
           <tr><td>가라오케 타이밍 — Parakeet 또는 Whisper</td><td>내 컴퓨터</td><td>선택</td></tr>
           <tr><td>스템 분리 — HT-Demucs</td><td>GPU 또는 CPU</td><td>선택</td></tr>
           <tr><td>작사 도우미</td><td>로컬 Gemma 또는 OpenRouter</td><td>선택</td></tr>
+          <tr><td>LoRA 학습 — HOT-Step ace-train</td><td>NVIDIA RTX 30 이상, VRAM 11 GB</td><td>8 GB, 선택</td></tr>
+          <tr><td>VST3 호스트 — HOT-Step</td><td>내 컴퓨터, 별도 프로세스</td><td>포함</td></tr>
         </tbody>
       </table>
     </div>
