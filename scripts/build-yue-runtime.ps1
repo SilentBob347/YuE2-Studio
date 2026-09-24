@@ -17,7 +17,10 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $engineSource = Get-Content -Raw (Join-Path $repoRoot 'engines\yue2-cpp-source.json') | ConvertFrom-Json
 # The ggml build tree is deep; a short root keeps it under MAX_PATH.
 $engineBuildRoot = if ($env:YUE_ENGINE_BUILD_ROOT) { $env:YUE_ENGINE_BUILD_ROOT } else { $env:TEMP }
-$engineWorktree = Join-Path $engineBuildRoot "yue2-$($engineSource.commit.Substring(0, 8))"
+# One checkout for every pinned commit: moving it to a new commit leaves the
+# build directories in place, so Ninja recompiles only what the commit changed
+# instead of all of ggml and its CUDA kernels.
+$engineWorktree = Join-Path $engineBuildRoot 'yue2-engine'
 $shippedTargets = @('yue-server')
 
 function Test-CudaToolchain {
@@ -102,7 +105,10 @@ function Invoke-CMakeBuild([string]$backend) {
     # Ninja drives nvcc and cl directly, so the build does not depend on the
     # CUDA MSBuild integration being installed into this Visual Studio.
     if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) { throw 'Ninja is required on PATH.' }
-    $command = "call `"$vcvars`" >nul && cmake -S . -B `"$buildDirectoryName`" -G Ninja -DCMAKE_BUILD_TYPE=Release $ccache $symbols $backendFlags && cmake --build `"$buildDirectoryName`" $targets --parallel $parallelism"
+    # VSLANG=1033: Ninja reads header dependencies from cl's /showIncludes, which a
+    # localised Visual Studio prints in its own language; without it an edited
+    # header would not rebuild anything.
+    $command = "set `"VSLANG=1033`" && call `"$vcvars`" >nul && cmake -S . -B `"$buildDirectoryName`" -G Ninja -DCMAKE_BUILD_TYPE=Release $ccache $symbols $backendFlags && cmake --build `"$buildDirectoryName`" $targets --parallel $parallelism"
     Push-Location $engineWorktree
     try { & cmd.exe /d /s /c $command | Out-Host } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw "yue2.cpp $backend build failed." }
