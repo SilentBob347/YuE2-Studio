@@ -665,9 +665,12 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/training/pack/install", post(install_training_pack))
         .route("/v1/training/pack/cancel", post(cancel_training_pack))
         .route("/v1/training/datasets", post(create_training_dataset))
+        // A dataset is gigabytes of lossless audio, far over the studio's usual body limit.
+        .route("/v1/training/datasets/import", post(import_training_dataset).layer(DefaultBodyLimit::max(TRAINING_UPLOAD_LIMIT)))
+        .route("/v1/training/datasets/{id}/reveal", post(reveal_training_dataset))
         .route("/v1/training/datasets/{id}", axum::routing::patch(update_training_dataset).delete(delete_training_dataset))
         .route("/v1/training/datasets/{id}/songs", post(add_training_songs))
-        .route("/v1/training/datasets/{id}/files", post(upload_training_files))
+        .route("/v1/training/datasets/{id}/files", post(upload_training_files).layer(DefaultBodyLimit::max(TRAINING_UPLOAD_LIMIT)))
         .route("/v1/training/datasets/{id}/items/{item}", axum::routing::patch(update_training_item).delete(delete_training_item))
         .route("/v1/training/datasets/{id}/items/{item}/autofill", post(autofill_training_item))
         .route("/v1/training/runs", post(start_training))
@@ -1672,6 +1675,9 @@ async fn install_separator(state: &AppState) {
     }
 }
 
+/// What one upload of songs to a dataset may weigh.
+const TRAINING_UPLOAD_LIMIT: usize = 16 * 1024 * 1024 * 1024;
+
 fn training_error(error: anyhow::Error) -> (StatusCode, Json<ApiError>) {
     api_error(StatusCode::BAD_REQUEST, format!("{error:#}"))
 }
@@ -1755,6 +1761,42 @@ struct DatasetInput {
 
 async fn create_training_dataset(State(state): State<AppState>, Json(input): Json<DatasetInput>) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
     state.training.create_dataset(input.name.as_deref().unwrap_or_default(), input.trigger.as_deref().unwrap_or_default()).map(Json).map_err(training_error)
+}
+
+/// Takes a dataset folder uploaded from another studio: its dataset.json and
+/// the audio beside it.
+async fn import_training_dataset(State(state): State<AppState>, mut multipart: Multipart) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    let mut manifest = None;
+    let mut files = Vec::new();
+    while let Some(field) = multipart.next_field().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read the upload: {e}")))? {
+        let Some(name) = field.file_name().map(str::to_owned) else { continue };
+        let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))?.to_vec();
+        if name.rsplit(['/', '\\']).next() == Some("dataset.json") {
+            manifest = Some(bytes);
+        } else if name.to_ascii_lowercase().ends_with(".wav") {
+            files.push((name, bytes));
+        }
+    }
+    let manifest = manifest.ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "the folder has no dataset.json".into()))?;
+    let training = state.training.clone();
+    tokio::task::spawn_blocking(move || training.import_dataset(&manifest, &files))
+        .await
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map(Json)
+        .map_err(training_error)
+}
+
+/// Opens a dataset's folder in the file manager, to copy it to another studio.
+async fn reveal_training_dataset(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let folder = state.training.dataset_folder(&id).map_err(training_error)?;
+    #[cfg(windows)]
+    let opened = std::process::Command::new("explorer.exe").arg(&folder).spawn();
+    #[cfg(target_os = "macos")]
+    let opened = std::process::Command::new("open").arg(&folder).spawn();
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let opened = std::process::Command::new("xdg-open").arg(&folder).spawn();
+    opened.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(Json(serde_json::json!({ "opened": folder.display().to_string() })))
 }
 
 async fn update_training_dataset(State(state): State<AppState>, Path(id): Path<String>, Json(input): Json<DatasetInput>) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {

@@ -13,6 +13,9 @@ const en = {
   trainingDownload: 'Download',
   trainingDatasets: 'Datasets',
   trainingNewDataset: 'New dataset',
+  trainingImport: 'Import',
+  trainingImportHint: 'Take a dataset folder from another studio of the family: the folder with dataset.json and its audio.',
+  trainingShowFolderHint: 'Show the dataset folder: copy it to take the dataset to another studio.',
   trainingDatasetName: 'Name',
   trainingTrigger: 'Trigger word',
   trainingTriggerHint: 'A rare word that switches the LoRA on; picking the LoRA on the create page puts it in for you.',
@@ -114,6 +117,10 @@ const en = {
   trainingAutofillAll: 'Recognise all lyrics',
   trainingAutofillHint: 'Separates the vocals, recognises the words and lays them out as verses and choruses. Check the result before training.',
   trainingAutofilling: 'Recognising…',
+  trainingDescribe: 'Describe',
+  trainingDescribeAll: 'Describe all',
+  trainingDescribing: 'Describing…',
+  trainingDescribeHint: 'The writing assistant writes each song\'s structured caption from its style line and lyrics. Check it before training.',
 };
 
 export type TrainingStrings = { readonly [K in keyof typeof en]: string };
@@ -128,6 +135,9 @@ const ru: TrainingStrings = {
   trainingDownload: 'Скачать',
   trainingDatasets: 'Наборы',
   trainingNewDataset: 'Новый набор',
+  trainingImport: 'Импорт',
+  trainingImportHint: 'Забрать набор из другой студии семейства: выберите папку с dataset.json и аудио.',
+  trainingShowFolderHint: 'Показать папку набора: скопируйте её, чтобы перенести набор в другую студию.',
   trainingDatasetName: 'Название',
   trainingTrigger: 'Слово-триггер',
   trainingTriggerHint: 'Редкое слово, по которому включается LoRA; когда выбираете LoRA при создании песни, оно подставляется само.',
@@ -229,6 +239,10 @@ const ru: TrainingStrings = {
   trainingAutofillAll: 'Распознать все тексты',
   trainingAutofillHint: 'Отделяет вокал, распознаёт слова и раскладывает их по куплетам и припевам. Проверьте результат перед обучением.',
   trainingAutofilling: 'Распознаю…',
+  trainingDescribe: 'Описать',
+  trainingDescribeAll: 'Описать все',
+  trainingDescribing: 'Описываю…',
+  trainingDescribeHint: 'Ассистент пишет структурированное описание каждой песни по её стилю и тексту. Проверьте его перед обучением.',
 };
 
 const zh: TrainingStrings = {
@@ -241,6 +255,9 @@ const zh: TrainingStrings = {
   trainingDownload: '下载',
   trainingDatasets: '数据集',
   trainingNewDataset: '新建数据集',
+  trainingImport: '导入',
+  trainingImportHint: '从同系列的另一个工作室导入数据集：选择包含 dataset.json 和音频的文件夹。',
+  trainingShowFolderHint: '显示数据集文件夹：复制它即可把数据集带到另一个工作室。',
   trainingDatasetName: '名称',
   trainingTrigger: '触发词',
   trainingTriggerHint: '激活 LoRA 的罕见词；在创作页选择该 LoRA 时会自动填入。',
@@ -342,6 +359,10 @@ const zh: TrainingStrings = {
   trainingAutofillAll: '识别全部歌词',
   trainingAutofillHint: '分离人声、识别歌词并整理为主歌和副歌。训练前请检查结果。',
   trainingAutofilling: '正在识别…',
+  trainingDescribe: '描述',
+  trainingDescribeAll: '全部描述',
+  trainingDescribing: '正在描述…',
+  trainingDescribeHint: '写作助手根据每首歌的风格和歌词写出结构化描述。训练前请检查。',
 };
 
 const ja: TrainingStrings = {
@@ -354,6 +375,9 @@ const ja: TrainingStrings = {
   trainingDownload: 'ダウンロード',
   trainingDatasets: 'データセット',
   trainingNewDataset: '新しいデータセット',
+  trainingImport: 'インポート',
+  trainingImportHint: '同じファミリーの別スタジオのデータセットを取り込みます。dataset.json と音声のあるフォルダーを選んでください。',
+  trainingShowFolderHint: 'データセットのフォルダーを開きます。コピーすれば別のスタジオに持っていけます。',
   trainingDatasetName: '名前',
   trainingTrigger: 'トリガーワード',
   trainingTriggerHint: 'LoRA を有効にする珍しい語。作成ページで LoRA を選ぶと自動で入ります。',
@@ -455,6 +479,10 @@ const ja: TrainingStrings = {
   trainingAutofillAll: 'すべての歌詞を認識',
   trainingAutofillHint: 'ボーカルを分離して歌詞を認識し、ヴァースとコーラスに整理します。学習の前に結果を確認してください。',
   trainingAutofilling: '認識中…',
+  trainingDescribe: '説明を書く',
+  trainingDescribeAll: 'すべて説明',
+  trainingDescribing: '説明を作成中…',
+  trainingDescribeHint: '執筆アシスタントが各曲のスタイルと歌詞から構造化キャプションを書きます。学習前に確認してください。',
 };
 
 const ko: TrainingStrings = {
@@ -467,6 +495,9 @@ const ko: TrainingStrings = {
   trainingDownload: '내려받기',
   trainingDatasets: '데이터셋',
   trainingNewDataset: '새 데이터셋',
+  trainingImport: '가져오기',
+  trainingImportHint: '같은 계열의 다른 스튜디오 데이터셋을 가져옵니다. dataset.json과 오디오가 있는 폴더를 고르세요.',
+  trainingShowFolderHint: '데이터셋 폴더를 엽니다. 복사하면 다른 스튜디오로 옮길 수 있습니다.',
   trainingDatasetName: '이름',
   trainingTrigger: '트리거 단어',
   trainingTriggerHint: 'LoRA를 켜는 드문 단어입니다. 만들기 페이지에서 LoRA를 고르면 자동으로 들어갑니다.',
@@ -568,6 +599,10 @@ const ko: TrainingStrings = {
   trainingAutofillAll: '모든 가사 인식',
   trainingAutofillHint: '보컬을 분리해 가사를 인식하고 벌스와 코러스로 정리합니다. 학습 전에 결과를 확인하세요.',
   trainingAutofilling: '인식 중…',
+  trainingDescribe: '설명 쓰기',
+  trainingDescribeAll: '모두 설명',
+  trainingDescribing: '설명 작성 중…',
+  trainingDescribeHint: '작성 도우미가 각 곡의 스타일과 가사로 구조화된 캡션을 씁니다. 학습 전에 확인하세요.',
 };
 
 export const trainingStrings = { en, ru, zh, ja, ko };

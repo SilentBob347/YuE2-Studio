@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, CheckSquare, ChevronDown, Download, FolderOpen, Library, Loader2, Mic2, Plus, Search, Square, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, CheckSquare, ChevronDown, Download, FolderInput, FolderOpen, Library, Loader2, Mic2, Plus, Search, Square, Trash2, Wand2, X } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { ConfirmDialog } from './ConfirmDialog';
 import {
@@ -12,6 +12,7 @@ import {
   TrainingState,
   addFiles,
   autofillItem,
+  describeItem,
   addLibrarySongs,
   cancelRun,
   cancelTrainingPack,
@@ -23,7 +24,9 @@ import {
   fetchTraining,
   gigabytes,
   installCheckpoint,
+  importDataset,
   installTrainingPack,
+  revealDataset,
   startRun,
   updateDataset,
   updateItem,
@@ -245,7 +248,7 @@ const LibraryPicker: React.FC<{ exclude: string[]; onAdd: (ids: string[]) => voi
 };
 
 /** One song of a dataset: title and length, opening into its style and lyrics. */
-const ItemRow: React.FC<{ datasetId: string; item: DatasetItem; styleKind: 'style' | 'caption'; recognising: boolean; onRecognise: () => void; onChanged: (dataset: Dataset) => void; onError: (message: string) => void }> = ({ datasetId, item, styleKind, recognising, onRecognise, onChanged, onError }) => {
+const ItemRow: React.FC<{ datasetId: string; item: DatasetItem; styleKind: 'style' | 'caption'; recognising: boolean; onRecognise: () => void; describing: boolean; onDescribe: () => void; onChanged: (dataset: Dataset) => void; onError: (message: string) => void }> = ({ datasetId, item, styleKind, recognising, onRecognise, describing, onDescribe, onChanged, onError }) => {
   const { t } = useStrings();
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState(item.style);
@@ -270,7 +273,14 @@ const ItemRow: React.FC<{ datasetId: string; item: DatasetItem; styleKind: 'styl
       {open && (
         <div className="mt-2 space-y-2 pl-6">
           <label className="block">
-            <span className={LABEL}>{styleKind === 'caption' ? t('trainingCaption') : t('trainingStyle')}</span>
+            <span className="flex items-center justify-between gap-2">
+              <span className={LABEL}>{styleKind === 'caption' ? t('trainingCaption') : t('trainingStyle')}</span>
+              {styleKind === 'caption' && (
+                <button type="button" onClick={onDescribe} disabled={describing} className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-500 hover:text-pink-500 disabled:opacity-60">
+                  {describing ? <Loader2 size={12} className="animate-spin text-pink-500" /> : <Wand2 size={12} />}{t('trainingDescribe')}
+                </button>
+              )}
+            </span>
             {styleKind === 'caption' ? (
               <>
                 <textarea value={style} onChange={event => setStyle(event.target.value)} onBlur={() => style !== item.style && save({ style })} rows={6} className={`${CONTROL} mt-1 font-mono text-xs`} />
@@ -427,7 +437,31 @@ export const TrainingPanel: React.FC = () => {
   const [starting, setStarting] = useState(false);
   const [deleting, setDeleting] = useState<{ kind: 'dataset' | 'run'; id: string } | null>(null);
   const [recognising, setRecognising] = useState<string[]>([]);
+  const [describing, setDescribing] = useState<string[]>([]);
   const filePicker = useRef<HTMLInputElement | null>(null);
+  const folderPicker = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  // a folder picker is not a React attribute; it has to be set on the element
+  useEffect(() => {
+    folderPicker.current?.setAttribute('webkitdirectory', '');
+  }, []);
+
+  const importFolder = async (files: File[]) => {
+    if (files.length === 0) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const made = await importDataset(files);
+      setSelected(made.id);
+      await refresh();
+    } catch (problem) {
+      setError(errorText(problem));
+    } finally {
+      setImporting(false);
+      if (folderPicker.current) folderPicker.current.value = '';
+    }
+  };
 
   const refresh = useCallback(async () => {
     try {
@@ -507,6 +541,24 @@ export const TrainingPanel: React.FC = () => {
     setRecognising([]);
   };
 
+  // one at a time: each is a request to the writing assistant
+  const describe = async (ids: string[]) => {
+    if (!dataset) return;
+    setDescribing(ids);
+    setError(null);
+    for (const id of ids) {
+      try {
+        replace(await describeItem(dataset.id, id));
+      } catch (problem) {
+        setError(errorText(problem));
+        break;
+      } finally {
+        setDescribing(current => current.filter(value => value !== id));
+      }
+    }
+    setDescribing([]);
+  };
+
   const start = async () => {
     if (!dataset) return;
     setStarting(true);
@@ -557,6 +609,10 @@ export const TrainingPanel: React.FC = () => {
             </button>
           ))}
           <button type="button" onClick={() => setCreating(value => !value)} className={OUTLINE}><Plus size={13} />{t('trainingNewDataset')}</button>
+          <button type="button" onClick={() => folderPicker.current?.click()} disabled={importing} className={OUTLINE} title={t('trainingImportHint')}>
+            {importing ? <Loader2 size={13} className="animate-spin" /> : <FolderInput size={13} />}{t('trainingImport')}
+          </button>
+          <input ref={folderPicker} type="file" multiple className="hidden" onChange={event => void importFolder(Array.from(event.target.files ?? []))} />
         </div>
 
         {creating && (
@@ -580,7 +636,10 @@ export const TrainingPanel: React.FC = () => {
                 <span className={LABEL}>{t('trainingTrigger')}</span>
                 <input key={`${dataset.id}-trigger`} defaultValue={dataset.trigger} onBlur={event => event.target.value !== dataset.trigger && void updateDataset(dataset.id, { trigger: event.target.value }).then(replace).catch(problem => setError(errorText(problem)))} className={`${CONTROL} mt-1`} />
               </label>
-              <button type="button" onClick={() => setDeleting({ kind: 'dataset', id: dataset.id })} className={`${OUTLINE} self-end hover:border-rose-400 hover:text-rose-600`} title={t('trainingDelete')}><Trash2 size={13} /></button>
+              <div className="flex gap-2 self-end">
+                <button type="button" onClick={() => void revealDataset(dataset.id).catch(problem => setError(errorText(problem)))} className={OUTLINE} title={t('trainingShowFolderHint')}><FolderOpen size={13} /></button>
+                <button type="button" onClick={() => setDeleting({ kind: 'dataset', id: dataset.id })} className={`${OUTLINE} hover:border-rose-400 hover:text-rose-600`} title={t('trainingDelete')}><Trash2 size={13} /></button>
+              </div>
             </div>
             <p className="text-[11px] leading-4 text-zinc-500">{t('trainingTriggerHint')}</p>
 
@@ -602,11 +661,20 @@ export const TrainingPanel: React.FC = () => {
                 <span className="text-[11px] leading-4 text-zinc-500">{t('trainingAutofillHint')}</span>
               </div>
             )}
+            {dataset.items.length > 0 && state.item_style === 'caption' && (
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => void describe(dataset.items.map(item => item.id))} disabled={describing.length > 0 || Boolean(state.active)} className={OUTLINE}>
+                  {describing.length > 0 ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+                  {describing.length > 0 ? `${t('trainingDescribing')} ${dataset.items.length - describing.length + 1}/${dataset.items.length}` : t('trainingDescribeAll')}
+                </button>
+                <span className="text-[11px] leading-4 text-zinc-500">{t('trainingDescribeHint')}</span>
+              </div>
+            )}
             {picking && <LibraryPicker exclude={exclude} onAdd={ids => void addSongs(ids)} onClose={() => setPicking(false)} />}
             {dataset.items.length === 0 ? (
               <p className="text-sm text-zinc-500">{t('trainingNoSongs')}</p>
             ) : (
-              <div>{dataset.items.map(item => <ItemRow key={item.id} datasetId={dataset.id} item={item} styleKind={state.item_style} recognising={recognising.includes(item.id)} onRecognise={() => void recognise([item.id])} onChanged={replace} onError={setError} />)}</div>
+              <div>{dataset.items.map(item => <ItemRow key={item.id} datasetId={dataset.id} item={item} styleKind={state.item_style} recognising={recognising.includes(item.id)} onRecognise={() => void recognise([item.id])} describing={describing.includes(item.id)} onDescribe={() => void describe([item.id])} onChanged={replace} onError={setError} />)}</div>
             )}
           </div>
         )}

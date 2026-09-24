@@ -116,6 +116,18 @@ export function addFiles(id: string, files: File[]): Promise<Dataset> {
   return call<Dataset>(`/v1/training/datasets/${id}/files`, { method: 'POST', body: form });
 }
 
+/** A dataset folder from another studio: its dataset.json and the audio beside it. */
+export function importDataset(files: File[]): Promise<Dataset> {
+  const form = new FormData();
+  for (const file of files) {
+    const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+    if (file.name === 'dataset.json' || file.name.toLowerCase().endsWith('.wav')) form.append('files', file, path);
+  }
+  return call<Dataset>('/v1/training/datasets/import', { method: 'POST', body: form });
+}
+
+export const revealDataset = (id: string) => call<void>(`/v1/training/datasets/${id}/reveal`, { method: 'POST' });
+
 export const updateItem = (id: string, item: string, patch: Partial<Pick<DatasetItem, 'title' | 'style' | 'lyrics' | 'instrumental'>>) =>
   call<Dataset>(`/v1/training/datasets/${id}/items/${item}`, json('PATCH', patch));
 export const deleteItem = (id: string, item: string) => call<Dataset>(`/v1/training/datasets/${id}/items/${item}`, { method: 'DELETE' });
@@ -130,5 +142,8 @@ export const gigabytes = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} G
 export const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
 
 /** Recognises a song's lyrics from its recording and lays them out in sections. */
+/** Has the writing assistant write a song's structured caption, for engines that train on one. */
+export const describeItem = (id: string, item: string) => call<Dataset>(`/v1/training/datasets/${id}/items/${item}/describe`, { method: 'POST' });
+
 export const autofillItem = (id: string, item: string, language?: string) =>
   call<Dataset>(`/v1/training/datasets/${id}/items/${item}/autofill`, json('POST', { language }));
