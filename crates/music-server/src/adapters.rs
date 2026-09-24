@@ -510,11 +510,22 @@ impl AdapterLibrary {
     }
 }
 
-/// The Hugging Face tags that mark an engine's adapters, from the catalogue file.
+/// The Hugging Face tags that mark an engine's adapters, from the catalogue
+/// file. A repository matches when it carries every tag of one set: trainers
+/// tag the same model differently, and the site only ANDs its filters.
 #[derive(Debug, Clone, Default, Deserialize)]
 struct HubConfig {
     #[serde(default)]
     tags: Vec<String>,
+    /// Further tag sets, searched besides `tags`.
+    #[serde(default)]
+    also: Vec<Vec<String>>,
+}
+
+impl HubConfig {
+    fn tag_sets(&self) -> impl Iterator<Item = &Vec<String>> {
+        std::iter::once(&self.tags).chain(&self.also).filter(|set| !set.is_empty())
+    }
 }
 
 fn hub_config(engine: &str) -> Option<&'static HubConfig> {
@@ -607,25 +618,29 @@ impl AdapterLibrary {
     /// query narrows them by name.
     pub async fn hub_search(&self, http: &reqwest::Client, query: &str) -> Result<Vec<HubRepo>> {
         let config = hub_config(&self.engine).context("this engine has no adapters on Hugging Face")?;
-        let mut url = reqwest::Url::parse(&format!("{HUB}/api/models"))?;
-        {
-            let mut pairs = url.query_pairs_mut();
-            for tag in &config.tags {
-                pairs.append_pair("filter", tag);
+        let known: Vec<&String> = config.tag_sets().flatten().collect();
+        let mut repos: Vec<HubRepo> = Vec::new();
+        for set in config.tag_sets() {
+            let mut url = reqwest::Url::parse(&format!("{HUB}/api/models"))?;
+            {
+                let mut pairs = url.query_pairs_mut();
+                for tag in set {
+                    pairs.append_pair("filter", tag);
+                }
+                let query = query.trim();
+                if !query.is_empty() {
+                    pairs.append_pair("search", query);
+                }
+                pairs.append_pair("sort", "likes").append_pair("direction", "-1").append_pair("limit", "100").append_pair("full", "true");
             }
-            let query = query.trim();
-            if !query.is_empty() {
-                pairs.append_pair("search", query);
-            }
-            pairs.append_pair("sort", "likes").append_pair("direction", "-1").append_pair("limit", "100").append_pair("full", "true");
-        }
-        let found: Vec<Value> = http.get(url).send().await?.error_for_status()?.json().await?;
-        Ok(found
-            .into_iter()
-            .filter_map(|model| {
-                let repo = model.get("id").and_then(Value::as_str)?.to_string();
-                let skip = |tag: &str| config.tags.iter().any(|known| known == tag) || tag.contains(':');
-                Some(HubRepo {
+            let found: Vec<Value> = http.get(url).send().await?.error_for_status()?.json().await?;
+            for model in found {
+                let Some(repo) = model.get("id").and_then(Value::as_str).map(str::to_owned) else { continue };
+                if repos.iter().any(|known| known.repo == repo) {
+                    continue;
+                }
+                let skip = |tag: &str| known.iter().any(|known| known.as_str() == tag) || tag.contains(':');
+                repos.push(HubRepo {
                     author: repo.split('/').next().unwrap_or_default().to_string(),
                     likes: model.get("likes").and_then(Value::as_u64).unwrap_or(0),
                     downloads: model.get("downloads").and_then(Value::as_u64).unwrap_or(0),
@@ -641,9 +656,11 @@ impl AdapterLibrary {
                         .map(str::to_owned)
                         .collect(),
                     repo,
-                })
-            })
-            .collect())
+                });
+            }
+        }
+        repos.sort_by(|a, b| b.likes.cmp(&a.likes).then(b.downloads.cmp(&a.downloads)));
+        Ok(repos)
     }
 
     /// The weight files of a repository at its current commit.
