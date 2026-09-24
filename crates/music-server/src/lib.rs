@@ -5158,6 +5158,11 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
             let peak_clip = job.generation_settings.get("peak_clip").and_then(Value::as_u64).map_or(DEFAULT_PEAK_CLIP, |value| value as u32);
             audio = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
                 let mut stereo = audio_pcm::decode_stereo_bytes(audio, "wav")?;
+                // a NaN would become the peak and turn the whole track into silence
+                let broken = stereo.left.iter().chain(&stereo.right).filter(|sample| !sample.is_finite()).count();
+                if broken > 0 {
+                    anyhow::bail!("the engine returned {broken} broken samples (NaN or infinity); make the song again");
+                }
                 audio_post::encode::normalize_peak(&mut stereo, peak_clip);
                 audio_post::encode::mp3(&stereo, kbps)
             })

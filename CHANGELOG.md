@@ -3,6 +3,41 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-24 — 1.1.0
+
+### Added
+
+- **LoRA.** A LoRA page with the installed files, a catalogue of ready ones (styles,
+  artists, sound, sliders, with their authors credited) and a search on Hugging Face that
+  downloads what you pick. In the create form each LoRA gets its own strength for the
+  composition and for the sound, and its trigger word goes into the style for you. The
+  engine merges LoRA and LoKr at load (yue2.cpp fork `adapters`, 16c42d2), honours the
+  rsLoRA scale, and refuses DoRA and LoHa files by name instead of playing them wrong.
+- **Training your own LoRA.** An optional tab on the LoRA page. 5–20 songs of one artist
+  or style become a LoRA on your card with HOT-Step's trainer and its tuned recipe: LoKr
+  64/4, Prodigy, a stop when the composition half drifts past a KL of 1.4, a checkpoint
+  every 50 steps, and lyric timing from the MMS forced aligner, which now reads Cyrillic
+  too. Every setting of the recipe is editable under Advanced, with the defaults one
+  click away. The vocals of each song are separated first, so the aligner hears the voice.
+  The assistant fills in a song's lyrics by ear, and each checkpoint goes into the LoRA
+  library in one click. The trainer and its weights (about 8 GB) download only when you
+  open training; it needs an RTX 30-series card or newer with 11 GB of VRAM.
+- **Datasets travel between studios.** A dataset is a folder with `dataset.json` and its
+  audio; import one from MiniMax Music3 Studio or show the folder to take it there.
+- **Audio processing.** Noise reduction, the Spectral Lifter, a vocal naturaliser, your own
+  VST3 plugins in a chain, and mastering to a reference track, in that order. Plugins are
+  found in the system VST3 folders, each is set up in its own window, and they run in a
+  host process of their own, so a plugin that crashes does not take the studio with it.
+  Compare before and after while it plays; keep the result as a version of the track,
+  next to the untouched original, or throw it away.
+
+### Changed
+
+- **MP3 is made by the studio.** The engine renders 32-bit float and the studio encodes
+  the MP3 with LAME, so nothing is lost before the encoder.
+- **Section tags keep the order they are pressed in**, and the LoRA list in the create form
+  is no longer cut off by its card.
+
 ## 2026-09-24 — 1.0.4
 
 ### Fixed
