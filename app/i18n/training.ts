@@ -180,7 +180,7 @@ const en = {
   trainingField_epochs: 'Epochs',
   trainingHint_epochs: 'An epoch is one pass over every song of the dataset. More epochs follow the songs more closely; too many and songs start to loop or lose their endings.',
   trainingEpochSteps: '{epochs} epochs × {songs} songs = {steps} steps.',
-  trainingHint_target_kl: 'Lower keeps more of the base model, higher follows the songs more closely. The step limit is a cap the run rarely reaches.',
+  trainingHint_target_kl: 'KL is how far the LoRA has moved from the base model in how it composes. 0 is the base model unchanged; it grows as the LoRA learns the songs. Around 1.25 the artist can be heard, 1.4 is the recipe of the trainer author, and around 1.9 the model starts to break (looping endings). The step limit is a cap the run rarely reaches.',
   trainingChoice_steps: 'By steps',
 };
 
@@ -363,7 +363,7 @@ const ru: TrainingStrings = {
   trainingField_epochs: 'Эпох',
   trainingHint_epochs: 'Эпоха — один проход по всем песням набора. Больше эпох — ближе к песням; слишком много — песни начинают зацикливаться и терять концовки.',
   trainingEpochSteps: '{epochs} эпох × {songs} песен = {steps} шагов.',
-  trainingHint_target_kl: 'Меньше — больше от исходной модели, больше — ближе к песням набора. Предел шагов — потолок, до которого обучение обычно не доходит.',
+  trainingHint_target_kl: 'KL — насколько LoRA отошла от исходной модели в том, как она сочиняет. 0 — исходная модель без изменений, по мере обучения число растёт. Около 1,25 уже слышно исполнителя, 1,4 — рецепт автора тренера, около 1,9 модель начинает портиться (зацикленные концовки). Предел шагов — потолок, до которого обучение обычно не доходит.',
   trainingChoice_steps: 'По шагам',
 };
 
@@ -544,7 +544,7 @@ const zh: TrainingStrings = {
   trainingField_epochs: '轮数',
   trainingHint_epochs: '一轮就是把数据集的所有歌曲过一遍。轮数越多越接近这些歌曲；太多则歌曲会开始循环、失去结尾。',
   trainingEpochSteps: '{epochs} 轮 × {songs} 首 = {steps} 步。',
-  trainingHint_target_kl: '越低保留越多原模型，越高越接近数据集的歌曲。步数上限是训练很少达到的上限。',
+  trainingHint_target_kl: 'KL 表示 LoRA 在作曲方式上偏离原模型的程度。0 表示与原模型相同，随训练逐渐增大。约 1.25 时能听出这位艺人，1.4 是训练器作者的配方，约 1.9 时模型开始变差（结尾循环）。步数上限是训练很少达到的上限。',
   trainingChoice_steps: '按步数',
 };
 
@@ -725,7 +725,7 @@ const ja: TrainingStrings = {
   trainingField_epochs: 'エポック',
   trainingHint_epochs: '1 エポックはデータセットの全曲を一巡することです。多いほど曲に近づき、多すぎると曲がループしたり終わりを失ったりします。',
   trainingEpochSteps: '{epochs} エポック × {songs} 曲 = {steps} ステップ。',
-  trainingHint_target_kl: '低いほど元のモデルを多く残し、高いほどデータセットの曲に近づきます。ステップ上限は学習がめったに届かない上限です。',
+  trainingHint_target_kl: 'KL は、作曲の仕方で LoRA が元のモデルからどれだけ離れたかを示します。0 は元のモデルのままで、学習とともに増えます。1.25 前後でアーティストらしさが聞こえ、1.4 はトレーナー作者のレシピ、1.9 前後でモデルが崩れ始めます（エンディングのループ）。ステップ上限は学習がめったに届かない上限です。',
   trainingChoice_steps: 'ステップ数で',
 };
 
@@ -906,7 +906,7 @@ const ko: TrainingStrings = {
   trainingField_epochs: '에폭',
   trainingHint_epochs: '한 에폭은 데이터셋의 모든 곡을 한 번 도는 것입니다. 많을수록 곡에 가까워지고, 너무 많으면 곡이 반복되거나 끝을 잃습니다.',
   trainingEpochSteps: '{epochs} 에폭 × {songs}곡 = {steps} 단계.',
-  trainingHint_target_kl: '낮을수록 원래 모델을 더 남기고, 높을수록 데이터셋의 곡에 가까워집니다. 단계 상한은 학습이 거의 도달하지 않는 상한입니다.',
+  trainingHint_target_kl: 'KL은 LoRA가 작곡 방식에서 원래 모델로부터 얼마나 멀어졌는지를 나타냅니다. 0은 원래 모델 그대로이고, 학습할수록 커집니다. 1.25 부근부터 아티스트가 들리고, 1.4는 트레이너 제작자의 레시피이며, 1.9 부근에서 모델이 망가지기 시작합니다(끝부분 반복). 단계 상한은 학습이 거의 도달하지 않는 상한입니다.',
   trainingChoice_steps: '단계 수 기준',
 };
 
