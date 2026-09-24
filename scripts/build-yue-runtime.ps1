@@ -129,16 +129,25 @@ function Invoke-Cuda12Build {
     if (-not (Test-Path $nvcc)) { throw "The CUDA 12 backend needs a CUDA 12 toolkit; nvcc.exe is missing under '$Cuda12Root'. Set -Cuda12Root or CUDA_PATH_V12_9." }
     $root = $Cuda12Root.Replace('\', '/')
     $buildDirectoryName = 'build-cuda12-universal'
-    # nvcc 12 predates this Visual Studio; ggml's own CUDA 12 release builds
-    # pass the same switch. -Wno-deprecated-gpu-targets silences the notice
-    # that CUDA 12 is the last toolkit for Maxwell, Pascal and Volta.
-    $cudaFlags = '-allow-unsupported-compiler -Wno-deprecated-gpu-targets'
+    # -Wno-deprecated-gpu-targets silences the notice that CUDA 12 is the last
+    # toolkit for Maxwell, Pascal and Volta.
+    $cudaFlags = '-Wno-deprecated-gpu-targets'
     $flags = "-DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CUDA=ON -DGGML_VULKAN=OFF `"-DCMAKE_CUDA_ARCHITECTURES=52-real;60-real;61-real;70-real;75-real;80-real;86-real;89-real;90-real;120a-real`" `"-DCMAKE_CUDA_COMPILER=$root/bin/nvcc.exe`" `"-DCUDAToolkit_ROOT=$root`" `"-DCMAKE_CUDA_FLAGS=$cudaFlags`""
     $ccache = if (Get-Command ccache -ErrorAction SilentlyContinue) { '-DGGML_CCACHE=ON' } else { '-DGGML_CCACHE=OFF' }
     $symbols = '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase -DCMAKE_EXE_LINKER_FLAGS=/DEBUG -DCMAKE_SHARED_LINKER_FLAGS=/DEBUG'
     $parallelism = [Math]::Max(1, [Environment]::ProcessorCount)
     $vcvars = Get-VcVars64
-    $command = "set `"VSLANG=1033`" && set `"CUDA_PATH=$Cuda12Root`" && call `"$vcvars`" >nul && cmake -S . -B `"$buildDirectoryName`" -G Ninja -DCMAKE_BUILD_TYPE=Release $ccache $symbols $flags && cmake --build `"$buildDirectoryName`" --target ggml-cuda --parallel $parallelism"
+    # nvcc 12.9 knows MSVC up to 14.4x (Visual Studio 2022); its front end
+    # crashes on the headers of 14.5x. Visual Studio 2026 installs the 2022
+    # toolset beside its own as the component
+    # Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64.
+    $toolsRoot = Join-Path (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $vcvars))) 'Tools\MSVC'
+    $toolset = Get-ChildItem -Path $toolsRoot -Directory | Where-Object { $_.Name -match '^14\.[34]\d\.' } | Sort-Object { [version]$_.Name } | Select-Object -Last 1
+    if (-not $toolset) { throw "The CUDA 12 backend needs an MSVC 14.3x/14.4x toolset beside this Visual Studio; add the component Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64." }
+    $vcvarsVersion = ($toolset.Name -split '\.')[0..1] -join '.'
+    # --fresh: the toolset is part of the configuration, and a cache from
+    # another one keeps its compiler. Unchanged objects are not rebuilt.
+    $command = "set `"VSLANG=1033`" && set `"CUDA_PATH=$Cuda12Root`" && call `"$vcvars`" -vcvars_ver=$vcvarsVersion >nul && cmake --fresh -S . -B `"$buildDirectoryName`" -G Ninja -DCMAKE_BUILD_TYPE=Release $ccache $symbols $flags && cmake --build `"$buildDirectoryName`" --target ggml-cuda --parallel $parallelism"
     Push-Location $engineWorktree
     try { & cmd.exe /d /s /c $command | Out-Host } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw 'yue2.cpp CUDA 12 backend build failed.' }
