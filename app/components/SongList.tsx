@@ -3,6 +3,7 @@ import { Song } from '../types';
 import { Play, MoreHorizontal, Heart, ThumbsDown, ListPlus, Pause, Search, Filter, Check, Globe, Lock, Loader2, ThumbsUp, Share2, Video, Info, Clock, Timer, ImagePlus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
+import type { TranslationKey } from '../i18n/translations';
 import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
 import { openStems } from '../services/openStems';
@@ -404,6 +405,10 @@ export const SongList: React.FC<SongListProps> = ({
                                     isOwner={item.song.nativeReplayAvailable || user?.id === item.song.userId}
                                     onPlay={() => onPlay(item.song)}
                                     onSelect={() => onSelect(item.song)}
+                                    onOpenOriginal={(() => {
+                                        const original = item.song.derived ? songs.find(entry => entry.id === item.song.derived?.from) : undefined;
+                                        return original ? () => onSelect(original) : undefined;
+                                    })()}
                                     onToggleSelect={() => {
                                         if (item.song.isGenerating) return;
                                         setSelectedIds(prev => {
@@ -492,6 +497,8 @@ interface SongItemProps {
     onSongUpdate?: (updatedSong: Song) => void;
     onCancelJob?: () => void;
     onResetJob?: () => void;
+    /** Opens the track this one was made from; absent when it is gone. */
+    onOpenOriginal?: () => void;
 }
 
 const SongItem: React.FC<SongItemProps> = ({
@@ -518,7 +525,7 @@ const SongItem: React.FC<SongItemProps> = ({
     onSongUpdate,
     onCancelJob,
     onResetJob,
-}) => {
+ onOpenOriginal}) => {
     const { t } = useI18n();
     const [showDropdown, setShowDropdown] = useState(false);
     const [imageError, setImageError] = useState(false);
@@ -563,6 +570,7 @@ const SongItem: React.FC<SongItemProps> = ({
     return (
         <>
         <div
+            data-mcp-context={`song ${song.id}: ${song.title}`}
             onClick={onSelect}
             draggable={Boolean(song.audioUrl) && !song.isGenerating}
             onDragStart={(e) => {
@@ -686,6 +694,18 @@ const SongItem: React.FC<SongItemProps> = ({
                             >
                                 {song.title || (song.isGenerating ? (song.queuePosition ? t('queued') || "Queued..." : (t(song.stage) || song.stage || t('creating') || "Creating...")) : t('untitled') || "Untitled")}
                             </h3>
+                        )}
+                        {song.derived && (
+                            <button
+                                type="button"
+                                disabled={!onOpenOriginal}
+                                onClick={(event) => { event.stopPropagation(); onOpenOriginal?.(); }}
+                                title={onOpenOriginal ? t('openOriginal') : t('originalGone')}
+                                className="inline-flex max-w-full items-center gap-1 truncate rounded-sm border border-zinc-300 px-1.5 py-0.5 text-[10px] text-zinc-600 hover:border-pink-400 hover:text-pink-600 disabled:cursor-default disabled:hover:border-zinc-300 disabled:hover:text-zinc-600 dark:border-white/15 dark:text-zinc-300"
+                            >
+                                {t('madeFrom')} «{song.derived.fromTitle}» · {t(`derivedTool_${song.derived.tool}` as TranslationKey)}
+                                {song.derived.tool === 'stems' && typeof song.derived.settings?.stem === 'string' ? `: ${song.derived.settings.stem}` : ''}
+                            </button>
                         )}
                         <span
                           className="inline-flex items-center justify-center text-[9px] font-bold text-white bg-gradient-to-r from-pink-500 to-purple-500 px-1.5 py-0.5 rounded-sm shadow-sm"

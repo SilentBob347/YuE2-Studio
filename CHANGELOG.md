@@ -7,13 +7,25 @@ Windows build.
 
 ### Added
 
-- **An MCP server in the studio.** `http://127.0.0.1:8791/mcp` gives an agent 144 tools: every
+- **An MCP server in the studio.** `http://127.0.0.1:8791/mcp` gives an agent 151 tools: every
   route of the studio's API, called inside the process, and the window itself - a
   screenshot, its controls, the player and the video editor - through a bridge the page
   answers. Files are passed by their path; the model's writing rules and official
   examples are tools, resources and prompts, so a connected agent writes instead of the
   studio's small assistant. `docs/mcp-skill.md` is the
   skill an agent reads.
+- **The agent as the studio's assistant.** Pick **Agent (MCP)** as the writing assistant and
+  the write buttons and a dataset preparation ask the connected agent what they would ask
+  the local model, with the same instructions and answer schema. Settings has an **Agent
+  (MCP)** page: whether an agent and the window are connected, the address and the lines to
+  paste into Claude Code or any other client.
+- **MCP 2026-07-28.** The server speaks the stateless revision (`server/discover`, per-request
+  `_meta`, `Mcp-Method`/`Mcp-Name` headers checked against the body, cacheable lists,
+  structured results) and the handshake revisions for older clients, and answers only this
+  computer's agents and its own window. An agent reads and fills the create page's form,
+  sees every control of the window with its label and the song it belongs to, shows the user
+  a message and reads the window's console. `llms.txt` and the README tell an agent given
+  the repository how to install, connect and start.
 - **A dataset in one drop.** The training page is a three-step wizard: drop a folder of
   songs, check them, train. Albums with a cue sheet are cut into songs; titles and artists
   come from the tags, the file name and the folders.

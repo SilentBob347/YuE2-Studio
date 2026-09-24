@@ -301,6 +301,10 @@ export const OptionalGroup: React.FC<{
                 if (serverField && engine === 'local') {
                   return null;
                 }
+                // the connected agent needs neither a key nor a download
+                if (engine === 'agent') {
+                  return null;
+                }
                 return (
                   <div className="flex items-center gap-2">
                     <input
@@ -955,6 +959,7 @@ export const SetupGate: React.FC<{ onReady?: () => void; mode?: 'first-run' | 's
                 { id: 'managed', label: 'llama.cpp' },
                 { id: 'local', label: t('assistantLocal'), device: false },
                 { id: 'open_router', label: 'OpenRouter', device: false },
+                { id: 'agent', label: t('assistantAgent'), device: false },
                 { id: 'none', label: t('assistantDisabled'), device: false },
               ]}
               settingsUrl="/v1/assistant/status"

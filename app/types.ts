@@ -1,4 +1,6 @@
 export interface Song {
+  /** A track a tool made from another: which one, by which tool, how. */
+  derived?: { from: string; fromTitle: string; tool: string; settings?: Record<string, unknown> } | null;
   id: string;
   title: string;
   lyrics: string;

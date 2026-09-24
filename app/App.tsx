@@ -11,6 +11,7 @@ import { ReplayModal } from './components/ReplayModal';
 import { ProcessingModal } from './components/ProcessingModal';
 import { VideoGeneratorModal } from './components/VideoGeneratorModal';
 import { useBridgeCommand } from './services/mcpBridge';
+import { apiUrl } from './services/apiBase';
 import { SettingsModal } from './components/SettingsModal';
 import { Song, YueRequest, YueJob, YueProgress, View, Playlist } from './types';
 // Resizable panel hook
@@ -381,6 +382,20 @@ function AppContent() {
       return false;
     }
   }, []);
+
+  // The library asked for while the service was still starting came back
+  // empty; once the service answers again it is read afresh.
+  const wasOffline = useRef(false);
+  useEffect(() => {
+    if (nativeModels === 'offline') {
+      wasOffline.current = true;
+      return;
+    }
+    if (wasOffline.current && nativeModels !== 'unknown') {
+      wasOffline.current = false;
+      void refreshNativeLibrary();
+    }
+  }, [nativeModels, refreshNativeLibrary]);
 
   const handleNativeReplay = useCallback((song: Song) => {
     if (!song.nativeReplayAvailable) return;
@@ -1060,6 +1075,11 @@ function AppContent() {
     setCurrentView(view as View);
     return { text: `On ${String(view)}.` };
   });
+  useBridgeCommand('notify', ({ text, tone }) => {
+    const kind: ToastType = tone === 'error' || tone === 'success' ? tone : 'info';
+    showToast(String(text ?? ''), kind);
+    return { text: 'Shown.' };
+  });
   useBridgeCommand('open_settings', ({ section }) => {
     setSettingsSection(typeof section === 'string' ? section : null);
     setShowSettingsModal(true);
@@ -1075,7 +1095,14 @@ function AppContent() {
     repeat: repeatMode,
     queue: playQueue.length,
   }));
-  useBridgeCommand('player_play', ({ song_id }) => {
+  useBridgeCommand('player_play', ({ song_id, stem }) => {
+    if (song_id && stem) {
+      // one separated stem of the song, played on its own
+      const song = songById(song_id);
+      const take: Song = { ...song, id: `${song.id}#${String(stem)}`, title: `${song.title} · ${String(stem)}`, audioUrl: apiUrl(`/v1/library/songs/${encodeURIComponent(song.id)}/stems/${encodeURIComponent(String(stem))}`) };
+      playSong(take, [take]);
+      return { text: `Playing the ${String(stem)} stem of ${song.title}.` };
+    }
     if (song_id) {
       const song = songById(song_id);
       if (currentSong?.id !== song.id) playSong(song);

@@ -30,7 +30,7 @@ export function useBridgeCommand(command: string, handler: Handler): void {
 
 // ---------------------------------------------------------------- what is on screen
 
-const INTERACTIVE = 'button, a[href], input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="switch"], [role="slider"], [contenteditable="true"]';
+const INTERACTIVE = 'button, a[href], input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="switch"], [role="slider"], [contenteditable="true"], [data-mcp-context]';
 
 function visible(element: Element): boolean {
   const box = element.getBoundingClientRect();
@@ -39,10 +39,36 @@ function visible(element: Element): boolean {
   return style.visibility !== 'hidden' && style.display !== 'none';
 }
 
+/// The name of a lucide icon a button shows instead of words.
+function iconName(element: Element): string {
+  const classes = element.querySelector('svg')?.getAttribute('class') ?? '';
+  const icon = classes.split(/\s+/).find((name) => name.startsWith('lucide-'));
+  return icon ? `${icon.slice('lucide-'.length).replace(/-/g, ' ')} icon` : '';
+}
+
+/// The text written next to a field: a label, a heading, a caption before it.
+function nearbyText(element: Element): string {
+  let node: Element | null = element;
+  for (let depth = 0; depth < 2 && node; depth += 1) {
+    for (let sibling = node.previousElementSibling; sibling; sibling = sibling.previousElementSibling) {
+      if (sibling.matches(INTERACTIVE) || sibling.querySelector(INTERACTIVE) || sibling.matches('h1, h2') || sibling.querySelector('h1, h2')) continue;
+      const text = (sibling.textContent || '').replace(/\s+/g, ' ').trim();
+      if (text && text.length <= 80) return text;
+    }
+    node = node.parentElement;
+  }
+  return '';
+}
+
 function label(element: Element): string {
-  const own = element.getAttribute('aria-label') || element.getAttribute('title') || element.getAttribute('placeholder') || '';
+  const own = element.getAttribute('aria-label') || element.getAttribute('title') || '';
+  if (own) return own.slice(0, 80);
+  if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
+    const tied = element.labels?.[0]?.textContent?.replace(/\s+/g, ' ').trim();
+    return (tied || nearbyText(element) || element.getAttribute('placeholder') || '').slice(0, 80);
+  }
   const text = (element.textContent || '').replace(/\s+/g, ' ').trim();
-  return (own || text).slice(0, 80);
+  return (text || iconName(element) || nearbyText(element)).slice(0, 80);
 }
 
 let nextRef = 1;
@@ -55,14 +81,21 @@ function refOf(element: Element): string {
   return ref;
 }
 
-/** Every visible control, one line each, with the ref the other commands take. */
+/// The dialog on top, when one is open: its controls are what the user can reach.
+function openDialog(): Element | null {
+  const dialogs = Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], .fixed.inset-0')).filter(visible);
+  return dialogs.length ? dialogs[dialogs.length - 1] : null;
+}
+
+/// Every visible control, one line each, with the ref the other commands take.
+/// A control inside a song row names the song it belongs to.
 function readPage(): string {
   const lines: string[] = [];
   const title = document.querySelector('h1, h2')?.textContent?.trim();
   if (title) lines.push(`Page: ${title}`);
-  const dialog = document.querySelector('[role="dialog"], .fixed.inset-0');
-  if (dialog && visible(dialog)) lines.push('A dialog is open; its controls are listed first.');
-  const scope = dialog && visible(dialog) ? [dialog, document.body] : [document.body];
+  const dialog = openDialog();
+  if (dialog) lines.push('A dialog is open; its controls are listed first, then the page behind it.');
+  const scope = dialog ? [dialog, document.body] : [document.body];
   const seen = new Set<Element>();
   for (const root of scope) {
     for (const element of Array.from(root.querySelectorAll(INTERACTIVE))) {
@@ -70,14 +103,22 @@ function readPage(): string {
       seen.add(element);
       const tag = element.tagName.toLowerCase();
       const kind = element.getAttribute('role') || (tag === 'input' ? `input ${(element as HTMLInputElement).type}` : tag);
+      const context = element.closest('[data-mcp-context]')?.getAttribute('data-mcp-context');
       const parts = [refOf(element), kind, JSON.stringify(label(element))];
-      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
-        if (element instanceof HTMLInputElement && (element.type === 'checkbox' || element.type === 'radio')) parts.push(element.checked ? 'checked' : 'unchecked');
-        else if (element.value) parts.push(`value=${JSON.stringify(element.value.slice(0, 120))}`);
+      if (context) parts.push(`in ${JSON.stringify(context)}`);
+      if (element instanceof HTMLInputElement && (element.type === 'checkbox' || element.type === 'radio')) {
+        parts.push(element.checked ? 'checked' : 'unchecked');
+      } else if (element instanceof HTMLInputElement && element.type === 'range') {
+        parts.push(`value=${element.value}`, `range=${element.min || 0}..${element.max || 100}`, `step=${element.step || 1}`);
+      } else if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+        if (element.value) parts.push(`value=${JSON.stringify(element.value.slice(0, 160))}`);
+        else parts.push('empty', ...(element.placeholder ? [`placeholder=${JSON.stringify(element.placeholder.slice(0, 80))}`] : []));
       }
       if (element instanceof HTMLSelectElement) {
         parts.push(`value=${JSON.stringify(element.value)}`, `options=${JSON.stringify(Array.from(element.options).map((option) => option.value))}`);
       }
+      const pressed = element.getAttribute('aria-checked') ?? element.getAttribute('aria-pressed') ?? element.getAttribute('aria-selected');
+      if (pressed) parts.push(pressed === 'true' ? 'on' : 'off');
       if ((element as HTMLButtonElement).disabled) parts.push('disabled');
       lines.push(parts.join(' '));
     }
@@ -116,6 +157,29 @@ function setValue(element: HTMLElement, value: string): void {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 250));
 
+// ---------------------------------------------------------------- what the page logged
+
+const logged: Array<{ level: string; text: string; at: string }> = [];
+
+function remember(level: string, parts: unknown[]): void {
+  const text = parts.map((part) => (part instanceof Error ? `${part.name}: ${part.message}` : typeof part === 'string' ? part : JSON.stringify(part))).join(' ');
+  logged.push({ level, text: text.slice(0, 2000), at: new Date().toISOString() });
+  if (logged.length > 100) logged.shift();
+}
+
+/// Keeps the page's errors and warnings for an agent to read.
+function watchConsole(): void {
+  for (const level of ['error', 'warn'] as const) {
+    const original = console[level].bind(console);
+    console[level] = (...parts: unknown[]) => {
+      remember(level, parts);
+      original(...parts);
+    };
+  }
+  window.addEventListener('error', (event) => remember('error', [event.message, `${event.filename}:${event.lineno}`]));
+  window.addEventListener('unhandledrejection', (event) => remember('error', ['unhandled rejection', event.reason]));
+}
+
 const builtIn: Record<string, Handler> = {
   async screenshot(args) {
     const scale = Math.min(1, Number(args.max_width ?? 1600) / window.innerWidth);
@@ -123,6 +187,7 @@ const builtIn: Record<string, Handler> = {
     return { image: data.replace(/^data:image\/png;base64,/, ''), text: `${window.innerWidth}x${window.innerHeight} window` };
   },
   read_page: () => ({ text: readPage() }),
+  console: () => ({ text: logged.length ? logged.map((entry) => `${entry.at} ${entry.level}: ${entry.text}`).join('\n') : 'Nothing logged.' }),
   async click(args) {
     const element = find(args);
     element.scrollIntoView({ block: 'center' });
@@ -172,6 +237,7 @@ let started = false;
 export function startBridge(): void {
   if (started || typeof window === 'undefined' || typeof EventSource === 'undefined') return;
   started = true;
+  watchConsole();
   const connect = () => {
     const events = new EventSource(apiUrl('/mcp/window'));
     // the service names this window first; a command for another window is not ours

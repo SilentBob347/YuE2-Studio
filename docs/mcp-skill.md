@@ -9,6 +9,16 @@ YuE2 Studio serves MCP at `http://127.0.0.1:8791/mcp` while it is open (Streamab
 stateless JSON-RPC). Every tool runs the same code as a button of the studio, and the user
 sees what you do in the studio's window.
 
+## If the studio is not running yet
+
+1. It is a Windows desktop application. If it is not installed, download the installer or
+   the portable archive from https://github.com/timoncool/YuE2-Studio/releases/latest (it needs an
+   NVIDIA card; the first start offers to download the models).
+2. Start it. The MCP server is up as soon as its window is: `http://127.0.0.1:8791/mcp`.
+   Nothing else to install - no npx, no bridge.
+3. Connect (below), then call `studio_status`. If the models are missing, `models_catalog`
+   and `models_download` fetch them.
+
 ## Connect
 
 ```bash
@@ -18,7 +28,13 @@ claude mcp add --transport http yue2-studio http://127.0.0.1:8791/mcp
 Other clients: `{ "mcpServers": { "yue2-studio": { "type": "streamable-http", "url": "http://127.0.0.1:8791/mcp" } } }`.
 
 The server also serves this skill (resource `studio://skill`, prompt `studio`) and the
-writing guides (resources `studio://guide/<topic>`).
+writing guides (resources `studio://guide/<topic>`). It speaks MCP `2026-07-28` (stateless:
+every request carries its version in `_meta`, `server/discover` describes the server) and
+the handshake revisions `2025-11-25`, `2025-06-18` and `2025-03-26` through `initialize`.
+Only this computer's agents and the studio's own window may connect.
+
+The user sees it in the studio too: Settings, **Agent (MCP)** shows whether an agent is
+connected and the address to paste.
 
 ## Ground rules
 
@@ -90,6 +106,26 @@ writing guides (resources `studio://guide/<topic>`).
 6. `training_checkpoint_install` for the chosen step, then `song_create` with that LoRA
    in `adapters` and its trigger word in the style.
 
+**The create page, where the user can see it**
+
+`song_create` makes a song directly. When the user wants to watch and adjust it first:
+`ui_navigate` create, `create_form_set` with the fields (the user sees them fill in),
+`create_form_get` to check, and `create_form_submit` to press Create.
+
+**When you are the studio's writing assistant**
+
+The user can pick **Agent (MCP)** as the assistant engine. Then the studio's write buttons,
+and the lyric layout and the styles of a dataset preparation, ask you instead of its local model:
+`assistant_requests_wait` returns each request with the instructions and the answer schema
+the local model would get; write the answer by them and send it with
+`assistant_request_answer`. Keep calling `assistant_requests_wait` while the user works -
+`studio_status` shows `assistant_requests_waiting`. A request waits 15 minutes.
+
+**Talking to the user**
+
+`ui_notify` shows the user a short message in the window. `ui_console` shows the errors the
+window logged, when a button did nothing.
+
 **A video clip**
 
 1. `video_open` with a song id, `video_get` to see the presets and settings.
@@ -110,7 +146,8 @@ move around. Check the result with `ui_screenshot`.
   restart, logs.
 - **song**: create, job get/list/cancel, replay; **score**: compose, transcribe, job
   get/cancel.
-- **writing**: guide, examples; **assistant**: write, status, set, runtime, models.
+- **writing**: guide, examples; **assistant**: write, status, set, runtime, models;
+  requests wait and answer (when you are the assistant).
 - **library**: songs list, song get/update/delete/files, import audio, versions;
   **playlist**: list/create/update/delete.
 - **cover**: draw, set from file, templates, prompt render; **karaoke**: make, delete,
@@ -122,6 +159,6 @@ move around. Check the result with `ui_screenshot`.
   update/delete/files, prepare (+ cancel, train after), reveal; **lyrics**: find;
   **training**: status, start, cancel, checkpoint install, run delete, packs.
 - **ui**: screenshot, read page, click, type, select, press key, scroll, navigate, open
-  settings; **player**: state, play, pause, seek, next, previous, set; **video**: open,
+  settings, notify, console; **create_form**: get, set, submit; **player**: state, play, pause, seek, next, previous, set; **video**: open,
   get, set, render, play, pause, seek, close.
 - **openrouter**: status, key, catalog, log, complete, cover, transcribe.

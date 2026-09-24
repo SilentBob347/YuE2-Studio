@@ -32,6 +32,19 @@ It is built on [yue2.cpp](https://github.com/ServeurpersoCom/yue2.cpp), the nati
 port of YuE2. The studio around it is Rust and React in a Tauri window — nothing in the
 runtime path is Python.
 
+## For AI agents
+
+Given this repository, an agent can set everything up and drive the studio by itself:
+
+1. Install the studio from the [latest release](https://github.com/timoncool/YuE2-Studio/releases/latest) and start it.
+2. Connect to its MCP server at `http://127.0.0.1:8791/mcp`:
+   `claude mcp add --transport http yue2-studio http://127.0.0.1:8791/mcp`
+3. Read the skill it serves (resource `studio://skill`, prompt `studio`), the same text as
+   [docs/mcp-skill.md](docs/mcp-skill.md), and start with the tool `studio_status`.
+
+[llms.txt](llms.txt) says the same for tools that look for it. To keep the skill in Claude
+Code, save [docs/mcp-skill.md](docs/mcp-skill.md) as `~/.claude/skills/yue2-studio/SKILL.md`.
+
 ## What you can do
 
 - **Full songs from a style and lyrics** — up to six minutes, in the languages the model
@@ -177,9 +190,13 @@ While the studio is open it serves MCP at `http://127.0.0.1:8791/mcp`: an agent 
 Claude Code, Claude Desktop or Cursor does everything the page does, through the same code -
 songs and scores, the library, covers, stems, karaoke, processing, video clips, the player,
 LoRA, and a LoRA from a folder of songs end to end - and sees and works the window itself:
-a screenshot, its controls, clicks and typing. 144 tools, grouped by area. The model's
+a screenshot, its controls, clicks and typing. 151 tools, grouped by area. The model's
 writing rules and official examples come with the server, so the agent writes the styles,
 lyrics and lyric layouts itself instead of the studio's small assistant.
+
+With **Agent (MCP)** chosen as the writing assistant (Settings, Models), the connected agent
+also answers the studio's own write buttons and dataset preparation. Settings, **Agent
+(MCP)** shows whether an agent is connected and what to paste into the client.
 
 ```bash
 claude mcp add --transport http yue2-studio http://127.0.0.1:8791/mcp

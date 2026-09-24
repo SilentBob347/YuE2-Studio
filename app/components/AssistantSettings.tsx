@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Check, Loader2, Square } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
+import { AgentPanel } from './AgentPanel';
 import { loadNativeOpenRouterCatalog, refreshNativeOpenRouterCatalog, type NativeOpenRouterModel } from '../services/nativeOpenRouter';
 
 /**
@@ -171,6 +172,8 @@ export const AssistantExtras: React.FC<{ engine: string }> = ({ engine }) => {
       setBusy(null);
     }
   };
+
+  if (engine === 'agent') return <AgentPanel />;
 
   return (
     <div className="space-y-2">

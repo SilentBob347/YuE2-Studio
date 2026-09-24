@@ -29,7 +29,8 @@ pub fn install(api: Router) {
     let _ = API.set(api);
 }
 
-const PROTOCOL: &str = "2025-06-18";
+/// The studio's name, as clients show it.
+const STUDIO: &str = "YuE2 Studio";
 /// The skill an agent reads, served as a resource and a prompt.
 const SKILL: &str = include_str!("../../../docs/mcp-skill.md");
 const SKILL_URI: &str = "studio://skill";
@@ -161,7 +162,13 @@ fn shape(name: &str, args: &Value, value: Value) -> Value {
             }
             Value::Array(songs.map(|song| {
                 let style: String = song["caption"].as_str().unwrap_or_default().chars().take(90).collect();
-                json!({ "id": song["id"], "title": song["title"], "made": song["created_at"], "style": style })
+                let mut row = json!({ "id": song["id"], "title": song["title"], "made": song["created_at"], "style": style });
+                // a track a tool made names the one it was made from
+                if song["metadata"]["derived"].is_object() {
+                    row["made_from"] = song["metadata"]["derived"]["from"].clone();
+                    row["made_by"] = song["metadata"]["derived"]["tool"].clone();
+                }
+                row
             }).collect())
         }
         _ => value,
@@ -174,6 +181,7 @@ async fn status_summary() -> Value {
     let active_run = training["runs"].as_array().into_iter().flatten().find(|run| Some(run["id"].as_str().unwrap_or_default()) == training["active"].as_str()).map(compact_run);
     json!({
         "window_open": !open_windows().is_empty(),
+        "assistant_requests_waiting": open_questions().len(),
         "song_jobs": jobs,
         "covers_and_karaoke": running_activity,
         "preparation": compact_preparation(&training["prepare"]),
@@ -227,7 +235,7 @@ fn annotations(name: &str) -> Value {
     // a verb that changes something outweighs a noun that reads
     const CHANGES: &[&str] = &["install", "import", "remove", "delete", "refresh", "create", "update", "start", "cancel", "select", "download", "apply", "restart"];
     let changes = CHANGES.iter().any(|verb| name.split('_').any(|word| word == *verb));
-    let read_only = !changes && (READS.iter().any(|part| name.ends_with(part) || name.contains(&format!("{part}_"))) || name.starts_with("writing_") || name == "lyrics_find" || name == "cover_prompt_render" || name == "studio_wait" || name == "engine_presets_get");
+    let read_only = !changes && (READS.iter().any(|part| name.ends_with(part) || name.contains(&format!("{part}_"))) || name.starts_with("writing_") || name == "lyrics_find" || name == "cover_prompt_render" || name == "studio_wait" || name == "engine_presets_get" || name == "assistant_requests_wait" || name == "ui_console");
     let destructive = name.ends_with("_delete") || name.ends_with("_remove") || name == "processing_discard" || name.ends_with("_cancel") || name.contains("_cancel_");
     let title = name.replace('_', " ");
     json!({ "title": title, "readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": read_only || name.ends_with("_set") || name.contains("_select"), "openWorldHint": name.starts_with("openrouter_") || name.contains("_hf") || name == "lyrics_find" })
@@ -344,6 +352,116 @@ async fn ask_window(command: &str, args: Value, seconds: u64) -> Result<Value, S
     }
 }
 
+/// The studio's questions for its writing assistant when the user has made
+/// the connected agent that assistant: each waits here until the agent
+/// answers it with assistant_request_answer.
+struct AgentQuestion {
+    question: Value,
+    answer: tokio::sync::oneshot::Sender<String>,
+}
+
+struct Agent {
+    questions: Mutex<Vec<AgentQuestion>>,
+    /// When an agent last called the server, and what it called.
+    last_call: Mutex<Option<(std::time::Instant, String)>>,
+    calls: AtomicU64,
+}
+
+fn agent() -> &'static Agent {
+    static AGENT: OnceLock<Agent> = OnceLock::new();
+    AGENT.get_or_init(|| Agent { questions: Mutex::new(Vec::new()), last_call: Mutex::new(None), calls: AtomicU64::new(0) })
+}
+
+fn questions() -> std::sync::MutexGuard<'static, Vec<AgentQuestion>> {
+    agent().questions.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// An agent that called within this long still counts as connected.
+const AGENT_PRESENT: Duration = Duration::from_secs(600);
+/// How long a question waits for the agent's answer.
+const AGENT_ANSWER: Duration = Duration::from_secs(900);
+
+fn seen(what: &str) {
+    *agent().last_call.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some((std::time::Instant::now(), what.to_string()));
+    agent().calls.fetch_add(1, Ordering::Relaxed);
+}
+
+fn agent_present() -> bool {
+    agent().last_call.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().is_some_and(|(at, _)| at.elapsed() < AGENT_PRESENT)
+}
+
+/// The questions still waiting for an answer; one whose asker gave up is gone.
+fn open_questions() -> Vec<Value> {
+    let mut waiting = questions();
+    waiting.retain(|question| !question.answer.is_closed());
+    waiting.iter().map(|question| question.question.clone()).collect()
+}
+
+/// Asks the connected agent what the studio would ask its own assistant: the
+/// same instructions, the same request, the same answer schema.
+pub async fn ask_agent(system: &str, user: &str, schema: Option<Value>, target: &str) -> Result<String, String> {
+    if !agent_present() {
+        return Err("No agent is connected to the studio. Connect one to its MCP server (Settings, Agent) or choose another assistant.".into());
+    }
+    let id = format!("q{}", bridge().sequence.fetch_add(1, Ordering::Relaxed));
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    questions().push(AgentQuestion { question: json!({ "id": id, "target": target, "instructions": system, "request": user, "answer_schema": schema }), answer: sender });
+    match tokio::time::timeout(AGENT_ANSWER, receiver).await {
+        Ok(Ok(answer)) => Ok(answer),
+        _ => {
+            questions().retain(|question| question.question["id"] != id.as_str());
+            Err(format!("The agent did not answer within {} minutes.", AGENT_ANSWER.as_secs() / 60))
+        }
+    }
+}
+
+/// Waits until the studio has a question for the agent, a slice at a time.
+async fn wait_for_questions(args: &Value) -> Value {
+    let seconds = args.get("seconds").and_then(Value::as_u64).unwrap_or(60).clamp(1, 240);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds);
+    loop {
+        let waiting = open_questions();
+        if !waiting.is_empty() {
+            return json!({ "requests": waiting });
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return json!({ "requests": [], "note": "no request yet; call assistant_requests_wait again to keep listening" });
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+fn answer_question(args: &Value) -> Result<String, String> {
+    let id = text(args, "request_id")?;
+    let answer = match args.get("answer") {
+        Some(Value::String(text)) => text.clone(),
+        Some(value) if !value.is_null() => value.to_string(),
+        _ => return Err("'answer' is required".into()),
+    };
+    let found = {
+        let mut waiting = questions();
+        waiting.iter().position(|question| question.question["id"] == id.as_str()).map(|at| waiting.remove(at))
+    };
+    let Some(question) = found else {
+        return Err(format!("No request {id} is waiting; assistant_requests_wait lists the open ones."));
+    };
+    question.answer.send(answer).map_err(|_| format!("Request {id} was given up by the studio before the answer came."))?;
+    Ok("Answered; the studio goes on with it.".into())
+}
+
+/// Whether an agent and the window are connected, for the settings page.
+pub async fn status() -> Json<Value> {
+    let last = agent().last_call.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+    Json(json!({
+        "window_open": !open_windows().is_empty(),
+        "agent_connected": agent_present(),
+        "agent_last_call": last.as_ref().map(|(_, what)| what.clone()),
+        "agent_seconds_ago": last.as_ref().map(|(at, _)| at.elapsed().as_secs()),
+        "agent_calls": agent().calls.load(Ordering::Relaxed),
+        "requests_waiting": open_questions().len(),
+    }))
+}
+
 /// A required text argument, or a message saying which is missing.
 fn text(args: &Value, name: &str) -> Result<String, String> {
     args.get(name).and_then(Value::as_str).map(str::trim).filter(|value| !value.is_empty()).map(str::to_string).ok_or_else(|| format!("'{name}' is required"))
@@ -372,7 +490,7 @@ fn id_only(name: &str, what: &str) -> Value {
 }
 
 fn nothing() -> Value {
-    object(json!({}), &[])
+    json!({ "type": "object", "additionalProperties": false })
 }
 
 /// Audio, lyrics and cue files under a folder, with their path inside it:
@@ -527,6 +645,50 @@ fn tools() -> &'static [Tool] {
                 schema: || object(json!({ "section": { "type": "string" } }), &[]),
                 call: |args| window("open_settings", args, 15),
             },
+            // ---------------------------------------------------------------- the agent as the studio's assistant
+            Tool {
+                name: "assistant_requests_wait",
+                description: "When the user has chosen you as the studio's writing assistant (assistant engine 'Agent (MCP)'), what the studio would ask its own assistant waits here: the create page's write buttons, and the lyric layout and the styles of a dataset preparation. Returns the waiting requests - id, target, the instructions the studio's assistant would get, the request, and the JSON schema the answer must match - as soon as there is one, or after seconds (60 by default, at most 240). Answer each with assistant_request_answer; keep calling while the user works.",
+                schema: || object(json!({ "seconds": { "type": "integer" } }), &[]),
+                call: |_| composite("questions"),
+            },
+            Tool {
+                name: "assistant_request_answer",
+                description: "Answer a request from assistant_requests_wait: answer is the JSON object its answer_schema describes (or plain text for a request without a schema), written by its instructions. The studio goes on with it as with its own assistant's answer.",
+                schema: || object(json!({ "request_id": { "type": "string" }, "answer": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }), &["request_id", "answer"]),
+                call: |_| composite("answer"),
+            },
+            Tool {
+                name: "ui_notify",
+                description: "Show the user a short message in the studio's window, for a few seconds: what you did, what you need from them. tone: info (default), success or error.",
+                schema: || object(json!({ "text": { "type": "string" }, "tone": { "type": "string", "enum": ["info", "success", "error"] } }), &["text"]),
+                call: |args| window("notify", args, 15),
+            },
+            Tool {
+                name: "ui_console",
+                description: "The errors and warnings the studio's window logged lately, newest last: what went wrong on the page when a button did nothing.",
+                schema: nothing,
+                call: |args| window("console", args, 15),
+            },
+            // ---------------------------------------------------------------- the create page's form
+            Tool {
+                name: "create_form_get",
+                description: "The create page's form as the user sees it now: every field, the request it would send, whether the model is ready, and the form's error if it refused. The create page must be open (ui_navigate create).",
+                schema: nothing,
+                call: |args| window("create_get", args, 15),
+            },
+            Tool {
+                name: "create_form_set",
+                description: "Fill the create page's form in the window, as if typed - the user sees every field change; fields not given stay. fields: title, style, lyrics, abc, cot (full|melody|off), duration_seconds, lm_batch_size, synth_batch_size, steps, cfg_scale, lm_seed, seed, randomize_seed, cover_prompt, output_format, mp3_bitrate, peak_clip, adapters, mode (studio|simple|cover). Use it when the user wants to see and adjust the song before it is made; song_create makes one directly.",
+                schema: || object(json!({ "fields": { "type": "object", "description": "field -> value" } }), &["fields"]),
+                call: |args| window("create_set", args, 15),
+            },
+            Tool {
+                name: "create_form_submit",
+                description: "Press Create on the create page: the song is made from the form as it stands. studio_wait until idle waits for it; create_form_get shows why the form refused, if it did.",
+                schema: nothing,
+                call: |args| window("create_submit", args, 15),
+            },
             // ---------------------------------------------------------------- the player
             Tool {
                 name: "player_state",
@@ -536,8 +698,8 @@ fn tools() -> &'static [Tool] {
             },
             Tool {
                 name: "player_play",
-                description: "Play a library song (song_id) in the studio's player, or resume what is loaded.",
-                schema: || object(json!({ "song_id": { "type": "string" } }), &[]),
+                description: "Play a library song (song_id) in the studio's player, or resume what is loaded. With stem (drums, bass, other, vocals, guitar, piano) it plays that separated stem of the song alone; stems_split makes them, stems_get lists them.",
+                schema: || object(json!({ "song_id": { "type": "string" }, "stem": { "type": "string", "enum": ["drums", "bass", "other", "vocals", "guitar", "piano"] } }), &[]),
                 call: |args| window("player_play", args, 15),
             },
             Tool {
@@ -594,7 +756,7 @@ fn tools() -> &'static [Tool] {
                     "lyrics": { "type": "object" },
                     "background": { "type": "object" },
                     "album_art_path": { "type": "string" },
-                    "album_art": { "type": ["string", "null"] }
+                    "album_art": { "anyOf": [{ "type": "string" }, { "type": "null" }] }
                 }), &[]),
                 call: |args| {
                     let mut args = args.clone();
@@ -681,6 +843,13 @@ fn tools() -> &'static [Tool] {
                     "lm_seed": { "type": "integer" },
                     "steps": { "type": "integer" },
                     "cfg_scale": { "type": "number" },
+                    "lm_batch_size": { "type": "integer", "description": "compositions written from the request (1 by default)" },
+                    "synth_batch_size": { "type": "integer", "description": "performances rendered of each composition (1 by default)" },
+                    "semantic_tokens": { "type": "string", "description": "audio codes of a song already sung (library_song_get audio_codes): renders that take again" },
+                    "abc_sampling": { "type": "object", "description": "temperature, top_p, top_k, repetition_penalty, penalty_window, min_tokens, max_tokens", "properties": { "temperature": { "type": "number" }, "top_p": { "type": "number" }, "top_k": { "type": "integer" }, "repetition_penalty": { "type": "number" }, "penalty_window": { "type": "integer" }, "min_tokens": { "type": "integer" }, "max_tokens": { "type": "integer" } } },
+                    "semantic_sampling": { "type": "object", "description": "temperature, top_p, top_k, repetition_penalty, penalty_window, min_tokens, max_tokens", "properties": { "temperature": { "type": "number" }, "top_p": { "type": "number" }, "top_k": { "type": "integer" }, "repetition_penalty": { "type": "number" }, "penalty_window": { "type": "integer" }, "min_tokens": { "type": "integer" }, "max_tokens": { "type": "integer" } } },
+                    "peak_clip": { "type": "integer", "description": "peak limiter, dB below full scale" },
+                    "mp3_bitrate": { "type": "integer" },
                     "output_format": { "type": "string", "enum": ["mp3", "wav16", "wav24", "wav32"] },
                     "cover_prompt": { "type": "string", "description": "What the cover should show" },
                     "adapters": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "scales": { "type": "object", "description": "slot -> strength, e.g. {\"ar\": 1, \"nar\": 1}" } }, "required": ["id"] } }
@@ -785,7 +954,7 @@ fn tools() -> &'static [Tool] {
             // ---------------------------------------------------------------- the library
             Tool {
                 name: "library_songs_list",
-                description: "The songs in the library, newest first: id, title, when made and the start of the style. query filters by title or style; library_song_get gives one song whole. response_format detailed gives every field of every song.",
+                description: "The songs in the library, newest first: id, title, when made, made_from and made_by for a track a tool made from another (stems, processing, replay), and the start of the style. query filters by title or style; library_song_get gives one song whole. response_format detailed gives every field of every song.",
                 schema: || object(json!({ "query": { "type": "string" }, "response_format": { "type": "string", "enum": ["concise", "detailed"] } }), &[]),
                 call: |_| get("/v1/library/songs".into()),
             },
@@ -869,7 +1038,7 @@ fn tools() -> &'static [Tool] {
             },
             Tool {
                 name: "stems_split",
-                description: "Split a library song into six stems (drums, bass, other, vocals, guitar, piano) with HT-Demucs. Poll stems_get.",
+                description: "Split a library song into six stems (drums, bass, other, vocals, guitar, piano) with HT-Demucs. Each stem becomes a track of the library made from the song (made_from, made_by stems), replacing the stems of an earlier split; stems_get names them. Wait with studio_wait until idle or poll stems_get.",
                 schema: || id_only("song_id", "library song id"),
                 call: |args| post(format!("/v1/library/songs/{}/stems", segment(&text(args, "song_id")?)), json!({})),
             },
@@ -893,9 +1062,9 @@ fn tools() -> &'static [Tool] {
             },
             Tool {
                 name: "processing_keep",
-                description: "Keep the processed audio as a new version of the song.",
-                schema: nothing,
-                call: |_| post("/v1/processing/keep".into(), json!({})),
+                description: "Keep the processed audio as a new track of the library, made from the one processed: it names that track and the processing with its settings (metadata.derived), and wears its cover.",
+                schema: || object(json!({ "label": { "type": "string", "description": "what the processing is called on the new track; its stages when left out" } }), &[]),
+                call: |args| post("/v1/processing/keep".into(), args.clone()),
             },
             Tool {
                 name: "processing_discard",
@@ -1305,7 +1474,7 @@ fn tools() -> &'static [Tool] {
             Tool {
                 name: "dataset_prepare_train_after",
                 description: "For the preparation at work: start this training run once every song is ready (train: {name, recipe}), or not (train: null).",
-                schema: || object(json!({ "train": { "type": ["object", "null"] } }), &[]),
+                schema: || object(json!({ "train": { "anyOf": [{ "type": "object" }, { "type": "null" }] } }), &[]),
                 call: |args| post("/v1/training/prepare/train-after".into(), args.clone()),
             },
             // ---------------------------------------------------------------- training
@@ -1523,12 +1692,120 @@ fn cut(mut text: String) -> String {
     text
 }
 
-fn rpc(id: Value, result: Value) -> Response {
+/// The protocol revisions the studio speaks: the stateless one, where every
+/// request carries its version, and the handshake ones older clients open
+/// with `initialize`.
+const MODERN: &[&str] = &["2026-07-28"];
+const LEGACY: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
+const META_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
+/// How long a client may keep the tool list, the prompts and the guides:
+/// they change only with the studio itself.
+const LIST_TTL_MS: u64 = 3_600_000;
+const HEADER_MISMATCH: i64 = -32020;
+const UNSUPPORTED_VERSION: i64 = -32022;
+
+fn server_info() -> Value {
+    json!({ "name": env!("CARGO_PKG_NAME"), "title": STUDIO, "version": env!("CARGO_PKG_VERSION") })
+}
+
+fn supported_versions() -> Vec<&'static str> {
+    MODERN.iter().chain(LEGACY).copied().collect()
+}
+
+/// A complete result, signed with the server's identity.
+fn rpc(id: Value, mut result: Value) -> Response {
+    if let Some(fields) = result.as_object_mut() {
+        fields.entry("resultType").or_insert_with(|| "complete".into());
+        let meta = fields.entry("_meta").or_insert_with(|| json!({}));
+        meta["io.modelcontextprotocol/serverInfo"] = server_info();
+    }
     Json(json!({ "jsonrpc": "2.0", "id": id, "result": result })).into_response()
 }
 
 fn rpc_error(id: Value, code: i64, message: String) -> Response {
-    Json(json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })).into_response()
+    rpc_failure(StatusCode::OK, id, code, message, None)
+}
+
+fn rpc_failure(status: StatusCode, id: Value, code: i64, message: String, data: Option<Value>) -> Response {
+    let mut error = json!({ "code": code, "message": message });
+    if let Some(data) = data {
+        error["data"] = data;
+    }
+    (status, Json(json!({ "jsonrpc": "2.0", "id": id, "error": error }))).into_response()
+}
+
+/// A list or a read a client may cache: the same for everyone, fresh for an hour.
+fn cacheable(mut result: Value) -> Value {
+    result["ttlMs"] = LIST_TTL_MS.into();
+    result["cacheScope"] = "public".into();
+    result
+}
+
+/// A header value, with the Base64 sentinel form decoded.
+fn header_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    use base64::Engine;
+    let raw = headers.get(name)?.to_str().ok()?;
+    match raw.strip_prefix("=?base64?").and_then(|inner| inner.strip_suffix("?=")) {
+        Some(encoded) => base64::engine::general_purpose::STANDARD.decode(encoded).ok().and_then(|bytes| String::from_utf8(bytes).ok()),
+        None => Some(raw.to_string()),
+    }
+}
+
+/// Why a stateless request is refused, if it is: a version the studio does
+/// not speak, or headers that do not say what its body says.
+fn refused(headers: &HeaderMap, method: &str, params: &Value, version: &str) -> Option<(i64, String, Option<Value>)> {
+    if !MODERN.contains(&version) {
+        return Some((UNSUPPORTED_VERSION, "Unsupported protocol version".into(), Some(json!({ "supported": supported_versions(), "requested": version }))));
+    }
+    let mismatch = |what: String| Some((HEADER_MISMATCH, format!("Header mismatch: {what}"), None));
+    match header_value(headers, "mcp-protocol-version") {
+        Some(value) if value == version => {}
+        Some(value) => return mismatch(format!("MCP-Protocol-Version header value '{value}' does not match body value '{version}'")),
+        None => return mismatch("the MCP-Protocol-Version header is missing".into()),
+    }
+    match header_value(headers, "mcp-method") {
+        Some(value) if value == method => {}
+        Some(value) => return mismatch(format!("Mcp-Method header value '{value}' does not match body value '{method}'")),
+        None => return mismatch("the Mcp-Method header is missing".into()),
+    }
+    let named = match method {
+        "tools/call" | "prompts/get" => params.get("name"),
+        "resources/read" => params.get("uri"),
+        _ => return None,
+    }
+    .and_then(Value::as_str)
+    .unwrap_or_default();
+    match header_value(headers, "mcp-name") {
+        Some(value) if value == named => None,
+        Some(value) => mismatch(format!("Mcp-Name header value '{value}' does not match body value '{named}'")),
+        None => mismatch("the Mcp-Name header is missing".into()),
+    }
+}
+
+/// A tool's answer: the text an agent reads, and the same data structured
+/// when it is JSON and whole.
+fn tool_result(id: Value, text: String, structured: Option<Value>, error: bool) -> Response {
+    let mut result = json!({ "content": [{ "type": "text", "text": text }], "isError": error });
+    if let Some(structured) = structured.filter(|value| value.is_object() || value.is_array()) {
+        result["structuredContent"] = structured;
+    }
+    rpc(id, result)
+}
+
+fn tool_json(id: Value, value: Value) -> Response {
+    let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+    if text.len() > LIMIT {
+        tool_result(id, cut(text), None, false)
+    } else {
+        tool_result(id, text, Some(value), false)
+    }
+}
+
+/// The name a tool shows the user: its words, the first capitalised.
+fn tool_title(name: &str) -> String {
+    let words = name.replace('_', " ");
+    let mut letters = words.chars();
+    letters.next().map(|first| first.to_uppercase().chain(letters).collect()).unwrap_or_default()
 }
 
 pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
@@ -1536,42 +1813,64 @@ pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
         return foreign_origin();
     }
     let Ok(message) = serde_json::from_slice::<Value>(&body) else {
-        return rpc_error(Value::Null, -32700, "Parse error".into());
+        return rpc_failure(StatusCode::BAD_REQUEST, Value::Null, -32700, "Parse error".into(), None);
+    };
+    let Some(method) = message.get("method").and_then(Value::as_str) else {
+        return rpc_failure(StatusCode::BAD_REQUEST, Value::Null, -32600, "Invalid request: one JSON-RPC request or notification per POST".into(), None);
     };
     let id = message.get("id").cloned().unwrap_or(Value::Null);
-    let method = message.get("method").and_then(Value::as_str).unwrap_or_default();
     let params = message.get("params").cloned().unwrap_or(Value::Null);
+    // a notification is only acknowledged
+    if message.get("id").is_none() {
+        return StatusCode::ACCEPTED.into_response();
+    }
+    // A request of the stateless revision says its version in _meta and is
+    // checked against its headers; one without it is of the handshake era.
+    if let Some(version) = params.get("_meta").and_then(|meta| meta.get(META_VERSION)).and_then(Value::as_str) {
+        if let Some((code, text, data)) = refused(&headers, method, &params, version) {
+            return rpc_failure(StatusCode::BAD_REQUEST, id, code, text, data);
+        }
+    }
+    if method != "tools/call" {
+        seen(method);
+    }
     match method {
         "initialize" => {
-            let protocol = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(PROTOCOL);
+            let asked = params.get("protocolVersion").and_then(Value::as_str).unwrap_or_default();
+            let protocol = LEGACY.iter().find(|version| **version == asked).copied().unwrap_or(LEGACY[0]);
             rpc(id, json!({
                 "protocolVersion": protocol,
                 "capabilities": { "tools": {}, "resources": {}, "prompts": {} },
-                "serverInfo": { "name": env!("CARGO_PKG_NAME"), "version": env!("CARGO_PKG_VERSION") },
+                "serverInfo": server_info(),
                 "instructions": INSTRUCTIONS,
             }))
         }
-        "notifications/initialized" | "notifications/cancelled" => StatusCode::ACCEPTED.into_response(),
+        "server/discover" => rpc(id, cacheable(json!({
+            "supportedVersions": supported_versions(),
+            "capabilities": { "tools": {}, "resources": {}, "prompts": {} },
+            "instructions": INSTRUCTIONS,
+        }))),
         "ping" => rpc(id, json!({})),
         "resources/list" => {
-            let mut list = vec![json!({ "uri": SKILL_URI, "name": "studio skill", "description": "How to drive the studio: every tool, what the model reads, step-by-step recipes.", "mimeType": "text/markdown" })];
+            let mut list = vec![json!({ "uri": SKILL_URI, "name": "studio skill", "title": "How to drive the studio", "description": "How to drive the studio: every tool, what the model reads, step-by-step recipes.", "mimeType": "text/markdown" })];
             for (topic, about) in crate::assistant::GUIDE_TOPICS {
-                list.push(json!({ "uri": format!("{GUIDE_URI}{topic}"), "name": format!("writing guide: {topic}"), "description": about, "mimeType": "text/plain" }));
+                list.push(json!({ "uri": format!("{GUIDE_URI}{topic}"), "name": format!("writing guide: {topic}"), "title": format!("Writing guide: {topic}"), "description": about, "mimeType": "text/plain" }));
             }
-            rpc(id, json!({ "resources": list }))
+            rpc(id, cacheable(json!({ "resources": list })))
         }
+        "resources/templates/list" => rpc(id, cacheable(json!({ "resourceTemplates": [] }))),
         "resources/read" => {
             let uri = params.get("uri").and_then(Value::as_str).unwrap_or_default();
             let text = if uri == SKILL_URI { Some(SKILL.to_string()) } else { uri.strip_prefix(GUIDE_URI).and_then(crate::assistant::writing_guide) };
             match text {
-                Some(text) => rpc(id, json!({ "contents": [{ "uri": uri, "mimeType": if uri == SKILL_URI { "text/markdown" } else { "text/plain" }, "text": text }] })),
+                Some(text) => rpc(id, cacheable(json!({ "contents": [{ "uri": uri, "mimeType": if uri == SKILL_URI { "text/markdown" } else { "text/plain" }, "text": text }] }))),
                 None => rpc_error(id, -32002, format!("Resource not found: {uri}")),
             }
         }
-        "prompts/list" => rpc(id, json!({ "prompts": [
-            { "name": "studio", "description": "Load the studio's skill: the tools, what the model reads, and recipes." },
-            { "name": "write_song", "description": "Write a song for the model and make it.", "arguments": [{ "name": "idea", "description": "what the song is about, its genre and mood", "required": true }] },
-        ] })),
+        "prompts/list" => rpc(id, cacheable(json!({ "prompts": [
+            { "name": "studio", "title": "Studio skill", "description": "Load the studio's skill: the tools, what the model reads, and recipes." },
+            { "name": "write_song", "title": "Write a song", "description": "Write a song for the model and make it.", "arguments": [{ "name": "idea", "description": "what the song is about, its genre and mood", "required": true }] },
+        ] }))),
         "prompts/get" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
             let idea = params.get("arguments").and_then(|arguments| arguments.get("idea")).and_then(Value::as_str).unwrap_or_default();
@@ -1586,15 +1885,16 @@ pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
             }
         }
         "tools/list" => {
-            let list: Vec<Value> = tools().iter().map(|tool| json!({ "name": tool.name, "description": tool.description, "inputSchema": (tool.schema)(), "annotations": annotations(tool.name) })).collect();
-            rpc(id, json!({ "tools": list }))
+            let list: Vec<Value> = tools().iter().map(|tool| json!({ "name": tool.name, "title": tool_title(tool.name), "description": tool.description, "inputSchema": (tool.schema)(), "annotations": annotations(tool.name) })).collect();
+            rpc(id, cacheable(json!({ "tools": list })))
         }
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+            seen(name);
             let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            let answer = |text: String, error: bool| rpc(id.clone(), json!({ "content": [{ "type": "text", "text": text }], "isError": error }));
+            let answer = |text: String, error: bool| tool_result(id.clone(), text, None, error);
             let Some(tool) = tools().iter().find(|tool| tool.name == name) else {
-                return answer(format!("Unknown tool: {name}"), true);
+                return rpc_error(id, -32602, format!("Unknown tool: {name}; tools/list names them all."));
             };
             match (tool.call)(&args) {
                 Err(problem) => answer(problem, true),
@@ -1607,15 +1907,24 @@ pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
                         }
                         let text = result.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| if result.is_null() || result.get("image").is_some() { "Done.".into() } else { serde_json::to_string_pretty(&result).unwrap_or_default() });
                         content.push(json!({ "type": "text", "text": text }));
-                        rpc(id.clone(), json!({ "content": content, "isError": false }))
+                        let mut answer = json!({ "content": content, "isError": false });
+                        if result.get("image").is_none() && result.get("text").is_none() && (result.is_object() || result.is_array()) {
+                            answer["structuredContent"] = result;
+                        }
+                        rpc(id.clone(), answer)
                     }
                     Err(problem) => answer(problem, true),
                 },
-                Ok(call) if call.path == "composite:status" => answer(serde_json::to_string_pretty(&status_summary().await).unwrap_or_default(), false),
-                Ok(call) if call.path == "composite:wait" => answer(serde_json::to_string_pretty(&wait_for(&args).await).unwrap_or_default(), false),
+                Ok(call) if call.path == "composite:status" => tool_json(id, status_summary().await),
+                Ok(call) if call.path == "composite:wait" => tool_json(id, wait_for(&args).await),
+                Ok(call) if call.path == "composite:questions" => tool_json(id, wait_for_questions(&args).await),
+                Ok(call) if call.path == "composite:answer" => match answer_question(&args) {
+                    Ok(text) => answer(text, false),
+                    Err(problem) => answer(problem, true),
+                },
                 Ok(call) => match call_route(call).await {
                     Ok((status, text)) if status.is_success() => match serde_json::from_str::<Value>(&text) {
-                        Ok(value) => answer(cut(serde_json::to_string_pretty(&shape(name, &args, value)).unwrap_or_default()), false),
+                        Ok(value) => tool_json(id, shape(name, &args, value)),
                         Err(_) => answer(text, false),
                     },
                     Ok((_, text)) => answer(text, true),
@@ -1623,16 +1932,12 @@ pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
                 },
             }
         }
-        _ => rpc_error(id, -32601, format!("Method not found: {method}")),
+        _ => rpc_failure(StatusCode::NOT_FOUND, id, -32601, format!("Method not found: {method}"), None),
     }
 }
 
-pub async fn info() -> &'static str {
-    "Studio MCP endpoint: POST JSON-RPC here (Streamable HTTP)."
-}
-
 /// What an agent is told when it connects.
-const INSTRUCTIONS: &str = "You drive a music studio on this computer. Every tool is a button of the studio: what you do, the user sees in the studio's window. Long work (songs, stems, preparation, training) runs as jobs: start it, then poll studio_status or the job's own get tool until it finishes. The graphics card runs one heavy job at a time; while a LoRA trains, songs are not made. Look things up with the tools instead of guessing ids: library_songs_list, training_status, lora_list, models_status.";
+const INSTRUCTIONS: &str = "You drive YuE2 Studio on this computer. Every tool runs the same code as a button of the studio, and the user sees what you do in its window. Start with studio_status. Long work (songs, stems, karaoke, dataset preparation, training) is a job: start it, then studio_wait instead of polling. The graphics card runs one heavy job at a time; while a LoRA trains no song is made. Look ids up instead of guessing them: library_songs_list, training_status, dataset_get, lora_list, models_status. Before writing for the model yourself read writing_guide and writing_examples. When the user has made you the studio's writing assistant, answer its requests: assistant_requests_wait, then assistant_request_answer. The whole guide is the resource studio://skill (prompt 'studio').";
 
 #[cfg(test)]
 mod tests {
@@ -1701,6 +2006,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_agent_answers_what_the_studio_asks_its_assistant() {
+        seen("studio_status");
+        let asking = tokio::spawn(async { ask_agent("rules", "idea", Some(json!({ "type": "object" })), "all").await });
+        let waiting = wait_for_questions(&json!({ "seconds": 5 })).await;
+        let request = &waiting["requests"][0];
+        assert_eq!(request["instructions"], "rules");
+        assert_eq!(request["target"], "all");
+        let id = request["id"].as_str().unwrap().to_string();
+        answer_question(&json!({ "request_id": id, "answer": { "lyrics": "[Verse 1]" } })).unwrap();
+        assert_eq!(asking.await.unwrap().unwrap(), r#"{"lyrics":"[Verse 1]"}"#);
+        assert!(answer_question(&json!({ "request_id": id, "answer": "x" })).is_err(), "answered once only");
+    }
+
+    #[tokio::test]
     async fn a_multipart_body_streams_its_files() {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("song.flac");
@@ -1710,6 +2029,54 @@ mod tests {
         let whole: Vec<u8> = chunks.concat();
         assert_eq!(whole.len(), 4 + (1 << 20) + 5 + 4);
         assert!(whole.starts_with(b"head") && whole.ends_with(b"tail"));
+    }
+
+    #[tokio::test]
+    async fn a_stateless_request_is_checked_against_its_headers() {
+        let call = |headers: &[(&str, &str)], body: Value| {
+            let mut map = HeaderMap::new();
+            for (name, value) in headers {
+                map.insert(axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(), value.parse().unwrap());
+            }
+            async move {
+                let response = handle(map, axum::body::Bytes::from(body.to_string())).await;
+                let status = response.status();
+                let bytes = axum::body::to_bytes(response.into_body(), 1 << 22).await.unwrap();
+                (status, serde_json::from_slice::<Value>(&bytes).unwrap_or(Value::Null))
+            }
+        };
+        let meta = json!({ "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {} });
+        let modern = [("mcp-protocol-version", "2026-07-28"), ("mcp-method", "server/discover")];
+        let (status, found) = call(&modern, json!({ "jsonrpc": "2.0", "id": 1, "method": "server/discover", "params": { "_meta": meta } })).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(found["result"]["supportedVersions"][0], "2026-07-28");
+        assert_eq!(found["result"]["resultType"], "complete");
+        assert_eq!(found["result"]["cacheScope"], "public");
+        assert!(found["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"].is_string());
+
+        let (status, found) = call(&[("mcp-protocol-version", "2026-07-28"), ("mcp-method", "tools/call"), ("mcp-name", "studio_system")], json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "studio_status", "_meta": meta } })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "a name that differs from the body is refused");
+        assert_eq!(found["error"]["code"], HEADER_MISMATCH);
+
+        let (status, found) = call(&[("mcp-protocol-version", "2026-07-28")], json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": { "_meta": meta } })).await;
+        assert_eq!((status, found["error"]["code"].clone()), (StatusCode::BAD_REQUEST, json!(HEADER_MISMATCH)), "a missing Mcp-Method is refused");
+
+        let old = json!({ "io.modelcontextprotocol/protocolVersion": "1900-01-01" });
+        let (status, found) = call(&[("mcp-protocol-version", "1900-01-01"), ("mcp-method", "tools/list")], json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": { "_meta": old } })).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(found["error"]["code"], UNSUPPORTED_VERSION);
+        assert_eq!(found["error"]["data"]["requested"], "1900-01-01");
+
+        let encoded = format!("=?base64?{}?=", { use base64::Engine; base64::engine::general_purpose::STANDARD.encode("studio://skill") });
+        let (status, found) = call(&[("mcp-protocol-version", "2026-07-28"), ("mcp-method", "resources/read"), ("mcp-name", encoded.as_str())], json!({ "jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": { "uri": "studio://skill", "_meta": meta } })).await;
+        assert_eq!(status, StatusCode::OK, "a Base64 name is decoded before it is compared");
+        assert!(found["result"]["contents"][0]["text"].as_str().unwrap().contains("MCP"));
+
+        let (status, found) = call(&[("mcp-protocol-version", "2026-07-28"), ("mcp-method", "nope/nope")], json!({ "jsonrpc": "2.0", "id": 6, "method": "nope/nope", "params": { "_meta": meta } })).await;
+        assert_eq!((status, found["error"]["code"].clone()), (StatusCode::NOT_FOUND, json!(-32601)));
+
+        let (status, _) = call(&[], json!({ "jsonrpc": "2.0", "method": "notifications/initialized" })).await;
+        assert_eq!(status, StatusCode::ACCEPTED);
     }
 
     #[tokio::test]
@@ -1728,6 +2095,6 @@ mod tests {
         let list = reply(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" })).await;
         assert_eq!(list["result"]["tools"].as_array().unwrap().len(), tools().len());
         let unknown = reply(json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "nope" } })).await;
-        assert_eq!(unknown["result"]["isError"], true);
+        assert_eq!(unknown["error"]["code"], -32602);
     }
 }

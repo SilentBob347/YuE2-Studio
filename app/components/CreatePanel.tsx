@@ -7,6 +7,7 @@ import {
 import { AudioWaveform } from './AudioWaveform';
 import type { Song, YueCot, YueOutputFormat, YueRequest, YueSampling } from '../types';
 import { useI18n } from '../context/I18nContext';
+import { useBridgeCommand } from '../services/mcpBridge';
 import { EXAMPLES, randomExample } from '../services/examples';
 import { ScoreView } from './ScoreView';
 import { composeScore, transcribe } from '../services/transcription';
@@ -685,7 +686,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         body: payload,
         signal: run.signal,
       });
-      if (live.ok && live.body) {
+      if (!live.ok || !live.body) {
+        const refused = await live.json().catch(() => null);
+        throw new Error(refused?.error || String(live.status));
+      }
+      let body: Record<string, unknown> | null = null;
+      {
         const reader = live.body.getReader();
         const decoder = new TextDecoder();
         let carry = '';
@@ -699,7 +705,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             carry = carry.slice(split + 2);
             split = carry.indexOf('\n\n');
             if (!frame.startsWith('data:')) continue;
-            let event: { stage?: string; delta?: string; error?: string; model?: string };
+            let event: { stage?: string; delta?: string; text?: string; error?: string; model?: string; draft?: Record<string, unknown> };
             try {
               event = JSON.parse(frame.slice(5).trim());
             } catch {
@@ -707,6 +713,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             }
             if (event.error) throw new Error(event.error);
             if (event.stage) setAssistStage(event.stage);
+            if (event.draft) body = event.draft;
             if (event.model) setAssistModel(event.model);
             if (event.delta) {
               streamed += event.delta;
@@ -715,13 +722,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
           }
         }
       }
-      const response = await fetch('/v1/assistant/write', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload,
-      });
-      const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(body?.error || String(response.status));
+      if (!body) throw new Error(t('assistantNoAnswer'));
       if (typeof body?.lyrics === 'string') setLyrics(body.lyrics);
       if (typeof body?.style === 'string') setStyle(body.style);
       if (typeof body?.abc === 'string') setAbc(body.abc.trimEnd());
@@ -762,6 +763,51 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     }
     onGenerate(request);
   };
+
+  // An agent connected over MCP reads and fills this form as the user sees it
+  const formFields: Record<string, [unknown, (value: string) => void]> = {
+    title: [name, setName],
+    style: [style, setStyle],
+    lyrics: [lyrics, setLyrics],
+    abc: [abc, setAbc],
+    cot: [cot, (value) => setCot(value as YueCot | '')],
+    duration_seconds: [duration, setDuration],
+    lm_batch_size: [lmBatch, setLmBatch],
+    synth_batch_size: [synthBatch, setSynthBatch],
+    steps: [steps, setSteps],
+    cfg_scale: [cfgScale, setCfgScale],
+    lm_seed: [lmSeed, setLmSeed],
+    seed: [seed, setSeed],
+    cover_prompt: [coverPrompt, setCoverPrompt],
+    output_format: [format, (value) => setFormat(value as YueOutputFormat)],
+    mp3_bitrate: [mp3Bitrate, setMp3Bitrate],
+    peak_clip: [peakClip, setPeakClip],
+  };
+  useBridgeCommand('create_get', () => ({
+    mode,
+    fields: { ...Object.fromEntries(Object.entries(formFields).map(([key, [value]]) => [key, value])), randomize_seed: randomizeSeed, adapters },
+    request: buildRequest(),
+    ready,
+    error,
+    assistant_writing: assisting,
+  }));
+  useBridgeCommand('create_set', (args) => {
+    const fields = (args.fields && typeof args.fields === 'object' ? args.fields : args) as Record<string, unknown>;
+    const unknown: string[] = [];
+    for (const [key, value] of Object.entries(fields)) {
+      if (key === 'mode' && (value === 'studio' || value === 'simple' || value === 'cover')) setMode(value);
+      else if (key === 'randomize_seed') setRandomizeSeed(Boolean(value));
+      else if (key === 'adapters' && Array.isArray(value)) setAdapters(value as AdapterUse[]);
+      else if (formFields[key]) formFields[key][1](value == null ? '' : String(value));
+      else unknown.push(key);
+    }
+    if (unknown.length) throw new Error(`Unknown fields: ${unknown.join(', ')}. The form has: ${[...Object.keys(formFields), 'mode', 'randomize_seed', 'adapters'].join(', ')}.`);
+    return { text: 'Filled in; create_form_get shows the form, ui_screenshot shows it on screen.' };
+  });
+  useBridgeCommand('create_submit', () => {
+    submit();
+    return { text: 'Pressed Create. studio_status shows the new job; if the form refused, create_form_get says why under error.' };
+  });
 
   const songs = numberOrUndefined(lmBatch) ?? 1;
   const variations = numberOrUndefined(synthBatch) ?? 1;

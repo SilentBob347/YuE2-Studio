@@ -258,6 +258,9 @@ enum MusicJobPhase {
 
 #[derive(Debug, Clone, Serialize)]
 struct MusicJob {
+    /// Where a track made from another comes from (a re-render).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    derived: Option<Value>,
     id: String,
     engine_id: String,
     /// What the assistant said this track's cover should show, if anything.
@@ -507,12 +510,16 @@ enum AssistantProvider {
     OpenRouter,
     /// A model Studio downloaded and runs itself with llama.cpp.
     Managed,
+    /// The agent connected over MCP: the studio asks it what it would ask its
+    /// own model, with the same instructions and answer schema.
+    Agent,
 }
 
 impl AssistantConfig {
     fn available(&self) -> bool {
         match self.provider {
             AssistantProvider::None => false,
+            AssistantProvider::Agent => true,
             AssistantProvider::Local => {
                 self.local_base_url.as_deref().is_some_and(|url| !url.trim().is_empty())
                     && self.local_model.as_deref().is_some_and(|model| !model.trim().is_empty())
@@ -778,7 +785,9 @@ pub async fn serve() -> anyhow::Result<()> {
     // the MCP tools call the same routes, inside the process
     mcp::install(app.clone());
     let app = app
-        .route("/mcp", post(mcp::handle).get(mcp::info))
+        // POST only: a GET is answered 405, as the stateless revision asks
+        .route("/mcp", post(mcp::handle))
+        .route("/mcp/status", get(mcp::status))
         .route("/mcp/window", get(mcp::window_events))
         .route("/mcp/window/result", post(mcp::window_result))
         .layer(CorsLayer::permissive())
@@ -1008,9 +1017,74 @@ struct SeparationRun {
     stems: Vec<String>,
     /// Whether the graphics card did the work, once the run is over.
     used_gpu: Option<bool>,
+    /// The library tracks the stems became.
+    library_songs: Vec<String>,
 }
 
 /// Where a song's stems live: beside the track, named after it.
+/// What a track made by a tool says about where it came from: the track it
+/// was made from, the tool, and the settings the tool ran with.
+fn derivation(from: &library::Song, tool: &str, settings: Value) -> Value {
+    serde_json::json!({ "from": from.id, "from_title": from.title, "tool": tool, "settings": settings })
+}
+
+/// The track a derived track was made from, and by which tool.
+fn derived_from(song: &library::Song) -> Option<(&str, &str)> {
+    let derived = song.metadata.get("derived")?;
+    Some((derived.get("from")?.as_str()?, derived.get("tool")?.as_str()?))
+}
+
+/// Gives a track made by a tool the cover of the one it was made from.
+fn cover_like(state: &AppState, from: &library::Song, to: &str) -> anyhow::Result<()> {
+    if let Some((path, media_type)) = state.library.cover_path_for_song(from) {
+        let image = std::fs::read(&path).with_context(|| format!("read the cover {}", path.display()))?;
+        state.library.store_song_cover(to, &image, &media_type)?;
+    }
+    Ok(())
+}
+
+/// Every stem of a song becomes a track of the library made from it: it
+/// plays, goes to the tools, makes a clip or a cover like any track, and
+/// wears the original's cover. Separating the song again replaces its stems
+/// in the library instead of adding more.
+fn stems_into_library(state: &AppState, song_id: &str, stems: &[String], overlap: f64) -> anyhow::Result<Vec<String>> {
+    let original = state.library.get_song(song_id)?.ok_or_else(|| anyhow::anyhow!("the song {song_id} is gone"))?;
+    for old in state.library.list_songs()? {
+        let stem = old.metadata.pointer("/derived/settings/stem").and_then(Value::as_str).unwrap_or_default();
+        if derived_from(&old) == Some((song_id, "stems")) && stems.iter().any(|name| name == stem) {
+            let files = song_files(state, &old);
+            state.library.delete_song(&old.id)?;
+            for path in files {
+                std::fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
+            }
+        }
+    }
+    let mut added = Vec::new();
+    for stem in stems {
+        let audio = std::fs::read(stem_path(state, song_id, stem)).with_context(|| format!("read the {stem} stem"))?;
+        let duration = library::audio_duration_seconds(&audio, "wav", None);
+        let song = state.library.import_audio_song(library::AudioImportInput {
+            title: format!("{} · {stem}", original.title),
+            caption: original.caption.clone(),
+            // the words belong to the voice, not to the drums
+            lyrics: if stem == "vocals" { original.lyrics.clone() } else { String::new() },
+            metadata: serde_json::json!({
+                "derived": derivation(&original, "stems", serde_json::json!({ "stem": stem, "model": "HT-Demucs", "overlap": overlap })),
+                "duration_seconds": duration,
+            }),
+            generation_settings: Value::Null,
+            engine_id: "stems".into(),
+            profile_id: None,
+            source: "stems".into(),
+            audio_extension: "wav".into(),
+            audio,
+        })?.song;
+        cover_like(state, &original, &song.id)?;
+        added.push(song.id);
+    }
+    Ok(added)
+}
+
 fn stem_path(state: &AppState, song_id: &str, stem: &str) -> PathBuf {
     state.library.media_dir().join(format!("{song_id}-{stem}.wav"))
 }
@@ -1608,7 +1682,8 @@ async fn processing_preview(State(state): State<AppState>, headers: HeaderMap) -
 
 #[derive(Debug, Deserialize)]
 struct KeepProcessingRequest {
-    /// What the version is called in the track's version list.
+    /// What the processing is called on the new track; its stages when left out.
+    #[serde(default)]
     label: String,
 }
 
@@ -1633,11 +1708,32 @@ async fn keep_processing(
         _ => None,
     };
     let settings = processing::settings_record(&run.request, reference_title.as_deref());
-    let recorded = match state.library.add_song_version(&run.song_id, &filename, input.label.trim(), settings) {
-        Ok(Some(song)) => Ok(song),
-        Ok(None) => Err(api_error(StatusCode::NOT_FOUND, "Song not found".into())),
-        Err(error) => Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
-    };
+    // the result is a track of its own, made from the one it processed
+    let recorded = (|| -> anyhow::Result<library::Song> {
+        let original = state.library.get_song(&run.song_id)?.ok_or_else(|| anyhow::anyhow!("Song not found"))?;
+        let audio = std::fs::read(&stored).with_context(|| format!("read {}", stored.display()))?;
+        let mut settings = settings;
+        settings["label"] = Value::from(if input.label.trim().is_empty() { run.stages.join(" + ") } else { input.label.trim().to_string() });
+        let song = state.library.create_song(library::SongInput {
+            title: format!("{} · {}", original.title, run.stages.join(" + ")),
+            audio_path: Some(stored.display().to_string()),
+            caption: original.caption.clone(),
+            lyrics: original.lyrics.clone(),
+            metadata: serde_json::json!({
+                "derived": derivation(&original, "processing", settings),
+                "duration_seconds": library::audio_duration_seconds(&audio, "wav", None),
+            }),
+            generation_settings: Value::Null,
+            engine_id: "processing".into(),
+            profile_id: None,
+            replay_request: None,
+            audio_codes: None,
+            source: "processing".into(),
+        })?;
+        cover_like(&state, &original, &song.id)?;
+        Ok(song)
+    })()
+    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")));
     let song = match recorded {
         Ok(song) => song,
         Err(problem) => {
@@ -2217,12 +2313,19 @@ async fn install_training_checkpoint(
     Ok(Json(meta))
 }
 
-async fn read_stems(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
-    Json(serde_json::json!({
+async fn read_stems(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let songs = state.library.list_songs().map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let in_library: Vec<Value> = songs
+        .iter()
+        .filter(|song| derived_from(song) == Some((id.as_str(), "stems")))
+        .map(|song| serde_json::json!({ "stem": song.metadata.pointer("/derived/settings/stem"), "song_id": song.id, "title": song.title }))
+        .collect();
+    Ok(Json(serde_json::json!({
         "song_id": id,
         "stems": stems_on_disk(&state, &id),
+        "library_songs": in_library,
         "run": state.separation_run.read().await.clone(),
-    }))
+    })))
 }
 
 async fn read_stem_audio(
@@ -2306,7 +2409,7 @@ async fn start_separation(
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "this track has no stored audio".into()))?;
 
     *state.separation_run.write().await =
-        Some(SeparationRun { song_id: id.clone(), progress: 0.0, done: false, error: None, stems: vec![], used_gpu: None });
+        Some(SeparationRun { song_id: id.clone(), progress: 0.0, done: false, error: None, stems: vec![], used_gpu: None, library_songs: vec![] });
 
     let model = state.separator.model_path();
     let config = state.separation_config.read().await.clone();
@@ -2348,8 +2451,12 @@ async fn start_separation(
                 match outcome {
                     Ok((stems, ran_on_gpu)) => {
                         run.progress = 1.0;
-                        run.stems = stems;
                         run.used_gpu = Some(ran_on_gpu);
+                        match stems_into_library(&background, &song_id, &stems, overlap) {
+                            Ok(songs) => run.library_songs = songs,
+                            Err(error) => run.error = Some(format!("the stems are separated but did not reach the library: {error:#}")),
+                        }
+                        run.stems = stems;
                     }
                     Err(error) => run.error = Some(format!("{error:#}")),
                 }
@@ -2929,6 +3036,7 @@ async fn update_configuration(
                             assistant.openrouter_model = Some(model);
                         }
                     }
+                    ExecutionMode::Local if assistant.provider == AssistantProvider::Agent => {}
                     ExecutionMode::Local => {
                         // Whichever local shape is set up: a managed model the
                         // studio downloaded, or a server the user runs.
@@ -4306,6 +4414,7 @@ async fn assistant_write_stream(
     }
     let (system, required) = assistant::instructions(&request);
     let user = assistant::user_message(&request);
+    let target = assist_target_name(request.target);
 
     let (sender, receiver) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(64);
     let emit = |sender: tokio::sync::mpsc::Sender<Result<axum::body::Bytes, std::io::Error>>, event: Value| async move {
@@ -4315,6 +4424,23 @@ async fn assistant_write_stream(
 
     tokio::spawn(async move {
         emit(sender.clone(), serde_json::json!({ "stage": "preparing" })).await;
+
+        // The connected agent answers whole: there is nothing to stream.
+        if config.provider == AssistantProvider::Agent {
+            emit(sender.clone(), serde_json::json!({ "stage": "sent", "model": "agent" })).await;
+            match mcp::ask_agent(&system, &user, Some(assistant::draft_schema(&required)), &target).await {
+                Ok(text) => {
+                    emit(sender.clone(), serde_json::json!({ "stage": "writing" })).await;
+                    emit(sender.clone(), serde_json::json!({ "delta": text })).await;
+                    match assistant::parse_draft(&text, &required) {
+                        Ok(draft) => emit(sender.clone(), serde_json::json!({ "stage": "done", "text": text, "draft": draft })).await,
+                        Err(error) => emit(sender.clone(), serde_json::json!({ "error": format!("the agent's answer does not fit the schema: {error}") })).await,
+                    }
+                }
+                Err(error) => emit(sender.clone(), serde_json::json!({ "error": error })).await,
+            }
+            return;
+        }
 
         // Where the request goes, and with which model.
         let (base, model, key): (String, String, Option<String>) = match config.provider {
@@ -4464,10 +4590,15 @@ async fn assistant_write_stream(
         // The answer is kept whenever it cannot be turned into a draft. That is
         // the case this log exists for: the window shows one red line, and
         // without this the text behind it is gone the moment it is closed.
-        if let Err(error) = assistant::parse_draft(&whole, &required) {
-            request_log::unusable("assistant", &model, &error.to_string(), &whole);
+        // The draft the window shows is the one it gets: the finished fields
+        // come at the end of this stream, not from asking the model again.
+        match assistant::parse_draft(&whole, &required) {
+            Ok(draft) => emit(sender.clone(), serde_json::json!({ "stage": "done", "text": whole, "draft": draft })).await,
+            Err(error) => {
+                request_log::unusable("assistant", &model, &error.to_string(), &whole);
+                emit(sender.clone(), serde_json::json!({ "error": error.to_string() })).await;
+            }
         }
-        emit(sender.clone(), serde_json::json!({ "stage": "done", "text": whole })).await;
         // The card belongs to whatever runs next unless the user asked for
         // everything to stay resident.
         release_assistant_unless_kept(&state).await;
@@ -4510,6 +4641,11 @@ async fn assistant_draft(state: &AppState, request: &assistant::AssistRequest) -
     Ok(serde_json::to_value(draft).unwrap_or(Value::Null))
 }
 
+/// What the assistant is asked for, by the name the API uses.
+fn assist_target_name(target: assistant::AssistTarget) -> String {
+    serde_json::to_value(target).ok().and_then(|value| value.as_str().map(str::to_string)).unwrap_or_default()
+}
+
 /// One chat completion from the configured writing assistant: the system and
 /// user messages, the answer's text. `schema` enforces the answer's shape where
 /// the provider can; `target` sizes the answer. The assistant stays loaded:
@@ -4531,6 +4667,10 @@ async fn assistant_ask(
             StatusCode::CONFLICT,
             "No writing assistant is configured. The manual form does not need one.".into(),
         ));
+    }
+
+    if config.provider == AssistantProvider::Agent {
+        return mcp::ask_agent(system, user, schema, &assist_target_name(target)).await.map_err(|error| api_error(StatusCode::BAD_GATEWAY, error));
     }
 
     let response: Value = match config.provider {
@@ -4622,6 +4762,7 @@ async fn assistant_ask(
                 .body
         }
         AssistantProvider::None => return Err(api_error(StatusCode::CONFLICT, "No writing assistant is configured.".into())),
+        AssistantProvider::Agent => unreachable!("the agent answered above"),
     };
 
     let content = assistant::content_of(&response).map_err(|error| {
@@ -5119,6 +5260,7 @@ async fn create_music_job(
     match state.music_server.submit(engine_submission(&body)).await {
         Ok(remote) => {
             let job = MusicJob {
+                derived: None,
                 id: remote.id,
                 engine_id,
                 cover_prompt: request.cover_prompt.clone(),
@@ -5180,7 +5322,8 @@ async fn replay_music_job(
         .await
         .map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine refused the job: {error}")))?;
     let title = request.title.clone().filter(|value| !value.trim().is_empty()).or(source_title);
-    let job = MusicJob {
+    let mut job = MusicJob {
+        derived: None,
         cover_prompt: None,
         id: remote.id,
         engine_id: PRIMARY_MUSIC_ENGINE_ID.into(),
@@ -5196,6 +5339,11 @@ async fn replay_music_job(
         songs: vec![],
         message: "Submitted a re-render: the semantic stream is present, so the autoregressive stage is skipped.".into(),
     };
+    if let Some(song_id) = &request.song_id {
+        if let Some(original) = state.library.get_song(song_id).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))? {
+            job.derived = Some(derivation(&original, "replay", serde_json::json!({ "steps": request.steps, "seed": request.seed, "synth_batch_size": request.synth_batch_size, "output_format": request.output_format, "peak_clip": request.peak_clip, "mp3_bitrate": request.mp3_bitrate })));
+        }
+    }
     state.jobs.write().await.insert(job.id.clone(), job.clone());
     spawn_job_watcher(state.clone(), job.id.clone());
     Ok((StatusCode::ACCEPTED, Json(job)))
@@ -5409,6 +5557,7 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
             "cot": generation_settings.get("cot"),
             "output_format": generation_settings.get("output_format"),
             "cover_prompt": job.cover_prompt.clone(),
+            "derived": job.derived.clone(),
         });
         // Several tracks from one request share its name; number them so the
         // library can tell the takes apart.
@@ -5983,6 +6132,7 @@ fn insert_optional<T: Serialize>(body: &mut Value, key: &str, value: Option<T>) 
 
 fn queued_not_configured_job(request: CreateMusicJobRequest, engine_id: String) -> MusicJob {
     MusicJob {
+        derived: None,
         cover_prompt: None,
         id: format!("unconfigured-{}", uuid_suffix()),
         engine_id,
@@ -6002,6 +6152,7 @@ fn queued_not_configured_job(request: CreateMusicJobRequest, engine_id: String) 
 
 fn failed_request_job(request: CreateMusicJobRequest, engine_id: String, error: String) -> MusicJob {
     MusicJob {
+        derived: None,
         cover_prompt: None,
         title: request.title.clone(),
         id: format!("rejected-{}", uuid_suffix()),
