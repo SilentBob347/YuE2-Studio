@@ -11,7 +11,7 @@ Windows build.
   artists, sound, sliders, with their authors credited) and a search on Hugging Face that
   downloads what you pick. In the create form each LoRA gets its own strength for the
   composition and for the sound, and its trigger word goes into the style for you. The
-  engine merges LoRA and LoKr at load (yue2.cpp fork `adapters`, 16c42d2), honours the
+  engine merges LoRA and LoKr at load (yue2.cpp fork `adapters`, 7647831), honours the
   rsLoRA scale, and refuses DoRA and LoHa files by name instead of playing them wrong.
 - **Training your own LoRA.** An optional tab on the LoRA page. 5–20 songs of one artist
   or style become a LoRA on your card with HOT-Step's trainer and its tuned recipe: LoKr
