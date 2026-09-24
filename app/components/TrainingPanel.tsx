@@ -708,8 +708,8 @@ const TrainStep: React.FC<{ state: TrainingState; dataset: Dataset; job: Prepare
   const [advanced, setAdvanced] = useState(false);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [starting, setStarting] = useState(false);
-  const unsung = dataset.items.filter(item => !item.instrumental && !item.lyrics.trim()).length;
-  const unstyled = dataset.items.filter(item => !item.style.trim()).length;
+  const unsung = dataset.items.filter(item => item.lyrics_state !== 'done').length;
+  const unstyled = dataset.items.filter(item => item.style_state !== 'done').length;
   const total = dataset.items.reduce((sum, item) => sum + item.seconds, 0);
   const preparing = Boolean(job && !job.finished);
   const blocker = !dataset.items.length ? t('trainingNeedSongs') : unsung ? t('trainingNeedLyrics').replace('{count}', String(unsung)) : preparing ? t('trainingWaitPrepare') : state.active ? t('trainingBusy') : null;
@@ -796,7 +796,7 @@ const DatasetList: React.FC<{ state: TrainingState; busy: boolean; onOpen: (id: 
       <input ref={importPicker} type="file" multiple className="hidden" onChange={event => { onImport(Array.from(event.target.files ?? [])); event.target.value = ''; }} />
       <div className="grid gap-3 sm:grid-cols-2">
         {state.datasets.map(dataset => {
-          const ready = dataset.items.filter(item => (item.instrumental || item.lyrics.trim()) && item.style.trim()).length;
+          const ready = dataset.items.filter(item => item.lyrics_state === 'done' && item.style_state === 'done').length;
           const preparing = job && !job.finished && job.dataset === dataset.id;
           const training = state.runs.some(run => run.dataset_id === dataset.id && run.status === 'running');
           const minutes = Math.round(dataset.items.reduce((sum, item) => sum + item.seconds, 0) / 60);

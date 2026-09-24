@@ -118,7 +118,13 @@ pub fn trigger_from(name: &str) -> String {
         .chars()
         .take(12)
         .collect();
-    if trigger.len() < 3 { format!("lora{trigger}") } else { trigger }
+    if trigger.len() >= 3 {
+        return trigger;
+    }
+    // a name in another script, or too short: a stable hash of it keeps the
+    // word rare and different for every name
+    let hash = name.bytes().fold(0x811c_9dc5u32, |hash, byte| (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193));
+    format!("lora{trigger}{:06x}", hash & 0x00ff_ffff)
 }
 
 /// Lyrics laid out in sections carry a heading line such as "[Verse 1]".
@@ -147,7 +153,8 @@ pub fn style_state_of(style: &str) -> StyleState {
 fn settle_states(dataset: &mut serde_json::Value) {
     let named = dataset.get("name").and_then(serde_json::Value::as_str).map(trigger_from);
     if let (Some(trigger), Some(fields)) = (named, dataset.as_object_mut()) {
-        if fields.get("trigger").and_then(serde_json::Value::as_str).is_none_or(|word| word.trim().is_empty()) {
+        let chosen = fields.get("trigger_chosen").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        if !chosen && fields.get("trigger").and_then(serde_json::Value::as_str).is_none_or(|word| word.trim().is_empty()) {
             fields.insert("trigger".into(), trigger.into());
         }
     }
@@ -184,6 +191,10 @@ pub struct Dataset {
     /// A rare word the adapter learns to answer to.
     #[serde(default)]
     pub trigger: String,
+    /// The user set the trigger, an empty one included; a word made from the
+    /// name fills it only while this is false.
+    #[serde(default)]
+    pub trigger_chosen: bool,
     pub created_at: String,
     #[serde(default)]
     pub items: Vec<DatasetItem>,
@@ -610,7 +621,7 @@ impl Training {
         }
         // every dataset has a trigger word from the start; the user can change it
         let trigger = if trigger.trim().is_empty() { trigger_from(name) } else { trigger.trim().to_string() };
-        let dataset = Dataset { format: dataset_format(), id: new_id(), name: name.into(), trigger, created_at: now(), items: Vec::new() };
+        let dataset = Dataset { format: dataset_format(), id: new_id(), name: name.into(), trigger, trigger_chosen: false, created_at: now(), items: Vec::new() };
         self.save_dataset(&dataset)?;
         Ok(dataset)
     }
@@ -623,6 +634,7 @@ impl Training {
         }
         if let Some(trigger) = trigger {
             dataset.trigger = trigger.trim().into();
+            dataset.trigger_chosen = true;
         }
         self.save_dataset(&dataset)?;
         Ok(dataset)
@@ -1386,7 +1398,9 @@ mod tests {
     fn a_trigger_word_is_made_from_the_name() {
         assert_eq!(trigger_from("Нейромонах Феофан"), "nrmnkhffn");
         assert_eq!(trigger_from("Mono Inc."), "mninc");
-        assert_eq!(trigger_from("Ария"), "loraar");
+        assert!(trigger_from("Ария").starts_with("loraar"));
+        assert_ne!(trigger_from("周杰伦"), trigger_from("夜に駆ける"));
+        assert!(trigger_from("周杰伦").starts_with("lora") && trigger_from("周杰伦").len() == 10);
         assert_eq!(trigger_from("Before The Dawn, Black Sun Aeon"), "bfrthdwnblck");
     }
 

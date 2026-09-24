@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
@@ -147,6 +147,14 @@ fn end_stage(shared: &Shared, name: &'static str) {
     update(shared, |status| status.stages.retain(|stage| stage.name != name));
 }
 
+/// Stores what a step made of a song; a song deleted meanwhile fails alone
+/// and the job goes on with the others.
+fn store(training: &training::Training, shared: &Shared, dataset: &str, item: &str, step: &'static str, patch: training::ItemPatch) {
+    if let Err(error) = training.update_item(dataset, item, patch) {
+        fail(shared, item, step, format!("{error:#}"));
+    }
+}
+
 fn fail(shared: &Shared, item: &str, step: &'static str, error: impl std::fmt::Display) {
     let error = error.to_string();
     update(shared, |status| status.failures.push(Failure { item: item.into(), step, error }));
@@ -209,11 +217,12 @@ fn launch(state: &AppState, job: Job) -> anyhow::Result<PrepareStatus> {
         device: None,
         train_after: job.train.is_some(),
     };
+    // kept on disk first: a job that cannot be kept is not started
+    let path = state.training.prepare_job_path();
+    std::fs::write(&path, serde_json::to_vec_pretty(&job)?).with_context(|| format!("write {}", path.display()))?;
     *state.prepare.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(status.clone());
     state.prepare_cancel.store(false, Ordering::Relaxed);
     *state.prepare_train.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = job.train.clone();
-    let path = state.training.prepare_job_path();
-    std::fs::write(&path, serde_json::to_vec_pretty(&job)?).with_context(|| format!("write {}", path.display()))?;
     let background = state.clone();
     tokio::spawn(async move {
         let shared = background.prepare.clone();
@@ -290,7 +299,10 @@ fn has_work(item: &training::DatasetItem, job: &Job, can_listen: bool, passed: P
 
 /// The queue: the songs of the job with a step still ahead, failures out.
 fn settle_pending(training: &training::Training, job: &Job, shared: &Shared, can_listen: bool, passed: Passed) {
-    let Ok(dataset) = training.dataset(&job.dataset) else { return };
+    let dataset = match training.dataset(&job.dataset) {
+        Ok(dataset) => dataset,
+        Err(error) => return fail(shared, "", "queue", format!("{error:#}")),
+    };
     update(shared, |status| {
         let failed: Vec<String> = status.failures.iter().map(|failure| failure.item.clone()).collect();
         status.pending = dataset
@@ -417,13 +429,13 @@ async fn lyrics_branch(state: &AppState, job: &Job, lyric_items: &[&training::Da
                         artist: unnamed.get(&item).cloned(),
                         ..Default::default()
                     };
-                    state.training.update_item(id, &item, found)?;
+                    store(&state.training, &shared, id, &item, "lyrics", found);
                     sheets.push((item.clone(), timed));
                     known.push(item);
                 }
                 Some(lyrics_db::Found::Instrumental { source }) => {
                     let instrumental = training::ItemPatch { lyrics: Some(String::new()), instrumental: Some(true), lyrics_source: Some(source.into()), lyrics_state: Some(LyricsState::Done), ..Default::default() };
-                    state.training.update_item(id, &item, instrumental)?;
+                    store(&state.training, &shared, id, &item, "lyrics", instrumental);
                     known.push(item);
                 }
                 None => {}
@@ -609,9 +621,19 @@ async fn listen_branch(state: &AppState, job: &Job, style_items: &[&training::Da
             })
             .collect();
         drop(decoded_tx);
+        // set when the measurer ends, by panic too, so no song waits on a
+        // measurement that will never come
+        let measured_all = Arc::new(AtomicBool::new(false));
         {
-            let (facts, facts_dir, facts_shared) = (facts.clone(), facts_dir.clone(), shared.clone());
+            let (facts, facts_dir, facts_shared, finished) = (facts.clone(), facts_dir.clone(), shared.clone(), measured_all.clone());
             measuring.push(std::thread::spawn(move || {
+                struct Finished(Arc<AtomicBool>);
+                impl Drop for Finished {
+                    fn drop(&mut self) {
+                        self.0.store(true, Ordering::Relaxed);
+                    }
+                }
+                let _finished = Finished(finished);
                 let mut measurer = audio_facts::Measurer::load(&facts_dir, true).map_err(|error| format!("{error:#}"));
                 if matches!(&measurer, Ok(measurer) if !measurer.on_gpu) {
                     update(&facts_shared, |status| status.notices.push("facts_on_cpu"));
@@ -626,7 +648,7 @@ async fn listen_branch(state: &AppState, job: &Job, style_items: &[&training::Da
                 }
             }));
         }
-        let (task_shared, task_cancel, task_facts) = (shared.clone(), cancel.clone(), facts.clone());
+        let (task_shared, task_cancel, task_facts, task_measured_all) = (shared.clone(), cancel.clone(), facts.clone(), measured_all.clone());
         let (training, dataset_id, task_ids, task_job) = (state.training.clone(), id.to_string(), ids.clone(), job.clone());
         let libraries = crate::engine_bundle_root();
         let log = tokio::task::spawn_blocking(move || {
@@ -638,6 +660,9 @@ async fn listen_branch(state: &AppState, job: &Job, style_items: &[&training::Da
                     }
                     if task_cancel.load(Ordering::Relaxed) {
                         return;
+                    }
+                    if task_measured_all.load(Ordering::Relaxed) && task_facts.lock().unwrap_or_else(|poisoned| poisoned.into_inner())[index].is_none() {
+                        break Err("the measurer stopped before this song".to_string());
                     }
                     std::thread::sleep(std::time::Duration::from_millis(100));
                 };
@@ -697,7 +722,7 @@ async fn write_lyrics(state: &AppState, job: &Job, timed: &HashMap<String, Strin
         match lay_out_lyrics(state, text, target).await {
             Ok(lyrics) => {
                 let done = training::ItemPatch { lyrics: Some(lyrics), instrumental: Some(false), lyrics_state: Some(LyricsState::Done), ..Default::default() };
-                state.training.update_item(&job.dataset, &item.id, done)?;
+                store(&state.training, &shared, &job.dataset, &item.id, "lyrics", done);
             }
             Err(error) => fail(&shared, &item.id, "lyrics", error),
         }
@@ -731,7 +756,7 @@ async fn write_styles(state: &AppState, job: &Job, can_listen: bool) -> anyhow::
         match outcome {
             Ok(style) => {
                 let done = training::ItemPatch { style: Some(style), style_state: Some(StyleState::Done), heard: Some(None), ..Default::default() };
-                state.training.update_item(&job.dataset, &song.id, done)?;
+                store(&state.training, &shared, &job.dataset, &song.id, "style", done);
             }
             Err(error) => fail(&shared, &song.id, "style", error),
         }
