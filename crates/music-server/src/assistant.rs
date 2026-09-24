@@ -38,7 +38,7 @@ Size the song to its intended length: about 2 to 3 sung words per second, a vers
 
 /// How a recognised recording becomes a lyric sheet: the words stay the
 /// singer's, only the layout is the assistant's.
-const TRANSCRIPT_RULES: &str = r#"The transcript comes from speech recognition run on the vocals of a finished recording: one line per sung phrase, each after its start time, with the recogniser's mistakes. Write the lyric sheet of that recording exactly as it is sung. Keep the singer's words, in their order and their language; correct a word only where the recognition is plainly wrong and the right word is certain from the line; never invent, rewrite, translate or complete lines, and drop fragments the recogniser picked up in instrumental passages. Leave the times out. Organise the lines into sections: a block of lines that returns is the [Chorus], written out every time it is sung; the blocks between choruses are verses numbered in order ([Verse 1], [Verse 2], [Verse 3]); a block sung once that is neither is the [Bridge]; a block that leads into the chorus every time is the [Pre-Chorus]; lines before the first verse are the [Intro] and after the last chorus the [Outro]. Every section starts with its tag in square brackets, in English, on a line of its own, its lines follow below it, and a blank line separates sections. Use no other tags and no section names in words."#;
+const TRANSCRIPT_RULES: &str = r#"The transcript comes from speech recognition run on the vocals of a finished recording: one line per sung phrase, each after its start time, with the recogniser's mistakes. Write the lyric sheet of that recording exactly as it is sung. Keep the singer's words, in their order, their language and their alphabet - Cyrillic stays Cyrillic, never transliterate; correct a word only where the recognition is plainly wrong and the right word is certain from the line; never invent, rewrite, translate or complete lines, and drop fragments the recogniser picked up in instrumental passages. Leave the times out. Organise the lines into sections: a block of lines that returns is the [Chorus], written out every time it is sung; the blocks between choruses are verses numbered in order ([Verse 1], [Verse 2], [Verse 3]); a block sung once that is neither is the [Bridge]; a block that leads into the chorus every time is the [Pre-Chorus]; lines before the first verse are the [Intro] and after the last chorus the [Outro]. Every section starts with its tag in square brackets, in English, on a line of its own, its lines follow below it, and a blank line separates sections. Use no other tags and no section names in words."#;
 
 const DICTION_RULE: &str = r#"
 Diction: the model sings the letters it is given and there is no pronunciation channel. Write every word in its ordinary spelling - in Russian write ё as ё, never е - and choose words whose stress falls naturally on the long notes of the line."#;
@@ -305,6 +305,28 @@ pub fn draft_schema(required: &[&str]) -> Value {
         "required": required,
         "additionalProperties": false,
     })
+}
+
+/// Sampling fitted to the task: laying out a transcript is copying, not
+/// writing, so it runs cold whatever the model publishes.
+pub fn fit_to_task(mut body: Value, target: AssistTarget) -> Value {
+    if target == AssistTarget::Transcript {
+        body["temperature"] = Value::from(0.2);
+    }
+    body
+}
+
+/// The share of letters in a text that are Cyrillic, to tell a lyric sheet
+/// that kept its alphabet from one the model transliterated.
+pub fn cyrillic_share(text: &str) -> f64 {
+    let (mut cyrillic, mut letters) = (0usize, 0usize);
+    for c in text.chars().filter(|c| c.is_alphabetic()) {
+        letters += 1;
+        if ('\u{0400}'..='\u{04FF}').contains(&c) {
+            cyrillic += 1;
+        }
+    }
+    if letters == 0 { 0.0 } else { cyrillic as f64 / letters as f64 }
 }
 
 /// The request as it goes out, with the model's own sampling when it has any.

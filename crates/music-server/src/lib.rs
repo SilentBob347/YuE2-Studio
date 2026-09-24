@@ -1900,7 +1900,20 @@ async fn autofill_training_item(
         let _ = std::fs::remove_file(&heard);
     }
     let words = words.map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("recognition failed: {error:#}")))?;
-    let lines = lyrics_sync::group_words(&words);
+    // Punctuation the recogniser hangs at the start of a line belongs to the
+    // line before, and an unknown-token marker is not a word.
+    let mut lines: Vec<(f64, String)> = Vec::new();
+    for (time, text) in lyrics_sync::group_words(&words) {
+        let text = text.replace("<unk>", "");
+        let body = text.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | '!' | '?' | ';' | ':'));
+        let lead = text.trim_start()[..text.trim_start().len() - body.len()].trim();
+        if let (false, Some(last)) = (lead.is_empty(), lines.last_mut()) {
+            last.1.push_str(lead);
+        }
+        if !body.trim().is_empty() {
+            lines.push((time, body.trim().to_string()));
+        }
+    }
     if lines.is_empty() {
         return Err(api_error(StatusCode::BAD_GATEWAY, "no words were recognised in this song; mark it instrumental or write the lyrics".into()));
     }
@@ -1919,8 +1932,21 @@ async fn autofill_training_item(
         abc: String::new(),
         duration_seconds: 0.0,
     };
-    let Json(draft) = assistant_write(State(state.clone()), Json(request)).await?;
-    let lyrics = draft.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string();
+    // A small model can answer a Cyrillic transcript in Latin letters; that is
+    // not the song, so it is asked once more and then refused, never stored.
+    let heard_cyrillic = assistant::cyrillic_share(&request.description) > 0.5;
+    let mut lyrics = String::new();
+    for _ in 0..2 {
+        let Json(draft) = assistant_write(State(state.clone()), Json(request.clone())).await?;
+        lyrics = draft.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string();
+        if !heard_cyrillic || assistant::cyrillic_share(&lyrics) > 0.5 {
+            break;
+        }
+        lyrics.clear();
+    }
+    if lyrics.is_empty() {
+        return Err(api_error(StatusCode::BAD_GATEWAY, "the assistant rewrote the lyrics in Latin letters twice; choose a larger assistant model or write the lyrics".into()));
+    }
     state
         .training
         .update_item(&id, &item, training::ItemPatch { lyrics: Some(lyrics), instrumental: Some(false), ..Default::default() })
@@ -4143,7 +4169,7 @@ async fn assistant_write(
             };
             let sent = reqwest::Client::new()
                 .post(format!("{}/chat/completions", base.trim_end_matches('/')))
-                .json(&assistant::chat_body_constrained(
+                .json(&assistant::fit_to_task(assistant::chat_body_constrained(
                     &model,
                     &system,
                     &user,
@@ -4151,7 +4177,7 @@ async fn assistant_write(
                     None,
                     matches!(config.provider, AssistantProvider::Managed | AssistantProvider::Local)
                         .then(|| assistant::draft_schema(&required)),
-                ))
+                ), request.target))
                 .timeout(std::time::Duration::from_secs(180))
                 .send()
                 .await
@@ -4190,12 +4216,15 @@ async fn assistant_write(
                     let effort = entry
                         .and_then(|entry| entry.reasoning.as_ref())
                         .and_then(|reasoning| reasoning.effort_for(config.reasoning_effort.as_deref()));
-                    assistant::chat_body_full(
-                        &model,
-                        &system,
-                        &user,
-                        effort.as_deref(),
-                        entry.map(|entry| serde_json::to_value(&entry.defaults).unwrap_or(Value::Null)).as_ref(),
+                    assistant::fit_to_task(
+                        assistant::chat_body_full(
+                            &model,
+                            &system,
+                            &user,
+                            effort.as_deref(),
+                            entry.map(|entry| serde_json::to_value(&entry.defaults).unwrap_or(Value::Null)).as_ref(),
+                        ),
+                        request.target,
                     )
                 },
             })
