@@ -452,6 +452,9 @@ export function AdaptersPage(): React.ReactElement {
   const offered = state?.catalog ?? [];
   const chosen = offered.filter(entry => selected.includes(entry.id) && !entry.installed);
   const toggle = (id: string) => setSelected(current => (current.includes(id) ? current.filter(value => value !== id) : [...current, id]));
+  const missing = offered.filter(entry => !entry.installed);
+  const allChosen = missing.length > 0 && missing.every(entry => selected.includes(entry.id));
+  const toggleAll = () => setSelected(allChosen ? [] : missing.map(entry => entry.id));
 
   const downloadSelected = async () => {
     setStarting(true);
@@ -578,7 +581,11 @@ export function AdaptersPage(): React.ReactElement {
               ))}
             </div>
             {!downloading && (
-              <div className="sticky bottom-0 -mx-1 bg-white/90 px-1 py-3 backdrop-blur dark:bg-suno/90">
+              <div className="sticky bottom-0 -mx-1 flex flex-wrap items-center gap-2 bg-white/90 px-1 py-3 backdrop-blur dark:bg-suno/90">
+                <button type="button" role="checkbox" aria-checked={allChosen} onClick={toggleAll} disabled={missing.length === 0} className={`${OUTLINE} ${allChosen ? 'border-pink-400 text-pink-600 dark:border-pink-500/60 dark:text-pink-300' : ''}`}>
+                  {allChosen ? <CheckSquare size={13} /> : <Square size={13} />}
+                  {t('adaptersSelectAll')}{missing.length > 0 ? ` · ${missing.length}` : ''}
+                </button>
                 <button type="button" onClick={() => void downloadSelected()} disabled={starting || chosen.length === 0} className={PRIMARY}>
                   {starting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                   {t('adaptersDownloadSelected')}{chosen.length > 0 ? ` · ${chosen.length} · ${megabytes(chosen.reduce((sum, entry) => sum + entry.bytes, 0))}` : ''}
