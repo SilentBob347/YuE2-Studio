@@ -6,5 +6,6 @@
   "target": "ace-train",
   "shipped_as": "music-train.exe",
   "release_tag": "music-train-8a5e42c4",
-  "asset": "music-train-cuda-windows-x64.zip"
+  "asset": "music-train-cuda-windows-x64.zip",
+  "bytes": 111747905
 }

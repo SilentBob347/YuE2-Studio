@@ -155,6 +155,8 @@ struct TrainerSource {
     shipped_as: String,
     release_tag: String,
     asset: String,
+    /// Size of the released archive.
+    bytes: u64,
 }
 
 fn trainer_source() -> &'static TrainerSource {
@@ -178,7 +180,7 @@ fn pack() -> &'static [Asset] {
             kind: AssetKind::Runtime,
             url: leak(format!("https://github.com/timoncool/YuE2-Studio/releases/download/{}/{}", source.release_tag, source.asset)),
             relative_path: leak(source.asset.clone()),
-            bytes: 60_000_000,
+            bytes: source.bytes,
             unzip_into: Some(TRAINER_FOLDER),
             marker: leak(source.shipped_as.clone()),
             pick: &[],
