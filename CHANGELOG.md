@@ -3,6 +3,33 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-24 — 1.1.2
+
+### Fixed
+
+- **Runs on every NVIDIA card from the GTX 900 series on.** A GTX 1660 Super stopped at the
+  first song with "PTX was compiled with an unsupported toolchain"
+  ([#2](https://github.com/timoncool/YuE2-Studio/issues/2)): the engine carried only PTX for
+  Turing, which a driver older than the CUDA toolkit cannot compile. The studio now ships two
+  CUDA builds of the engine with compiled code for every architecture, and picks the one the
+  card and its driver run:
+  - CUDA 13 for Turing and newer — GTX 16, RTX 20–50, Tesla T4, A100, RTX A-series, L4/L40,
+    H100 — with driver 580 or newer;
+  - CUDA 12 for Maxwell, Pascal and Volta — GTX 900/1000, Titan X/Xp/V, Tesla M40, P40, P100,
+    V100 — and for any card on a driver from 525 to 579.
+
+  The cuBLAS of that build is downloaded once, as before.
+- **A 6 GB card has room for the song.** The engine reserved its cache for the model's full
+  context whatever the song's length: 5.4 GB for a song under guidance, more than a 6 GB card
+  holds beside the model. The cache is now sized to the song — about 1.5 GB for 130 seconds —
+  and the audio comes out the same to the byte.
+- **Cards before Ampere** (Maxwell, Pascal, Volta, Turing) get the engine's FP16 clamp on
+  their own: their tensor cores accumulate in FP16, which can overflow into silence.
+
+### Engine
+
+- yue2.cpp e4f7a64: the cache sized per stage, and the CUDA backend chosen by the studio.
+
 ## 2026-09-24 — 1.1.1
 
 ### Fixed

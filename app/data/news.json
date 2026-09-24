@@ -1,5 +1,27 @@
 [
   {
+    "id": "yue2-studio-1-1-2",
+    "date": "2026-09-24",
+    "title": {
+      "en": "YuE2 Studio 1.1.2",
+      "ru": "YuE2 Studio 1.1.2",
+      "zh": "YuE2 Studio 1.1.2",
+      "ja": "YuE2 Studio 1.1.2",
+      "ko": "YuE2 Studio 1.1.2"
+    },
+    "body": {
+      "en": "YuE2 Studio now runs on every NVIDIA card from the GTX 900 series on. It ships two CUDA builds of the engine with compiled code for every architecture and picks the one your card and driver run: CUDA 13 for Turing and newer (GTX 16, RTX 20–50, T4, A100, RTX A-series, L4/L40, H100), CUDA 12 for Maxwell, Pascal and Volta (GTX 900/1000, Titan, Tesla M40/P40/P100/V100) and for older drivers. The error \"PTX was compiled with an unsupported toolchain\" is gone. The engine's cache is now sized to the song, about 1.5 GB for 130 seconds instead of 5.4 GB, so a 6 GB card has room; the audio is the same to the byte.",
+      "ru": "YuE2 Studio теперь работает на любой NVIDIA начиная с GTX 900. В студии две сборки движка с готовым кодом под каждую архитектуру, и она сама выбирает ту, что тянут карта и драйвер: CUDA 13 для Turing и новее (GTX 16, RTX 20–50, T4, A100, RTX A-серия, L4/L40, H100), CUDA 12 для Maxwell, Pascal и Volta (GTX 900/1000, Titan, Tesla M40/P40/P100/V100) и для старых драйверов. Ошибки «PTX was compiled with an unsupported toolchain» больше нет. Кэш движка теперь по длине песни, около 1.5 ГБ на 130 секунд вместо 5.4 ГБ, так что карте на 6 ГБ хватает места; звук тот же до байта.",
+      "zh": "YuE2 Studio 现在可在 GTX 900 系列及以后的所有 NVIDIA 显卡上运行。工作室内置两套 CUDA 引擎，为每种架构都带有编译好的代码，并自动选择显卡和驱动能运行的那一套：CUDA 13 用于 Turing 及更新架构（GTX 16、RTX 20–50、T4、A100、RTX A 系列、L4/L40、H100），CUDA 12 用于 Maxwell、Pascal 和 Volta（GTX 900/1000、Titan、Tesla M40/P40/P100/V100）以及较旧的驱动。“PTX was compiled with an unsupported toolchain”错误不再出现。引擎缓存现在按歌曲长度分配，130 秒约 1.5 GB，而不是 5.4 GB，6 GB 显卡也够用；音频逐字节一致。",
+      "ja": "YuE2 Studio が GTX 900 シリーズ以降のすべての NVIDIA カードで動くようになりました。各アーキテクチャ向けのコンパイル済みコードを持つ 2 つの CUDA ビルドを同梱し、カードとドライバーに合う方を自動で選びます。CUDA 13 は Turing 以降（GTX 16、RTX 20–50、T4、A100、RTX A シリーズ、L4/L40、H100）、CUDA 12 は Maxwell・Pascal・Volta（GTX 900/1000、Titan、Tesla M40/P40/P100/V100）と古いドライバー向けです。「PTX was compiled with an unsupported toolchain」エラーはなくなりました。エンジンのキャッシュは曲の長さに合わせて確保され、130 秒で 5.4 GB ではなく約 1.5 GB になったため、6 GB のカードでも余裕があります。音声はバイト単位で同じです。",
+      "ko": "YuE2 Studio가 이제 GTX 900 시리즈 이후의 모든 NVIDIA 카드에서 작동합니다. 아키텍처마다 컴파일된 코드를 담은 두 가지 CUDA 엔진 빌드를 포함하고, 카드와 드라이버가 실행할 수 있는 쪽을 자동으로 고릅니다. CUDA 13은 Turing 이상(GTX 16, RTX 20–50, T4, A100, RTX A 시리즈, L4/L40, H100), CUDA 12는 Maxwell·Pascal·Volta(GTX 900/1000, Titan, Tesla M40/P40/P100/V100)와 오래된 드라이버용입니다. \"PTX was compiled with an unsupported toolchain\" 오류가 더 이상 나지 않습니다. 엔진 캐시는 이제 곡 길이에 맞춰 잡혀 130초에 5.4 GB 대신 약 1.5 GB를 쓰므로 6 GB 카드에도 여유가 있습니다. 오디오는 바이트 단위로 같습니다."
+    },
+    "tags": [
+      "YuE2",
+      "1.1.2"
+    ]
+  },
+  {
     "id": "yue2-studio-1-1-1",
     "date": "2026-09-24",
     "title": {
