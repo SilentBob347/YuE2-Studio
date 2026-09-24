@@ -49,7 +49,7 @@ export interface TrainingRun {
   status: RunStatus;
   stage: string | null;
   stages: string[];
-  steps: { step: number; loss: number; step_ms?: number | null }[];
+  steps: { step: number; loss: number; ar_kl?: number | null; step_ms?: number | null }[];
   error?: string | null;
   created_at: string;
   finished_at?: string | null;

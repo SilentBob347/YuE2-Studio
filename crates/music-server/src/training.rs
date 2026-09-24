@@ -119,12 +119,14 @@ pub struct TrainingStepRecord {
     pub step: u32,
     pub loss: f64,
     #[serde(default)]
+    pub ar_kl: Option<f64>,
+    #[serde(default)]
     pub step_ms: Option<f64>,
 }
 
 impl From<TrainingStep> for TrainingStepRecord {
     fn from(step: TrainingStep) -> Self {
-        Self { step: step.step, loss: step.loss, step_ms: step.step_ms }
+        Self { step: step.step, loss: step.loss, ar_kl: Some(step.ar_kl), step_ms: step.step_ms }
     }
 }
 

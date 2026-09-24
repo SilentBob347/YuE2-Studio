@@ -201,6 +201,9 @@ pub struct TrainingStep {
     /// The combined loss HOT-Step charts: AR cross-entropy, 0.2 x AR KL and
     /// the NAR flow error.
     pub loss: f64,
+    /// How far the composition half has moved from the base model; it keeps
+    /// climbing once the adapter starts memorising the dataset.
+    pub ar_kl: f64,
     pub step_ms: Option<f64>,
 }
 
@@ -214,6 +217,7 @@ pub fn parse_training_step(line: &str) -> Option<TrainingStep> {
     Some(TrainingStep {
         step: value.get("step")?.as_u64()? as u32,
         loss: number("ar_ce")? + 0.2 * number("ar_kl")? + number("nar_mse")?,
+        ar_kl: number("ar_kl")?,
         step_ms: number("step_ms"),
     })
 }
@@ -250,6 +254,7 @@ mod tests {
         let step = parse_training_step(r#"{"stage":"joint","step":12,"ar_ce":2.0,"ar_kl":0.5,"nar_mse":0.3,"step_ms":800}"#).unwrap();
         assert_eq!(step.step, 12);
         assert!((step.loss - 2.4).abs() < 1e-9);
+        assert_eq!(step.ar_kl, 0.5);
         assert_eq!(step.step_ms, Some(800.0));
         assert!(parse_training_step(r#"{"stage":"AR transformer backward","step":3}"#).is_none());
         assert!(parse_training_step("[YuE2] Unloaded").is_none());

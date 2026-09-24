@@ -251,7 +251,7 @@ const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (mes
       {last && (
         <>
           <div className="mt-3 flex items-baseline justify-between text-[11px] tabular-nums text-zinc-600 dark:text-zinc-300">
-            <span>{t('trainingStep')} {last.step} / {run.recipe.steps} · {t('trainingLoss')} {last.loss.toFixed(3)}</span>
+            <span>{t('trainingStep')} {last.step} / {run.recipe.steps} · {t('trainingLoss')} {last.loss.toFixed(3)}{typeof last.ar_kl === 'number' ? ` · KL ${last.ar_kl.toFixed(2)}` : ''}</span>
             {running && left > 0 && <span>{clock(left)} {t('trainingLeft')}</span>}
           </div>
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-white/10">
@@ -410,7 +410,7 @@ export const TrainingPanel: React.FC = () => {
       const rate = Number(learningRate);
       await startRun(dataset.id, dataset.name, {
         steps,
-        save_every: Math.max(1, Math.round(steps / 3)),
+        save_every: Math.max(1, Math.round(steps / 6)),
         seed,
         rank,
         learning_rate: learningRate.trim() && Number.isFinite(rate) && rate > 0 ? rate : null,
