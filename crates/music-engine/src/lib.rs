@@ -3,3 +3,4 @@
 
 pub mod process_group;
 pub mod yue_server;
+pub mod yue_train;

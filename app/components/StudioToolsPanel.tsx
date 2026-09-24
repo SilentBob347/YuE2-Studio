@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, Download, FileAudio, Loader2, Music, Play, RefreshCw, Scissors, Search, SlidersHorizontal } from 'lucide-react';
+import { Check, Copy, Download, FileAudio, Loader2, Music, Play, RefreshCw, Scissors, Search, SlidersHorizontal, Wand2 } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { DevicePicker } from './DevicePicker';
 import { transcribeWithNativeOpenRouter } from '../services/nativeOpenRouter';
 import { apiUrl } from '../services/apiBase';
 import { openExternal } from '../services/externalLinks';
 import { StemPlayer } from './StemPlayer';
+import { mapNativeLibrarySong } from '../services/nativeLibrary';
 
 /**
  * Studio tools.
@@ -430,6 +431,28 @@ export function StudioToolsPanel({ initialSongId }: { initialSongId?: string | n
               </button>
             ))}
           </div>
+        </section>
+
+        {/* Processing: the same window the track menu opens, on the track chosen above. */}
+        <section className={CARD}>
+          <div className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white">
+            <Wand2 size={17} className="text-pink-500" /> {t('processTitle')}
+          </div>
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{t('processHint')}</p>
+          <button
+            type="button"
+            onClick={() => {
+              if (!songId) return;
+              void fetch(`/v1/library/songs/${encodeURIComponent(songId)}`)
+                .then(response => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`))))
+                .then(body => window.dispatchEvent(new CustomEvent('yue:process-song', { detail: mapNativeLibrarySong(body) })))
+                .catch(problem => setError(problem instanceof Error ? problem.message : String(problem)));
+            }}
+            disabled={!songId}
+            className="mt-3 inline-flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-xs font-semibold text-zinc-700 hover:border-pink-400 hover:text-pink-600 disabled:opacity-50 dark:border-white/15 dark:text-zinc-200"
+          >
+            <Wand2 size={13} /> {t('processMenu')}
+          </button>
         </section>
 
         {/* Transcription. */}

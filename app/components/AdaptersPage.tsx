@@ -3,6 +3,7 @@ import { AlertTriangle, Check, CheckSquare, ChevronDown, Download, ExternalLink,
 import { useI18n } from '../context/I18nContext';
 import { openExternal } from '../services/externalLinks';
 import { ConfirmDialog } from './ConfirmDialog';
+import { TrainingPanel } from './TrainingPanel';
 import {
   AdapterSlot,
   AdapterState,
@@ -37,9 +38,9 @@ const OUTLINE =
   'inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:border-pink-400 hover:text-pink-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-zinc-200';
 const PRIMARY =
   'inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-orange-500 to-pink-600 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50';
-const KIND_ORDER = ['style', 'artist', 'composition', 'sound', 'slider', 'other'];
+const KIND_ORDER = ['trained', 'style', 'artist', 'composition', 'sound', 'slider', 'other'];
 
-type Tab = 'installed' | 'catalog' | 'hub';
+type Tab = 'installed' | 'catalog' | 'hub' | 'training';
 
 const byKind = <T extends { kind: string }>(list: T[]) =>
   [...list].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
@@ -476,7 +477,7 @@ export function AdaptersPage(): React.ReactElement {
         </div>
 
         <div role="tablist" className="flex rounded-lg bg-zinc-100 p-1 dark:bg-white/5">
-          {(['installed', 'catalog', 'hub'] as Tab[]).map(value => (
+          {(['installed', 'catalog', 'hub', 'training'] as Tab[]).map(value => (
             <button
               key={value}
               type="button"
@@ -485,7 +486,7 @@ export function AdaptersPage(): React.ReactElement {
               onClick={() => setTab(value)}
               className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${tab === value ? 'bg-white text-black shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'}`}
             >
-              {value === 'installed' ? `${t('adaptersInstalledTab')} · ${state?.installed.length ?? 0}` : value === 'catalog' ? t('adaptersCatalogTab') : t('adaptersHubTab')}
+              {value === 'installed' ? `${t('adaptersInstalledTab')} · ${state?.installed.length ?? 0}` : value === 'catalog' ? t('adaptersCatalogTab') : value === 'hub' ? t('adaptersHubTab') : t('trainingNav')}
             </button>
           ))}
         </div>
@@ -586,6 +587,8 @@ export function AdaptersPage(): React.ReactElement {
             )}
           </>
         )}
+
+        {tab === 'training' && <TrainingPanel />}
 
         {tab === 'hub' && <HubPanel downloading={downloading} onStarted={() => void refresh()} onError={setError} />}
 

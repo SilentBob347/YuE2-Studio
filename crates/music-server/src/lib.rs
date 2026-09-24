@@ -1,5 +1,6 @@
 mod adapters;
 mod processing;
+mod training;
 mod auto_title;
 mod tagging;
 mod cover_prompt;
@@ -82,6 +83,8 @@ struct AppState {
     adapters: Arc<adapters::AdapterLibrary>,
     /// The processing run in progress or the last one, with its preview.
     processing_run: Arc<RwLock<Option<processing::ProcessRun>>>,
+    /// Adapter training: its optional weights, datasets and runs.
+    training: Arc<training::Training>,
 }
 
 #[derive(Clone)]
@@ -577,6 +580,10 @@ pub async fn serve() -> anyhow::Result<()> {
             PRIMARY_MUSIC_ENGINE_ID,
         )),
         processing_run: Arc::new(RwLock::new(None)),
+        training: Arc::new(training::Training::new(
+            &studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")),
+            PRIMARY_MUSIC_ENGINE_ID,
+        )),
         selected_profile_id: Arc::new(RwLock::new(selected_profile_id)),
         selected_component_ids: Arc::new(RwLock::new(selected_component_ids)),
         settings_path,
@@ -597,6 +604,7 @@ pub async fn serve() -> anyhow::Result<()> {
         )),
     };
     processing::clear_workspace(state.library.media_dir());
+    state.training.recover();
 
     let app = Router::new()
         .route("/health", get(health))
@@ -653,6 +661,19 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/processing/keep", post(keep_processing))
         .route("/v1/processing/discard", post(discard_processing))
         .route("/v1/processing/reference", post(upload_processing_reference))
+        .route("/v1/training", get(read_training))
+        .route("/v1/training/pack/install", post(install_training_pack))
+        .route("/v1/training/pack/cancel", post(cancel_training_pack))
+        .route("/v1/training/datasets", post(create_training_dataset))
+        .route("/v1/training/datasets/{id}", axum::routing::patch(update_training_dataset).delete(delete_training_dataset))
+        .route("/v1/training/datasets/{id}/songs", post(add_training_songs))
+        .route("/v1/training/datasets/{id}/files", post(upload_training_files))
+        .route("/v1/training/datasets/{id}/items/{item}", axum::routing::patch(update_training_item).delete(delete_training_item))
+        .route("/v1/training/datasets/{id}/items/{item}/autofill", post(autofill_training_item))
+        .route("/v1/training/runs", post(start_training))
+        .route("/v1/training/runs/{id}/cancel", post(cancel_training))
+        .route("/v1/training/runs/{id}", axum::routing::delete(delete_training_run))
+        .route("/v1/training/runs/{id}/checkpoints/{step}/install", post(install_training_checkpoint))
         .route("/v1/library/songs/{id}/stems", get(read_stems).post(start_separation))
         .route("/v1/library/songs/{id}/stems/{stem}", get(read_stem_audio))
         .route("/v1/library/songs/{id}/cover/auto", post(draw_cover_now))
@@ -1584,6 +1605,337 @@ async fn remove_song_version(
         }
     }
     Ok(Json(song))
+}
+
+/// Where the trainer lives: beside the engine in a packaged studio, or where
+/// `YUE_TRAIN_BIN` points in a developer build.
+fn trainer_executable() -> PathBuf {
+    env::var_os("YUE_TRAIN_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| engine_bundle_root().parent().map(|root| root.join("music-train")).unwrap_or_else(|| PathBuf::from("music-train")).join("music-train.exe"))
+}
+
+fn training_error(error: anyhow::Error) -> (StatusCode, Json<ApiError>) {
+    api_error(StatusCode::BAD_REQUEST, format!("{error:#}"))
+}
+
+/// The training page: what is installed, the datasets, the runs, and what the
+/// run in progress is doing.
+async fn read_training(State(state): State<AppState>) -> Json<Value> {
+    let training = &state.training;
+    let active = training.active_run().await;
+    let runs: Vec<Value> = training
+        .runs()
+        .into_iter()
+        .map(|run| {
+            let checkpoints = training.checkpoints(&run.id);
+            let mut value = serde_json::to_value(&run).unwrap_or(Value::Null);
+            value["checkpoints"] = serde_json::json!(checkpoints.iter().map(|checkpoint| checkpoint.step).collect::<Vec<_>>());
+            if active.as_deref() == Some(run.id.as_str()) || run.status == training::RunStatus::Failed {
+                value["log"] = serde_json::json!(training.log_tail(&run.id, 12));
+            }
+            value
+        })
+        .collect();
+    let trainer = trainer_executable();
+    Json(serde_json::json!({
+        "pack": training.pack_status(),
+        "pack_ready": training.pack_ready(),
+        "download": training.downloader().active_for(training::SCOPE).await,
+        "trainer_installed": trainer.is_file(),
+        "datasets": training.datasets(),
+        "runs": runs,
+        "active": active,
+    }))
+}
+
+async fn install_training_pack(State(state): State<AppState>) -> Json<Value> {
+    let training = state.training.clone();
+    tokio::spawn(async move {
+        if let Err(error) = training.install_pack().await {
+            eprintln!("[ERROR] training pack: {error:#}");
+        }
+    });
+    Json(serde_json::json!({ "started": true }))
+}
+
+async fn cancel_training_pack(State(state): State<AppState>) -> Json<Value> {
+    state.training.downloader().cancel();
+    Json(serde_json::json!({ "cancelled": true }))
+}
+
+#[derive(Debug, Deserialize)]
+struct DatasetInput {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    trigger: Option<String>,
+}
+
+async fn create_training_dataset(State(state): State<AppState>, Json(input): Json<DatasetInput>) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    state.training.create_dataset(input.name.as_deref().unwrap_or_default(), input.trigger.as_deref().unwrap_or_default()).map(Json).map_err(training_error)
+}
+
+async fn update_training_dataset(State(state): State<AppState>, Path(id): Path<String>, Json(input): Json<DatasetInput>) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    state.training.update_dataset(&id, input.name, input.trigger).map(Json).map_err(training_error)
+}
+
+async fn delete_training_dataset(State(state): State<AppState>, Path(id): Path<String>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    state.training.remove_dataset(&id).map_err(training_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct DatasetSongs {
+    song_ids: Vec<String>,
+}
+
+/// Adds library songs with their style and lyrics; decoding and resampling is
+/// real work, so it runs off the request threads.
+async fn add_training_songs(State(state): State<AppState>, Path(id): Path<String>, Json(input): Json<DatasetSongs>) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    let mut sources = Vec::new();
+    for song_id in &input.song_ids {
+        let song = state
+            .library
+            .get_song(song_id)
+            .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+            .ok_or_else(|| api_error(StatusCode::NOT_FOUND, format!("song {song_id} is not in the library")))?;
+        let audio = state.library.media_path_for_song(&song).ok_or_else(|| api_error(StatusCode::BAD_REQUEST, format!("{} has no stored audio", song.title)))?;
+        sources.push((audio, song.title, song.caption, song.lyrics, song.id));
+    }
+    let training = state.training.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut dataset = training.dataset(&id)?;
+        for (audio, title, style, lyrics, song_id) in sources {
+            dataset = training.add_item(&id, &audio, &title, &style, &lyrics, &format!("song:{song_id}"))?;
+        }
+        Ok::<_, anyhow::Error>(dataset)
+    })
+    .await
+    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+    .map(Json)
+    .map_err(training_error)
+}
+
+/// Adds audio files from the user's disk; a same-named `.txt` or `.lrc` part
+/// is taken as that song's lyrics.
+async fn upload_training_files(State(state): State<AppState>, Path(id): Path<String>, mut multipart: Multipart) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    let folder = std::env::temp_dir().join(format!("training-upload-{}", uuid::Uuid::now_v7().simple()));
+    std::fs::create_dir_all(&folder).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let mut audio = Vec::new();
+    let mut texts = std::collections::HashMap::new();
+    while let Some(field) = multipart.next_field().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read the upload: {e}")))? {
+        let Some(name) = field.file_name().map(|name| std::path::Path::new(name).file_name().and_then(|n| n.to_str()).unwrap_or("song").to_owned()) else { continue };
+        let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))?;
+        let lower = name.to_ascii_lowercase();
+        let stem = std::path::Path::new(&name).file_stem().and_then(|stem| stem.to_str()).unwrap_or(&name).to_owned();
+        if lower.ends_with(".txt") || lower.ends_with(".lrc") {
+            texts.insert(stem, String::from_utf8_lossy(&bytes).into_owned());
+        } else if [".wav", ".mp3", ".flac", ".ogg", ".m4a"].iter().any(|extension| lower.ends_with(extension)) {
+            let path = folder.join(&name);
+            std::fs::write(&path, &bytes).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            audio.push((path, stem, name));
+        }
+    }
+    if audio.is_empty() {
+        let _ = std::fs::remove_dir_all(&folder);
+        return Err(api_error(StatusCode::BAD_REQUEST, "no audio in the upload: WAV, MP3, FLAC, OGG or M4A".into()));
+    }
+    let training = state.training.clone();
+    let outcome = tokio::task::spawn_blocking(move || {
+        let mut dataset = training.dataset(&id)?;
+        for (path, stem, name) in audio {
+            let lyrics = texts.get(&stem).map(|text| training::plain_lyrics(text)).unwrap_or_default();
+            dataset = training.add_item(&id, &path, &stem, "", &lyrics, &format!("file:{name}"))?;
+        }
+        Ok::<_, anyhow::Error>(dataset)
+    })
+    .await;
+    let _ = std::fs::remove_dir_all(&folder);
+    outcome.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?.map(Json).map_err(training_error)
+}
+
+async fn update_training_item(
+    State(state): State<AppState>,
+    Path((id, item)): Path<(String, String)>,
+    Json(patch): Json<training::ItemPatch>,
+) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    state.training.update_item(&id, &item, patch).map(Json).map_err(training_error)
+}
+
+async fn delete_training_item(State(state): State<AppState>, Path((id, item)): Path<(String, String)>) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    state.training.remove_item(&id, &item).map(Json).map_err(training_error)
+}
+
+#[derive(Debug, Deserialize)]
+struct StartTraining {
+    dataset_id: String,
+    #[serde(default)]
+    name: String,
+    recipe: training::Recipe,
+}
+
+/// Starts a run. It wants the whole card: refused while a song renders, and
+/// the writing assistant is let go first.
+async fn start_training(State(state): State<AppState>, Json(input): Json<StartTraining>) -> Result<Json<training::Run>, (StatusCode, Json<ApiError>)> {
+    let rendering = state.jobs.read().await.values().any(|job| matches!(job.status, MusicJobStatus::Queued | MusicJobStatus::Running));
+    if rendering {
+        return Err(api_error(StatusCode::CONFLICT, "a song is being made; train once it is done".into()));
+    }
+    let tokenizer = selected_engine_models(&state).await.map_err(|error| api_error(StatusCode::CONFLICT, error))?.backbone;
+    free_the_card_for_the_engine(&state).await;
+    state
+        .training
+        .start(trainer_executable(), tokenizer, &input.dataset_id, &input.name, input.recipe)
+        .await
+        .map(Json)
+        .map_err(|error| api_error(StatusCode::CONFLICT, format!("{error:#}")))
+}
+
+async fn cancel_training(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    state.training.cancel(&id).await.map_err(training_error)?;
+    Ok(Json(serde_json::json!({ "cancelled": true })))
+}
+
+async fn delete_training_run(State(state): State<AppState>, Path(id): Path<String>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    state.training.remove_run(&id).await.map_err(training_error)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct InstallCheckpoint {
+    #[serde(default)]
+    name: Option<String>,
+}
+
+/// Adds a checkpoint to the adapter library, where the create page finds it.
+async fn install_training_checkpoint(
+    State(state): State<AppState>,
+    Path((id, step)): Path<(String, u32)>,
+    Json(input): Json<InstallCheckpoint>,
+) -> Result<Json<adapters::AdapterMeta>, (StatusCode, Json<ApiError>)> {
+    let run = state.training.run(&id).map_err(training_error)?;
+    let checkpoint = state
+        .training
+        .checkpoints(&id)
+        .into_iter()
+        .find(|checkpoint| checkpoint.step == step)
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, format!("the run has no checkpoint at step {step}")))?;
+    let name = input.name.filter(|name| !name.trim().is_empty()).unwrap_or_else(|| format!("{} · {step}", run.name));
+    let trigger = Some(run.trigger.clone());
+    let meta = state
+        .adapters
+        .import_trained(&name, trigger, &checkpoint.files, adapters::Origin::Trained { run: id.clone(), step })
+        .map_err(training_error)?;
+    state.training.mark_installed(&id, step).map_err(training_error)?;
+    Ok(Json(meta))
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AutofillRequest {
+    /// The language sung, when the user knows it; the recogniser guesses otherwise.
+    #[serde(default)]
+    language: Option<String>,
+}
+
+/// Writes a dataset song's lyrics from its recording: the vocals separated
+/// when the separator is installed, recognised with the karaoke recogniser,
+/// cut into lines at the pauses, and laid out in tagged sections by the
+/// writing assistant. The user checks the result; nothing trains until then.
+async fn autofill_training_item(
+    State(state): State<AppState>,
+    Path((id, item)): Path<(String, String)>,
+    Json(input): Json<AutofillRequest>,
+) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    if state.training.active_run().await.is_some() {
+        return Err(api_error(StatusCode::CONFLICT, "a training run has the card; recognise lyrics once it finishes".into()));
+    }
+    let config = state.lyrics_sync_config.read().await.clone();
+    if !config.available() || matches!(config.provider, lyrics_sync::AsrProvider::None) {
+        return Err(api_error(StatusCode::CONFLICT, "no speech recogniser is set up: choose one under Settings - Karaoke".into()));
+    }
+    if !ensure_local_recogniser(&state, &config, &item).await {
+        return Err(api_error(StatusCode::CONFLICT, "the speech recogniser is still downloading; try again when it is ready".into()));
+    }
+    let audio = state.training.item_audio(&id, &item).map_err(training_error)?;
+
+    // The vocals alone recognise far better than the mix; without the
+    // separator the whole song is used.
+    let runtime = state.lyrics_sync.onnxruntime_library_of(if state.lyrics_sync.has_cuda_libraries() {
+        lyrics_sync::OnnxFlavour::Cuda
+    } else {
+        lyrics_sync::OnnxFlavour::Cpu
+    });
+    let heard = match runtime.filter(|_| state.separator.is_installed()) {
+        Some(runtime) => {
+            let model = state.separator.model_path();
+            let overlap = state.separation_config.read().await.sane_overlap();
+            let on_gpu = state.lyrics_sync.has_cuda_libraries();
+            let source = audio.clone();
+            tokio::task::spawn_blocking(move || -> anyhow::Result<PathBuf> {
+                point_ort_at(&runtime);
+                let mix = audio_pcm::decode_stereo_44k(&source)?;
+                let separated = separation::separate(&model, &mix, separation::STEMS.len(), overlap, on_gpu, |_| {})?;
+                let vocals = separated.stems.into_iter().find(|stem| stem.name == "vocals").context("the separator returned no vocals")?;
+                let path = std::env::temp_dir().join(format!("training-vocals-{}.wav", uuid::Uuid::now_v7().simple()));
+                separation::write_wav_stereo(&path, &vocals.samples)?;
+                Ok(path)
+            })
+            .await
+            .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+            .map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("separating the vocals failed: {error:#}")))?
+        }
+        None => audio.clone(),
+    };
+
+    let words = match config.provider {
+        lyrics_sync::AsrProvider::Parakeet => {
+            let sync = state.lyrics_sync.clone();
+            let path = heard.clone();
+            tokio::task::spawn_blocking(move || sync.parakeet_words(&path)).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        }
+        lyrics_sync::AsrProvider::Whisper => {
+            let sync = state.lyrics_sync.clone();
+            let config = config.clone();
+            let path = heard.clone();
+            let language = input.language.clone();
+            tokio::task::spawn_blocking(move || sync.whisper_words(&config, &path, language.as_deref(), ""))
+                .await
+                .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        }
+        lyrics_sync::AsrProvider::OpenRouter => karaoke_words_from_openrouter(&state, &config, &heard.to_string_lossy(), input.language.as_deref()).await,
+        lyrics_sync::AsrProvider::None => unreachable!("checked above"),
+    };
+    if heard != audio {
+        let _ = std::fs::remove_file(&heard);
+    }
+    let words = words.map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("recognition failed: {error:#}")))?;
+    let lines = lyrics_sync::group_words(&words);
+    if lines.is_empty() {
+        return Err(api_error(StatusCode::BAD_GATEWAY, "no words were recognised in this song; mark it instrumental or write the lyrics".into()));
+    }
+    let transcript: String = lines
+        .iter()
+        .map(|(time, text)| format!("[{}:{:02}] {}", (*time as u64) / 60, (*time as u64) % 60, text.trim()))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let request = assistant::AssistRequest {
+        target: assistant::AssistTarget::Transcript,
+        description: transcript,
+        instruction: String::new(),
+        lyrics: String::new(),
+        style: String::new(),
+        abc: String::new(),
+        duration_seconds: 0.0,
+    };
+    let Json(draft) = assistant_write(State(state.clone()), Json(request)).await?;
+    let lyrics = draft.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string();
+    state
+        .training
+        .update_item(&id, &item, training::ItemPatch { lyrics: Some(lyrics), instrumental: Some(false), ..Default::default() })
+        .map(Json)
+        .map_err(training_error)
 }
 
 async fn read_stems(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
@@ -4258,6 +4610,10 @@ async fn create_music_job(
         return (StatusCode::ACCEPTED, Json(job));
     }
 
+    if state.training.active_run().await.is_some() {
+        let error = "a training run has the card; songs can be made once it finishes or is stopped".to_string();
+        return (StatusCode::CONFLICT, Json(failed_request_job(request, engine_id, error)));
+    }
     if let Some(missing) = request.adapters.iter().find(|adapter| !state.adapters.exists(&adapter.id)).map(|adapter| adapter.id.clone()) {
         let error = format!("adapter {missing} is not installed; add it again on the LoRA page");
         return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, error)));
@@ -4319,6 +4675,9 @@ async fn replay_music_job(
         (None, Some(replay)) => replay.clone(),
         (None, None) => return Err(api_error(StatusCode::BAD_REQUEST, "Provide song_id or replay_request.".into())),
     };
+    if state.training.active_run().await.is_some() {
+        return Err(api_error(StatusCode::CONFLICT, "a training run has the card; re-render once it finishes or is stopped".into()));
+    }
     let body = prepare_replay_synthesis(replay, &request).map_err(|error| api_error(StatusCode::BAD_REQUEST, error))?;
     let style = body.get("style").and_then(Value::as_str).unwrap_or_default().to_owned();
     let lyrics = body.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_owned();

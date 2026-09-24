@@ -36,6 +36,10 @@ first line of the chorus
 second line of the chorus
 Size the song to its intended length: about 2 to 3 sung words per second, a verse of 4-8 lines, a chorus repeated where a real song repeats it. Keep neighbouring lines close in syllable count so none is sung rushed. The lyrics carry no implementation notes: stage directions, singer cues, instruments, tempo and pronunciation marks all stay out - the model sings whatever text it is given. Write the sung lines in the language the user wrote their request in: a Russian idea gets Russian lines, a Japanese one Japanese; the tags and the style stay English, and the style names that language first."#;
 
+/// How a recognised recording becomes a lyric sheet: the words stay the
+/// singer's, only the layout is the assistant's.
+const TRANSCRIPT_RULES: &str = r#"The transcript comes from speech recognition run on the vocals of a finished recording: one line per sung phrase, each after its start time, with the recogniser's mistakes. Write the lyric sheet of that recording exactly as it is sung. Keep the singer's words, in their order and their language; correct a word only where the recognition is plainly wrong and the right word is certain from the line; never invent, rewrite, translate or complete lines, and drop fragments the recogniser picked up in instrumental passages. Leave the times out. Organise the lines into sections: a block of lines that returns is the [Chorus], written out every time it is sung; the blocks between choruses are verses numbered in order ([Verse 1], [Verse 2], [Verse 3]); a block sung once that is neither is the [Bridge]; a block that leads into the chorus every time is the [Pre-Chorus]; lines before the first verse are the [Intro] and after the last chorus the [Outro]. Every section starts with its tag in square brackets, in English, on a line of its own, its lines follow below it, and a blank line separates sections. Use no other tags and no section names in words."#;
+
 const DICTION_RULE: &str = r#"
 Diction: the model sings the letters it is given and there is no pronunciation channel. Write every word in its ordinary spelling - in Russian write ё as ё, never е - and choose words whose stress falls naturally on the long notes of the line."#;
 
@@ -57,6 +61,8 @@ pub enum AssistTarget {
     Style,
     /// Edit the ABC score as the instruction asks.
     Score,
+    /// Lay out a recording's recognised words as a lyric sheet.
+    Transcript,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,6 +133,14 @@ pub fn instructions(request: &AssistRequest) -> (String, &'static [&'static str]
                  Answer with ONLY a JSON object with keys: abc, and style only when it should change."
             ),
             &["abc"],
+        ),
+        AssistTarget::Transcript => (
+            format!(
+                "You prepare training data for YuE2, a model that learns songs from their audio and their lyric sheets.\n\
+                 {TRANSCRIPT_RULES}\n\
+                 Answer with ONLY a JSON object with key: lyrics."
+            ),
+            &["lyrics"],
         ),
         AssistTarget::All => (
             format!(
@@ -203,6 +217,7 @@ pub fn user_message(request: &AssistRequest) -> String {
             if brief.is_empty() { "(none - describe a sound that fits the lyrics)" } else { brief },
             request.lyrics.trim(),
         ),
+        AssistTarget::Transcript => format!("Transcript:\n{}", request.description.trim()),
         AssistTarget::Score => format!(
             "Request: {}\n\nStyle:\n{}\n\nLyrics:\n{}\n\nCurrent score:\n{}",
             if brief.is_empty() { "(none - tidy the score without changing the music)" } else { brief },

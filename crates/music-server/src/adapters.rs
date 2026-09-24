@@ -129,7 +129,8 @@ fn catalog() -> &'static [CatalogItem] {
 pub enum Origin {
     Catalog { catalog_id: String },
     Imported,
-    Trained,
+    /// A checkpoint of a training run.
+    Trained { #[serde(default)] run: String, #[serde(default)] step: u32 },
     /// A file of a Hugging Face repository, pinned to the commit it came from.
     Hub { repo: String, revision: String, file: String },
 }
@@ -400,6 +401,38 @@ impl AdapterLibrary {
             origin: Origin::Catalog { catalog_id: entry.id.clone() },
             created_at: String::new(),
         }
+    }
+
+    /// Records a trained checkpoint as an adapter, copying its files from the
+    /// run so the run can be removed without losing it.
+    pub fn import_trained(&self, name: &str, trigger: Option<String>, files: &[PathBuf], origin: Origin) -> Result<AdapterMeta> {
+        if files.is_empty() {
+            bail!("the checkpoint has no adapter files");
+        }
+        let id = format!("{}-{}", slug(name), &uuid::Uuid::now_v7().simple().to_string()[..8]);
+        let folder = self.folder(&id)?;
+        fs::create_dir_all(&folder)?;
+        for file in files {
+            let name = file.file_name().context("an adapter file without a name")?;
+            fs::copy(file, folder.join(name)).with_context(|| format!("copy {}", file.display()))?;
+        }
+        let meta = AdapterMeta {
+            id,
+            engine: self.engine.clone(),
+            name: Text::Plain(name.trim().to_string()),
+            description: Text::default(),
+            kind: "trained".into(),
+            trigger: trigger.filter(|trigger| !trigger.trim().is_empty()),
+            author: None,
+            page: None,
+            scales: BTreeMap::new(),
+            range: None,
+            slots: Vec::new(),
+            origin,
+            created_at: now(),
+        };
+        self.write_meta(&meta)?;
+        Ok(meta)
     }
 
     /// Stores uploaded weight files as a new adapter. An `adapter_config.json`

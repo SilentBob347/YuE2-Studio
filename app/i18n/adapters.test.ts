@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { adapterStrings } from './adapters';
 import { processingStrings } from './processing';
+import { trainingStrings } from './training';
 
-for (const [name, catalogue] of Object.entries({ LoRA: adapterStrings, processing: processingStrings })) {
+for (const [name, catalogue] of Object.entries({ LoRA: adapterStrings, processing: processingStrings, training: trainingStrings })) {
   describe(`${name} strings`, () => {
     it('every language carries every key, none empty', () => {
       const keys = Object.keys(catalogue.en).sort();
