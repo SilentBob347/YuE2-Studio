@@ -789,7 +789,8 @@ pub async fn serve() -> anyhow::Result<()> {
                         let auto = state.engine_options.read().await.backend == music_engine::yue_server::ComputeBackend::Auto;
                         let active = *state.active_device.read().await;
                         if let Some(device) = active.filter(|device| auto && *device != music_engine::yue_server::ComputeBackend::Cpu) {
-                            if describes_device_failure(&last_run_log().to_lowercase()) {
+                            let log = last_run_log().to_lowercase();
+                            if describes_device_failure(&log) || died_silently(&log) {
                                 music_engine::yue_server::note_in_log(&format!("{} failed on this machine; leaving it for this session", device_name(device)));
                                 state.failed_devices.write().await.push(device);
                             }
@@ -3114,6 +3115,15 @@ fn last_run_log() -> String {
     let tail = music_engine::yue_server::startup_log_tail(400);
     let start = tail.iter().rposition(|line| line.contains("---- starting")).unwrap_or(0);
     tail[start..].join("\n")
+}
+
+/// Whether the engine ended without a word about why. Its own failures -
+/// an assertion, an error, running out of memory - are written before it
+/// goes; a device lost under the driver takes the process with nothing said.
+fn died_silently(log: &str) -> bool {
+    !["error", "assert", "fatal", "exception", "abort", "failed", "out of memory"]
+        .iter()
+        .any(|marker| log.contains(marker))
 }
 
 /// Whether a lowercased engine log says the compute device itself failed -
@@ -5967,6 +5977,13 @@ mod tests {
         assert!(describes_device_failure("[load] fatal: yue_cuda_backend=c:\\x\\cuda13\\ggml-cuda.dll did not load"));
         assert!(!describes_device_failure("cuda error: out of memory\ncudamalloc failed"));
         assert!(!describes_device_failure("[load] self-test on cuda0: ok (1.2 ms)\n[server] listening on 127.0.0.1:18087"));
+    }
+
+    #[test]
+    fn an_engine_that_left_without_a_word_counts_as_a_lost_device() {
+        assert!(died_silently("[dit] graph: 1236 nodes, t=689, b=2"));
+        assert!(!died_silently("ggml_assert: x failed"));
+        assert!(!died_silently("cuda error: out of memory"));
     }
 
     #[test]
