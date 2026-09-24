@@ -3,6 +3,24 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-24 — 1.1.1
+
+### Fixed
+
+- **Songs play after the studio's folder moves.** The library kept each song's full path,
+  so a drive that came back under another letter after a restart, or a portable folder
+  copied elsewhere, left every song saying it was no longer available while the files
+  sat in the media folder. Songs are now found by name in the studio's own media folder.
+- **Errors say why.** Stem separation, karaoke and cover art showed only the first line
+  of a failure ("load the separation model ..."), without its cause; the whole reason is
+  shown now. When the graphics card cannot load the separation model, the message says
+  to choose the processor instead.
+
+### Added
+
+- **Select everything in the LoRA catalogue** that is not downloaded yet, in one click,
+  and download it as one set.
+
 ## 2026-09-24 — 1.1.0
 
 ### Added

@@ -1,5 +1,27 @@
 [
   {
+    "id": "yue2-studio-1-1-1",
+    "date": "2026-09-24",
+    "title": {
+      "en": "YuE2 Studio 1.1.1",
+      "ru": "YuE2 Studio 1.1.1",
+      "zh": "YuE2 Studio 1.1.1",
+      "ja": "YuE2 Studio 1.1.1",
+      "ko": "YuE2 Studio 1.1.1"
+    },
+    "body": {
+      "en": "Songs play again after the studio folder moves or its drive gets another letter: they are found by name in the media folder. Separation, karaoke and cover errors now show their cause. The LoRA catalogue can select everything not downloaded yet in one click.",
+      "ru": "Песни снова играют, если папка студии переехала или диск после перезагрузки получил другую букву: студия находит их по имени в папке media. Ошибки разделения на дорожки, караоке и обложек теперь показывают причину целиком. В каталоге LoRA можно одной кнопкой выбрать всё, что ещё не скачано.",
+      "zh": "工作室文件夹移动或磁盘盘符变化后，歌曲可以再次播放：会在 media 文件夹中按文件名找到。分轨、卡拉OK和封面的错误现在会显示完整原因。LoRA 目录可一键选择所有尚未下载的项目。",
+      "ja": "スタジオのフォルダーを移動したり、再起動でドライブ文字が変わっても曲が再生できるようになりました（media フォルダー内で名前で見つけます）。ステム分離・カラオケ・カバーのエラーは原因まで表示されます。LoRA カタログで未ダウンロードのものをワンクリックで全選択できます。",
+      "ko": "스튜디오 폴더를 옮기거나 재부팅 후 드라이브 문자가 바뀌어도 곡이 다시 재생됩니다. media 폴더에서 이름으로 찾습니다. 스템 분리, 가라오케, 커버 오류는 이제 원인까지 표시합니다. LoRA 카탈로그에서 아직 받지 않은 항목을 한 번에 모두 선택할 수 있습니다."
+    },
+    "tags": [
+      "YuE2",
+      "1.1.1"
+    ]
+  },
+  {
     "id": "yue2-studio-1-1",
     "date": "2026-09-24",
     "title": {
