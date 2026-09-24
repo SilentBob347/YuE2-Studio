@@ -882,8 +882,8 @@ async fn separation_assets(State(state): State<AppState>) -> Json<Value> {
         },
         {
             "id": "onnxruntime-cuda",
-            "label": "ONNX Runtime 1.24.2 · CUDA",
-            "bytes": 280_855_316u64,
+            "label": "ONNX Runtime 1.30.0 · CUDA",
+            "bytes": 379_723_801u64,
             "note": "The CUDA build of the runtime.",
             "installed": state.lyrics_sync.has_cuda_runtime(),
         },
@@ -910,8 +910,8 @@ async fn separation_assets(State(state): State<AppState>) -> Json<Value> {
         },
         {
             "id": "onnxruntime",
-            "label": "ONNX Runtime 1.24.2",
-            "bytes": 74_075_355,
+            "label": "ONNX Runtime 1.30.0",
+            "bytes": 82_645_522,
             "note": "Runs the separator and the karaoke recogniser; shared between them.",
             "installed": runtime_installed,
         }

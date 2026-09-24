@@ -121,11 +121,11 @@ pub const ASSETS: &[Asset] = &[
     },
     Asset {
         id: "llama-cuda",
-        label: "llama.cpp runtime (CUDA 13.3)",
+        label: "llama.cpp runtime (CUDA 13.4)",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b9966/llama-b9966-bin-win-cuda-13.3-x64.zip",
+        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11146/llama-b11146-bin-win-cuda-13.4-x64.zip",
         relative_path: "runtime/llama-cuda.zip",
-        bytes: 162_331_298,
+        bytes: 149_758_833,
         unzip_into: Some("cuda"),
         marker: "llama-server",
         vram_gb: None,
@@ -135,9 +135,9 @@ pub const ASSETS: &[Asset] = &[
         id: "llama-cuda-runtime",
         label: "CUDA runtime for llama.cpp",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b9966/cudart-llama-bin-win-cuda-13.3-x64.zip",
+        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11146/cudart-llama-bin-win-cuda-13.4-x64.zip",
         relative_path: "runtime/cudart.zip",
-        bytes: 390_970_417,
+        bytes: 423_535_356,
         unzip_into: Some("cuda"),
         marker: "cudart64",
         vram_gb: None,
@@ -147,9 +147,9 @@ pub const ASSETS: &[Asset] = &[
         id: "llama-cpu",
         label: "llama.cpp runtime (CPU)",
         kind: AssetKind::Runtime,
-        url: "https://github.com/ggml-org/llama.cpp/releases/download/b9966/llama-b9966-bin-win-cpu-x64.zip",
+        url: "https://github.com/ggml-org/llama.cpp/releases/download/b11146/llama-b11146-bin-win-cpu-x64.zip",
         relative_path: "runtime/llama-cpu.zip",
-        bytes: 18_211_851,
+        bytes: 18_560_055,
         unzip_into: Some("cpu"),
         marker: "llama-server",
         vram_gb: None,
@@ -763,7 +763,7 @@ mod tests {
     use super::*;
 
     /// llama.cpp is pinned to one build so a working setup keeps working.
-    const LLAMA_BUILD: &str = "b9966";
+    const LLAMA_BUILD: &str = "b11146";
 
     #[test]
     fn every_asset_has_a_size_and_a_distinct_id() {

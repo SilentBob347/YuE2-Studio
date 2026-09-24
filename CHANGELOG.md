@@ -3,6 +3,20 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-24 — 1.0.4
+
+### Fixed
+
+- **The audio editor opens with the track.** It opened blank: the waveform library it
+  runs on was left out of every build since 1.0.0, so the editor stopped on start. The
+  library is back, and a test now checks that every file the editor loads is built in.
+
+### Changed
+
+- **Newer runtimes for the add-ons.** The assistant downloads llama.cpp b11146 (CUDA 13.4)
+  instead of b9966, and karaoke and stem separation download ONNX Runtime 1.30.0
+  instead of 1.24.2. Add-ons already installed keep working on the versions they have.
+
 ## 2026-09-23 — 1.0.3
 
 ### Fixed

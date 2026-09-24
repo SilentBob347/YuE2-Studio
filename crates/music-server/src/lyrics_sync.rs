@@ -584,11 +584,11 @@ pub const ASSETS: &[Asset] = &[
     },
     Asset {
         id: "onnxruntime-cuda",
-        label: "ONNX Runtime 1.24.2 · CUDA",
+        label: "ONNX Runtime 1.30.0 · CUDA",
         kind: AssetKind::Runtime,
-        url: "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-win-x64-gpu-1.24.2.zip",
+        url: "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-gpu_cuda12-1.30.0.zip",
         relative_path: "runtime/onnxruntime-cuda.zip",
-        bytes: 280_855_316,
+        bytes: 379_723_801,
         unzip_into: Some("onnx-cuda"),
         marker: "onnxruntime_providers_cuda.dll",
         pick: &[],
@@ -661,11 +661,11 @@ pub const ASSETS: &[Asset] = &[
     },
     Asset {
         id: "onnxruntime",
-        label: "ONNX Runtime 1.24.2",
+        label: "ONNX Runtime 1.30.0",
         kind: AssetKind::Runtime,
-        url: "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-win-x64-1.24.2.zip",
+        url: "https://github.com/microsoft/onnxruntime/releases/download/v1.30.0/onnxruntime-win-x64-1.30.0.zip",
         relative_path: "runtime/onnxruntime.zip",
-        bytes: 74_075_355,
+        bytes: 82_645_522,
         unzip_into: Some("onnx"),
         marker: "onnxruntime.dll",
         pick: &[],
@@ -1423,7 +1423,7 @@ mod tests {
     const CUDART_BUILD: &str = "12.9.79";
     const CUFFT_BUILD: &str = "11.4.1.4";
     const CUDNN_BUILD: &str = "9.25.0.15";
-    const ONNXRUNTIME_BUILD: &str = "v1.24.2";
+    const ONNXRUNTIME_BUILD: &str = "v1.30.0";
 
     impl TimedLine {
         fn text(&self) -> String {
