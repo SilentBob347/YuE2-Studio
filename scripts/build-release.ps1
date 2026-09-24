@@ -43,6 +43,7 @@ $templatePath = Join-Path $tauriRoot 'tauri.release.conf.template.json'
 $releaseConfigPath = Join-Path $tauriRoot 'tauri.release.conf.json'
 $releaseDir = Join-Path $repoRoot "release\$Version"
 $engineResourceRoot = Join-Path $tauriRoot 'resources\yue2-cpp'
+$vstResourceRoot = Join-Path $tauriRoot 'resources\vst-host'
 $engineSource = Get-Content -Raw (Join-Path $repoRoot 'engines\yue2-cpp-source.json') | ConvertFrom-Json
 
 Push-Location $repoRoot
@@ -58,6 +59,15 @@ try {
     if (-not $stagedIsCurrent) {
         & (Join-Path $PSScriptRoot 'build-yue-runtime.ps1') -OutputDirectory $engineResourceRoot -RuntimeBackend $RuntimeBackend -CudaArchitecture universal
         if ($LASTEXITCODE -ne 0) { throw "the engine runtime build failed with exit code $LASTEXITCODE" }
+    }
+
+    # The VST host follows the trainer's HOT-Step commit; rebuilt only when that moves.
+    $trainSource = Get-Content -Raw (Join-Path $repoRoot 'engines\music-train-source.json') | ConvertFrom-Json
+    $vstStampPath = Join-Path $vstResourceRoot 'runtime.json'
+    $vstStamp = if (Test-Path $vstStampPath) { Get-Content -Raw $vstStampPath | ConvertFrom-Json } else { $null }
+    if (-not ($vstStamp -and $vstStamp.commit -eq $trainSource.commit -and (Test-Path (Join-Path $vstResourceRoot 'vst-host.exe')))) {
+        & (Join-Path $PSScriptRoot 'build-vst-host.ps1') -OutputDirectory $vstResourceRoot
+        if ($LASTEXITCODE -ne 0) { throw "the VST host build failed with exit code $LASTEXITCODE" }
     }
 
     # After the engine: one test reads the staged bundle's import tables and
@@ -105,6 +115,7 @@ try {
     New-Item -ItemType Directory -Force -Path (Join-Path $portableRoot 'resources') | Out-Null
     Copy-Item $engineResourceRoot (Join-Path $portableRoot 'resources\yue2-cpp') -Recurse -Force
     Get-ChildItem (Join-Path $portableRoot 'resources\yue2-cpp') -Filter '*.pdb' | Remove-Item -Force
+    Copy-Item $vstResourceRoot (Join-Path $portableRoot 'resources\vst-host') -Recurse -Force
     New-Item -ItemType File -Path (Join-Path $portableRoot 'portable.flag') -Force | Out-Null
     $portableZip = Join-Path $releaseDir "YuE2-Studio-$Version-portable-windows-x64.zip"
     if (Test-Path $portableZip) { Remove-Item -Force $portableZip }
