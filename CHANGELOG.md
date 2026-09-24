@@ -7,6 +7,10 @@ Windows build.
 
 ### Fixed
 
+- **The create page keeps what was typed in it.** Leaving it for the library, search or any
+  other page reset it to the defaults: the style, the lyrics, the score and every setting
+  were lost. The page now stays as it was left
+  ([#1](https://github.com/timoncool/YuE2-Studio/issues/1)).
 - **Songs play after the studio's folder moves.** The library kept each song's full path,
   so a drive that came back under another letter after a restart, or a portable folder
   copied elsewhere, left every song saying it was no longer available while the files

@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { Activity, useState, useEffect, useRef, useCallback } from 'react';
 import { Sidebar } from './components/Sidebar';
-import { CreatePanel } from './components/CreatePanel';
+import { CreatePanel, type CreateRequest } from './components/CreatePanel';
 import { SongList } from './components/SongList';
 import { RightSidebar } from './components/RightSidebar';
 import { Player } from './components/Player';
@@ -1221,9 +1221,17 @@ function AppContent() {
     return () => window.removeEventListener('yue:toast', onToast);
   }, []);
 
-  // A track sent to be covered opens the form it lands in.
+  // A track sent to be covered, or a score to sing, opens the form it lands in
+  // and waits there as a request until the form takes it.
+  const [createRequest, setCreateRequest] = useState<CreateRequest | null>(null);
   useEffect(() => {
-    const open = () => {
+    const open = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (event.type === 'yue:transcribe-song' && detail?.song) {
+        setCreateRequest({ id: Date.now(), kind: 'transcribe', song: detail.song, melodyOnly: Boolean(detail.melodyOnly) });
+      } else if (event.type === 'yue:use-score' && detail?.abc) {
+        setCreateRequest({ id: Date.now(), kind: 'score', abc: detail.abc, cot: detail.cot, lyrics: detail.lyrics, title: detail.title });
+      }
       setCurrentView('create');
       if (window.innerWidth < 768) setMobileShowList(false);
     };
@@ -1236,8 +1244,14 @@ function AppContent() {
   }, []);
 
   // Render Layout Logic
-  const renderContent = () => {
-    switch (currentView) {
+  // The create page stays mounted once the engine is up, hidden while another
+  // page shows: leaving it for the library used to throw away the style, the
+  // lyrics, the score and every setting typed into it.
+  const createKept = nativeModels !== 'offline' && nativeSetupReady;
+  const showingCreate = !['tools', 'adapters', 'library', 'playlist', 'search', 'news'].includes(currentView);
+
+  const renderContent = (view: typeof currentView = currentView) => {
+    switch (view) {
       case 'tools':
         return <StudioToolsPanel initialSongId={stemsSongId} />;
 
@@ -1325,6 +1339,7 @@ function AppContent() {
                 isGenerating={isGenerating}
                 activeJobCount={activeJobCount + pendingClickCount}
                 initialData={reuseData}
+                request={createRequest}
               />
             </div>
             {leftPanel.handle}
@@ -1435,7 +1450,8 @@ function AppContent() {
         />
 
         <main className="relative ml-[72px] flex min-h-0 min-w-0 flex-1 overflow-hidden md:ml-0">
-          {renderContent()}
+          {createKept && <Activity mode={showingCreate ? 'visible' : 'hidden'}>{renderContent('create')}</Activity>}
+          {!(createKept && showingCreate) && renderContent()}
         </main>
       </div>
 

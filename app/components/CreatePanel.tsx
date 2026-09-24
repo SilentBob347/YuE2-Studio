@@ -25,11 +25,19 @@ import { usesFromSettings, type AdapterUse } from '../services/adapters';
  * request stays sparse exactly like the engine's reference client sends it.
  */
 
+/** Something another page sends to the form: a library track to cover, or a
+ * score to sing. It lives in the app's state, not in a window event, so it
+ * still arrives when the form was hidden at the moment it was sent. */
+export type CreateRequest =
+  | { id: number; kind: 'transcribe'; song: Song; melodyOnly: boolean }
+  | { id: number; kind: 'score'; abc: string; cot?: YueCot; lyrics?: string; title?: string };
+
 interface CreatePanelProps {
   onGenerate: (request: YueRequest & { _tempId?: string }) => void;
   isGenerating: boolean;
   activeJobCount?: number;
   initialData?: { song: Song; timestamp: number } | null;
+  request?: CreateRequest | null;
 }
 
 type EngineDefaults = Partial<Record<string, unknown>> & {
@@ -236,7 +244,7 @@ const SamplingGrid: React.FC<{ value: SamplingText; defaults?: YueSampling; onCh
   );
 };
 
-export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerating, activeJobCount = 0, initialData }) => {
+export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerating, activeJobCount = 0, initialData, request }) => {
   const { t } = useI18n();
   const tt = t as unknown as (key: string) => string;
 
@@ -447,37 +455,33 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     return () => { if (coverAudio?.startsWith('blob:')) URL.revokeObjectURL(coverAudio); };
   }, [coverAudio]);
 
-  // A library track to cover: its recording becomes the score, and its own
-  // words start the lyric sheet when there is nothing there yet.
+  // A request from another page is applied once, by its id: the form's effects
+  // run again each time it is shown, and must not repeat what they already did.
+  const appliedRequest = useRef<number | null>(null);
   useEffect(() => {
-    const onTranscribe = (event: Event) => {
-      const detail = (event as CustomEvent<{ song: Song; melodyOnly: boolean }>).detail;
-      if (!detail?.song) return;
-      setCoverSource(detail.song.title);
-      setCoverAudio(detail.song.audioUrl ?? null);
-      if (detail.song.lyrics?.trim()) setLyrics(current => (current.trim() ? current : detail.song.lyrics));
+    if (!request || appliedRequest.current === request.id) return;
+    appliedRequest.current = request.id;
+    if (request.kind === 'transcribe') {
+      // a library track to cover: its recording becomes the score, and its own
+      // words start the lyric sheet when there is nothing there yet
+      const { song, melodyOnly } = request;
+      setCoverSource(song.title);
+      setCoverAudio(song.audioUrl ?? null);
+      if (song.lyrics?.trim()) setLyrics(current => (current.trim() ? current : song.lyrics));
       setMode('cover');
-      void runTranscription({ songId: detail.song.id }, detail.melodyOnly);
-    };
-    window.addEventListener('yue:transcribe-song', onTranscribe);
-    return () => window.removeEventListener('yue:transcribe-song', onTranscribe);
-  });
-
-  // A score arriving from elsewhere: a transcribed library track, an edited plan.
-  useEffect(() => {
-    const onScore = (event: Event) => {
-      const detail = (event as CustomEvent<{ abc: string; cot?: YueCot; lyrics?: string; title?: string }>).detail;
-      if (!detail?.abc) return;
-      setAbc(detail.abc.trimEnd());
-      if (detail.cot) setCot(detail.cot);
-      if (detail.lyrics && !lyrics.trim()) setLyrics(detail.lyrics);
-      if (detail.title && !name.trim()) setName(detail.title);
+      void runTranscription({ songId: song.id }, melodyOnly);
+    } else {
+      // a score from elsewhere: a transcribed library track, an edited plan
+      setAbc(request.abc.trimEnd());
+      if (request.cot) setCot(request.cot);
+      if (request.lyrics) setLyrics(current => (current.trim() ? current : request.lyrics ?? ''));
+      if (request.title) setName(current => (current.trim() ? current : request.title ?? ''));
       setSemanticTokens('');
       setMode('studio');
-    };
-    window.addEventListener('yue:use-score', onScore);
-    return () => window.removeEventListener('yue:use-score', onScore);
-  }, [lyrics, name]);
+    }
+    // runTranscription is the one from the render that received the request
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
 
   const reset = () => {
     setName(''); setStyle(''); setLyrics(''); setAbc(''); setCot('');
