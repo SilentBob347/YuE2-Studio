@@ -3,6 +3,48 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## Unreleased
+
+### Added
+
+- **A dataset in one drop.** The training page is a three-step wizard: drop a folder of
+  songs, check them, train. Albums with a cue sheet are cut into songs; titles and artists
+  come from the tags, the file name and the folders.
+- **Lyrics from the databases players use.** LRCLIB, then QQ Music, then Kugou, matched by
+  title, artist and length, kept word for word. Only a song none of them knows has its
+  vocals separated and is heard by Whisper, which is told the language the found lyrics are
+  in and has its usual hallucinations (subtitle credits, captions of sounds, 674 known
+  phrases in 11 languages) filtered out.
+- **Sections without touching the words.** For a published sheet the assistant only says
+  where each section starts; the studio puts the sheet's own lines under the tags, so no
+  line can be lost or merged. Lines sung more than once are marked so the chorus stands out.
+- **Every song shows where it is.** Lyrics and descriptions appear as each song is done,
+  with the stage and its count on top. One model is on the card at a time, each loaded once
+  for the whole batch.
+- **Picks up after a restart.** Each song keeps its lyrics and style state in the dataset,
+  and the job itself is kept on disk: after a crash or a restart the preparation carries on
+  by itself and redoes nothing. A failed or unfinished song has a button that finishes just
+  that song.
+- **A trigger word from the start.** Every dataset gets a rare word made from its name
+  (`nrmnkhffn` for "Нейромонах Феофан"); a word the user clears stays cleared.
+- **README lists every model** the studio downloads — training, listening, lyrics, stems,
+  assistant — with its direct link, size and the folder it goes in.
+- **Stop by drift or by epochs.** The run stops when the composition half drifts too far
+  from the base, or after a set number of passes over the songs.
+- **Describing by ear on the card.** MOSS-Music listens to every song and the assistant
+  writes its YuE2 style; the tempo is measured by Beat This! on the card, loaded once. The
+  key is no longer measured: YuE2's style never states it and the score's key comes from
+  SheetSage2.
+
+### Fixed
+
+- The assistant's JSON schema reached llama-server in a field it does not read, so local
+  answers were never held to it; it now goes where llama-server reads it.
+- The engine watcher no longer starts the music engine, and with it unloads the assistant,
+  while a preparation or a training run holds the card.
+- A song deleted during a preparation fails alone instead of stopping the job.
+- A title that starts with a number keeps it ("99 Luftballons").
+
 ## 2026-09-24 — 1.1.2
 
 ### Fixed
