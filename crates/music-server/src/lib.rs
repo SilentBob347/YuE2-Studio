@@ -2175,16 +2175,19 @@ async fn autofill_training_item(
     // not the song, so it is asked once more and then refused, never stored.
     let heard_cyrillic = assistant::cyrillic_share(&request.description) > 0.5;
     let mut lyrics = String::new();
+    let mut latin = false;
     for _ in 0..2 {
         let Json(draft) = assistant_write(State(state.clone()), Json(request.clone())).await?;
-        lyrics = draft.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string();
-        if !heard_cyrillic || assistant::cyrillic_share(&lyrics) > 0.5 {
+        lyrics = draft.get("lyrics").and_then(Value::as_str).unwrap_or_default().trim().to_string();
+        latin = heard_cyrillic && !lyrics.is_empty() && assistant::cyrillic_share(&lyrics) <= 0.5;
+        if !lyrics.is_empty() && !latin {
             break;
         }
         lyrics.clear();
     }
     if lyrics.is_empty() {
-        return Err(api_error(StatusCode::BAD_GATEWAY, "the assistant rewrote the lyrics in Latin letters twice; choose a larger assistant model or write the lyrics".into()));
+        let why = if latin { "rewrote the lyrics in Latin letters twice" } else { "returned no lyrics twice" };
+        return Err(api_error(StatusCode::BAD_GATEWAY, format!("the assistant {why}; choose a larger assistant model or write the lyrics")));
     }
     state
         .training

@@ -459,6 +459,7 @@ export const TrainingPanel: React.FC = () => {
   const [starting, setStarting] = useState(false);
   const [deleting, setDeleting] = useState<{ kind: 'dataset' | 'run'; id: string } | null>(null);
   const [recognising, setRecognising] = useState<string[]>([]);
+  const [recogniseTotal, setRecogniseTotal] = useState(0);
   const [describing, setDescribing] = useState<string[]>([]);
   const filePicker = useRef<HTMLInputElement | null>(null);
   const folderPicker = useRef<HTMLInputElement | null>(null);
@@ -549,6 +550,7 @@ export const TrainingPanel: React.FC = () => {
   const recognise = async (ids: string[]) => {
     if (!dataset) return;
     setRecognising(ids);
+    setRecogniseTotal(ids.length);
     setError(null);
     for (const id of ids) {
       try {
@@ -678,7 +680,7 @@ export const TrainingPanel: React.FC = () => {
               <div className="flex flex-wrap items-center gap-2">
                 <button type="button" onClick={() => void recognise(dataset.items.filter(item => !item.instrumental).map(item => item.id))} disabled={recognising.length > 0 || Boolean(state.active)} className={OUTLINE}>
                   {recognising.length > 0 ? <Loader2 size={13} className="animate-spin" /> : <Mic2 size={13} />}
-                  {recognising.length > 0 ? `${t('trainingAutofilling')} ${dataset.items.length - recognising.length + 1}/${dataset.items.length}` : t('trainingAutofillAll')}
+                  {recognising.length > 0 ? `${t('trainingAutofilling')} ${recogniseTotal - recognising.length + 1}/${recogniseTotal}` : t('trainingAutofillAll')}
                 </button>
                 <span className="text-[11px] leading-4 text-zinc-500">{t('trainingAutofillHint')}</span>
               </div>
@@ -710,7 +712,7 @@ export const TrainingPanel: React.FC = () => {
           </button>
           {advanced && <RecipeForm recipe={recipe ?? state.recipe_defaults} defaults={state.recipe_defaults} fields={state.recipe_fields} onChange={setRecipe} />}
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button type="button" onClick={() => void start()} disabled={Boolean(blocker) || starting || Boolean(state.active)} className={PRIMARY}>
+            <button type="button" onClick={() => void start()} disabled={Boolean(blocker) || starting || Boolean(state.active) || recognising.length > 0} className={PRIMARY}>
               {starting ? <Loader2 size={15} className="animate-spin" /> : null}{t('trainingStart')}
             </button>
             {blocker && <span className="text-xs text-zinc-500">{blocker}</span>}
