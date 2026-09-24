@@ -245,7 +245,7 @@ const LibraryPicker: React.FC<{ exclude: string[]; onAdd: (ids: string[]) => voi
 };
 
 /** One song of a dataset: title and length, opening into its style and lyrics. */
-const ItemRow: React.FC<{ datasetId: string; item: DatasetItem; recognising: boolean; onRecognise: () => void; onChanged: (dataset: Dataset) => void; onError: (message: string) => void }> = ({ datasetId, item, recognising, onRecognise, onChanged, onError }) => {
+const ItemRow: React.FC<{ datasetId: string; item: DatasetItem; styleKind: 'style' | 'caption'; recognising: boolean; onRecognise: () => void; onChanged: (dataset: Dataset) => void; onError: (message: string) => void }> = ({ datasetId, item, styleKind, recognising, onRecognise, onChanged, onError }) => {
   const { t } = useStrings();
   const [open, setOpen] = useState(false);
   const [style, setStyle] = useState(item.style);
@@ -270,8 +270,15 @@ const ItemRow: React.FC<{ datasetId: string; item: DatasetItem; recognising: boo
       {open && (
         <div className="mt-2 space-y-2 pl-6">
           <label className="block">
-            <span className={LABEL}>{t('trainingStyle')}</span>
-            <input value={style} onChange={event => setStyle(event.target.value)} onBlur={() => style !== item.style && save({ style })} className={`${CONTROL} mt-1`} />
+            <span className={LABEL}>{styleKind === 'caption' ? t('trainingCaption') : t('trainingStyle')}</span>
+            {styleKind === 'caption' ? (
+              <>
+                <textarea value={style} onChange={event => setStyle(event.target.value)} onBlur={() => style !== item.style && save({ style })} rows={6} className={`${CONTROL} mt-1 font-mono text-xs`} />
+                <span className="mt-1 block text-[11px] leading-4 text-zinc-500">{t('trainingCaptionHint')}</span>
+              </>
+            ) : (
+              <input value={style} onChange={event => setStyle(event.target.value)} onBlur={() => style !== item.style && save({ style })} className={`${CONTROL} mt-1`} />
+            )}
           </label>
           <label className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-200">
             <input type="checkbox" checked={item.instrumental} onChange={event => save({ instrumental: event.target.checked })} className="accent-pink-500" />
@@ -599,7 +606,7 @@ export const TrainingPanel: React.FC = () => {
             {dataset.items.length === 0 ? (
               <p className="text-sm text-zinc-500">{t('trainingNoSongs')}</p>
             ) : (
-              <div>{dataset.items.map(item => <ItemRow key={item.id} datasetId={dataset.id} item={item} recognising={recognising.includes(item.id)} onRecognise={() => void recognise([item.id])} onChanged={replace} onError={setError} />)}</div>
+              <div>{dataset.items.map(item => <ItemRow key={item.id} datasetId={dataset.id} item={item} styleKind={state.item_style} recognising={recognising.includes(item.id)} onRecognise={() => void recognise([item.id])} onChanged={replace} onError={setError} />)}</div>
             )}
           </div>
         )}

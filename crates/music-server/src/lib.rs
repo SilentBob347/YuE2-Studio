@@ -1715,6 +1715,7 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
         "recipe_defaults": training::Recipe::default(),
         "recipe_fields": music_engine::yue_train::recipe_fields(),
         "min_vram_gb": music_engine::yue_train::MIN_VRAM_GB,
+        "item_style": "style",
         "download": match training_download {
             Some(active) if !active.done => Some(active),
             other => separator_download.or(other),

@@ -96,6 +96,32 @@ pub fn write_wav24(path: &Path, audio: &audio_post::Stereo) -> Result<()> {
     Ok(())
 }
 
+/// Writes stereo as 32-bit IEEE float WAV, at its own rate and unclipped.
+pub fn write_wav_f32(path: &Path, audio: &audio_post::Stereo) -> Result<()> {
+    let file = File::create(path).with_context(|| format!("create {}", path.display()))?;
+    let mut out = BufWriter::new(file);
+    let frames = audio.frames();
+    let data_bytes = (frames * 2 * 4) as u32;
+    out.write_all(b"RIFF")?;
+    out.write_all(&(36 + data_bytes).to_le_bytes())?;
+    out.write_all(b"WAVEfmt ")?;
+    out.write_all(&16u32.to_le_bytes())?;
+    out.write_all(&3u16.to_le_bytes())?; // IEEE float
+    out.write_all(&2u16.to_le_bytes())?; // stereo
+    out.write_all(&audio.rate.to_le_bytes())?;
+    out.write_all(&(audio.rate * 2 * 4).to_le_bytes())?; // byte rate
+    out.write_all(&8u16.to_le_bytes())?; // block align
+    out.write_all(&32u16.to_le_bytes())?; // bits per sample
+    out.write_all(b"data")?;
+    out.write_all(&data_bytes.to_le_bytes())?;
+    for frame in 0..frames {
+        out.write_all(&audio.left[frame].to_le_bytes())?;
+        out.write_all(&audio.right[frame].to_le_bytes())?;
+    }
+    out.flush().context("finish writing the WAV")?;
+    Ok(())
+}
+
 /// Every channel kept apart, at the file's own sample rate.
 fn decode_channels(path: &Path) -> Result<(Vec<Vec<f32>>, u32)> {
     let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
