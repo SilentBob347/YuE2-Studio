@@ -1,0 +1,138 @@
+[
+  {
+    "id": "yue2-studio-1-0-1",
+    "date": "2026-09-23",
+    "title": {
+      "en": "YuE2 Studio 1.0.1",
+      "ru": "YuE2 Studio 1.0.1",
+      "zh": "YuE2 Studio 1.0.1",
+      "ja": "YuE2 Studio 1.0.1",
+      "ko": "YuE2 Studio 1.0.1"
+    },
+    "body": {
+      "en": "Cover mode now plays the recording you chose, with a waveform you can click to seek. The Instrumental switch is gone: YuE2 sings whatever it is given and makes words up for empty lyrics, so the switch promised what the model does not do. Deleting a song now also removes its audio, stems and cover from disk.",
+      "ru": "В режиме кавера выбранную запись теперь можно прослушать: плеер с волной, клик по волне перематывает. Переключатель «Инструментал» убран: YuE2 поёт всегда, а на пустой текст сама сочиняет слова, так что переключатель обещал то, чего модель не умеет. Удаление песни теперь стирает с диска и её аудио, дорожки и обложку.",
+      "zh": "翻唱模式现在可以试听所选录音，带波形播放器，点击波形即可跳转。已移除“纯音乐”开关：YuE2 总会演唱，歌词为空时会自己编词，这个开关承诺了模型做不到的事。删除歌曲时现在也会从磁盘删除其音频、分轨和封面。",
+      "ja": "カバーモードで選んだ録音を試聴できるようになりました。波形プレーヤー付きで、波形をクリックするとシークします。「インスト」スイッチは削除しました。YuE2 は常に歌い、歌詞が空だと自分で言葉を作るため、モデルにできないことを約束していました。曲を削除すると、音声・ステム・カバー画像もディスクから削除されます。",
+      "ko": "커버 모드에서 선택한 녹음을 들어볼 수 있습니다. 파형 플레이어가 있고 파형을 클릭하면 이동합니다. '연주곡' 스위치는 제거했습니다. YuE2는 항상 노래하며 가사가 비어 있으면 스스로 가사를 만들어 내므로, 모델이 할 수 없는 것을 약속하고 있었습니다. 곡을 삭제하면 오디오, 스템, 커버도 디스크에서 삭제됩니다."
+    },
+    "tags": [
+      "YuE2",
+      "1.0.1"
+    ]
+  },
+  {
+    "id": "yue2-studio-1-0",
+    "date": "2026-09-23",
+    "title": {
+      "en": "YuE2 Studio 1.0",
+      "ru": "YuE2 Studio 1.0",
+      "zh": "YuE2 Studio 1.0",
+      "ja": "YuE2 Studio 1.0",
+      "ko": "YuE2 Studio 1.0"
+    },
+    "body": {
+      "en": "A studio for YuE2, the open song model that writes a score before it sings. Style and lyrics in, a full song with vocals out, up to six minutes, rendered on your own card by yue2.cpp. One executable, no Python; the installed version updates itself, the portable one keeps everything in its own folder.",
+      "ru": "Студия для YuE2 — открытой модели, которая сначала пишет партитуру, а потом поёт. На входе стиль и текст, на выходе целая песня с вокалом до шести минут, рендер на вашей карте через yue2.cpp. Один exe, без Python; установленная версия обновляется сама, портативная держит всё в своей папке.",
+      "zh": "为 YuE2 打造的工作室。YuE2 是一个先写乐谱再演唱的开源歌曲模型。输入风格和歌词，输出最长六分钟、带人声的完整歌曲，由 yue2.cpp 在你的显卡上渲染。单个可执行文件，无需 Python；安装版会自动更新，便携版把一切保存在自己的文件夹里。",
+      "ja": "歌う前に楽譜を書くオープンなソングモデル YuE2 のためのスタジオです。スタイルと歌詞から、最長 6 分のボーカル入りフルソングを yue2.cpp があなたのカードでレンダリングします。単一の実行ファイルで Python は不要。インストール版は自動更新、ポータブル版はすべてを自分のフォルダーに保存します。",
+      "ko": "노래하기 전에 악보부터 쓰는 오픈 노래 모델 YuE2를 위한 스튜디오입니다. 스타일과 가사를 넣으면 최대 6분의 보컬이 있는 완성곡이 나오고, yue2.cpp가 내 그래픽카드에서 렌더링합니다. 실행 파일 하나, Python 없음. 설치판은 스스로 업데이트되고 포터블판은 모든 것을 자기 폴더에 둡니다."
+    },
+    "tags": [
+      "YuE2",
+      "yue2.cpp",
+      "1.0"
+    ]
+  },
+  {
+    "id": "yue2-any-gpu",
+    "date": "2026-09-23",
+    "title": {
+      "en": "CUDA, Vulkan, processor",
+      "ru": "CUDA, Vulkan, процессор",
+      "zh": "CUDA、Vulkan、处理器",
+      "ja": "CUDA・Vulkan・プロセッサ",
+      "ko": "CUDA, Vulkan, 프로세서"
+    },
+    "body": {
+      "en": "The engine carries CUDA, Vulkan and processor backends and picks the best one it finds: CUDA on NVIDIA, Vulkan elsewhere, the processor without a GPU; Settings → Local engine lets you choose. Vulkan is verified on NVIDIA; on AMD and Intel it is experimental - AMD Radeon integrated graphics gave unintelligible vocals in our test, and discrete cards are untested. Owners, tell us how it goes.",
+      "ru": "В движке есть бэкенды CUDA, Vulkan и процессор, и он сам берёт лучший: CUDA на NVIDIA, Vulkan на остальных, процессор без видеокарты; в «Настройки → Локальный движок» можно выбрать вручную. Vulkan проверен на NVIDIA; на AMD и Intel он экспериментальный — на встроенной AMD Radeon вокал вышел неразборчивым, дискретные карты не проверены. Владельцы — расскажите, как работает.",
+      "zh": "引擎内置 CUDA、Vulkan 和处理器后端并自动选择最佳者：NVIDIA 用 CUDA，其他显卡用 Vulkan，没有显卡时用处理器；也可在“设置 → 本地引擎”中手动选择。Vulkan 已在 NVIDIA 上验证；在 AMD 和 Intel 上属实验性质——在 AMD Radeon 集成显卡上人声无法辨认，独立显卡尚未测试。欢迎反馈。",
+      "ja": "エンジンは CUDA、Vulkan、プロセッサのバックエンドを備え、最適なものを自動選択します。NVIDIA は CUDA、それ以外は Vulkan、GPU がなければプロセッサ。「設定 → ローカルエンジン」で手動選択もできます。Vulkan は NVIDIA で確認済みですが、AMD と Intel では実験的です。AMD Radeon 内蔵グラフィックスではボーカルが聞き取れず、単体カードは未検証です。結果をぜひ教えてください。",
+      "ko": "엔진에는 CUDA, Vulkan, 프로세서 백엔드가 있고 가장 좋은 것을 고릅니다. NVIDIA는 CUDA, 그 밖에는 Vulkan, 그래픽카드가 없으면 프로세서이며 '설정 → 로컬 엔진'에서 직접 고를 수 있습니다. Vulkan은 NVIDIA에서 확인했고 AMD와 Intel에서는 실험적입니다. AMD Radeon 내장 그래픽에서는 보컬을 알아들을 수 없었고 외장 카드는 검증하지 않았습니다. 사용 후기를 알려 주세요."
+    },
+    "tags": [
+      "Vulkan",
+      "AMD",
+      "Intel",
+      "CUDA"
+    ]
+  },
+  {
+    "id": "yue2-score",
+    "date": "2026-09-23",
+    "title": {
+      "en": "The score is yours to edit",
+      "ru": "Партитуру можно править",
+      "zh": "乐谱由你编辑",
+      "ja": "楽譜は自由に編集できます",
+      "ko": "악보는 직접 고칠 수 있습니다"
+    },
+    "body": {
+      "en": "Every song comes back with the ABC score it was sung from, engraved as sheet music. Change notes, tempo or key and create again: the composition stays, the performance changes. Compose the score shows it in seconds, before anything is sung - the studio's take on yue2.cpp's yue-plan.",
+      "ru": "Каждая песня возвращается с партитурой ABC, по которой она спета, — нотами на экране. Поменяйте ноты, темп или тональность и создайте снова: композиция остаётся, меняется исполнение. «Сочинить партитуру» покажет её за секунды, ещё до пения, — это аналог yue-plan из yue2.cpp.",
+      "zh": "每首歌都会附带演唱所依据的 ABC 乐谱，并以五线谱显示。修改音符、速度或调性后再次创作：作品保持不变，演绎随之改变。“创作乐谱”能在演唱前几秒内给出乐谱，相当于 yue2.cpp 的 yue-plan。",
+      "ja": "すべての曲は、歌のもとになった ABC 楽譜つきで返り、楽譜として表示されます。音符、テンポ、キーを変えてもう一度作成すると、曲はそのままに演奏が変わります。「楽譜を作曲」なら歌う前に数秒で楽譜が見られます。yue2.cpp の yue-plan に相当します。",
+      "ko": "모든 곡은 노래의 바탕이 된 ABC 악보와 함께 돌아오고, 악보로 그려집니다. 음표, 템포, 조성을 바꿔 다시 만들면 곡은 그대로, 연주가 바뀝니다. '악보 작곡'은 노래하기 전에 몇 초 만에 악보를 보여 줍니다. yue2.cpp의 yue-plan에 해당합니다."
+    },
+    "tags": [
+      "ABC",
+      "score"
+    ]
+  },
+  {
+    "id": "yue2-covers",
+    "date": "2026-09-23",
+    "title": {
+      "en": "Covers with SheetSage2",
+      "ru": "Каверы через SheetSage2",
+      "zh": "用 SheetSage2 翻唱",
+      "ja": "SheetSage2 でカバー",
+      "ko": "SheetSage2로 커버"
+    },
+    "body": {
+      "en": "SheetSage2 listens to a recording and writes its melody down; YuE2 sings that melody with your lyrics in your style. Pick a file in the Cover tab, or transcribe any track from its menu - melody only for covers, or with chords.",
+      "ru": "SheetSage2 слушает запись и записывает её мелодию, YuE2 поёт эту мелодию с вашим текстом в вашем стиле. Выберите файл во вкладке «Кавер» или транскрибируйте любой трек из его меню — только мелодию для кавера или с аккордами.",
+      "zh": "SheetSage2 聆听录音并记下旋律，YuE2 用你的歌词和风格演唱这段旋律。在“翻唱”标签中选择文件，或从任意曲目的菜单中转写——翻唱只取旋律，也可带和弦。",
+      "ja": "SheetSage2 が録音を聴いてメロディを書き起こし、YuE2 があなたの歌詞とスタイルでそのメロディを歌います。「カバー」タブでファイルを選ぶか、任意のトラックのメニューから書き起こします。カバー用のメロディのみ、またはコードつき。",
+      "ko": "SheetSage2가 녹음을 듣고 멜로디를 받아 적으면, YuE2가 그 멜로디를 내 가사와 스타일로 부릅니다. '커버' 탭에서 파일을 고르거나 아무 트랙의 메뉴에서 채보하세요. 커버용 멜로디만, 또는 코드까지."
+    },
+    "tags": [
+      "SheetSage2",
+      "cover"
+    ]
+  },
+  {
+    "id": "yue2-engine-parity",
+    "date": "2026-09-23",
+    "title": {
+      "en": "Everything the engine can do",
+      "ru": "Всё, что умеет движок",
+      "zh": "引擎的全部能力",
+      "ja": "エンジンのすべての機能",
+      "ko": "엔진이 할 수 있는 모든 것"
+    },
+    "body": {
+      "en": "All seven sampling knobs for both stages, guidance, both seeds, flow-matching steps, batches and variations, peak normalisation, MP3 or WAV. Prompts open and save as JSON or YAML in yue2.cpp's own request format, and a prompt that carries audio codes asks whether to render the same take again or sing a new one - as the engine's WebUI does.",
+      "ru": "Все семь параметров сэмплинга для обеих стадий, guidance, оба сида, шаги flow matching, пачки и вариации, нормализация пика, MP3 или WAV. Промпты открываются и сохраняются в JSON или YAML в формате запросов yue2.cpp, а промпт с аудиокодами спросит, отрендерить тот же дубль или спеть новый, — как в WebUI движка.",
+      "zh": "两个阶段的全部七个采样参数、引导强度、两个种子、流匹配步数、批量与变体、峰值归一化、MP3 或 WAV。提示词可按 yue2.cpp 自己的请求格式以 JSON 或 YAML 打开和保存；带音频编码的提示词会询问是重新渲染同一版还是重新演唱——与引擎的 WebUI 一致。",
+      "ja": "両ステージの 7 つのサンプリング設定、ガイダンス、2 つのシード、フローマッチングのステップ、バッチとバリエーション、ピーク正規化、MP3 または WAV。プロンプトは yue2.cpp のリクエスト形式で JSON または YAML として開いて保存でき、オーディオコードを含むプロンプトは、同じテイクを再レンダリングするか新たに歌うかを尋ねます。エンジンの WebUI と同じです。",
+      "ko": "두 단계의 샘플링 설정 일곱 가지, 가이던스, 두 시드, 플로 매칭 스텝, 배치와 변주, 피크 정규화, MP3 또는 WAV. 프롬프트는 yue2.cpp의 요청 형식으로 JSON 또는 YAML로 열고 저장하며, 오디오 코드가 담긴 프롬프트는 같은 테이크를 다시 렌더링할지 새로 부를지 묻습니다. 엔진의 WebUI와 같습니다."
+    },
+    "tags": [
+      "yue2.cpp",
+      "YAML",
+      "replay"
+    ]
+  }
+]
