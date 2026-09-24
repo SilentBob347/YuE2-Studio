@@ -33,8 +33,8 @@ export interface Recipe {
   steps: number;
   save_every: number;
   seed?: number;
-  rank?: number | null;
-  learning_rate?: number | null;
+  /** The run stops once the planner is this far from the base model; 0 runs every step. */
+  target_kl?: number;
 }
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';

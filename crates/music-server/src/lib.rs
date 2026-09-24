@@ -1607,6 +1607,71 @@ async fn remove_song_version(
     Ok(Json(song))
 }
 
+/// The studio's separator, handed to training for the vocals lyric timing
+/// and lyric recognition are measured on.
+struct StudioSeparator {
+    model: PathBuf,
+    runtime: PathBuf,
+    overlap: f64,
+    on_gpu: bool,
+}
+
+impl training::VocalSeparator for StudioSeparator {
+    fn separate(&self, mix: &std::path::Path, out: &std::path::Path) -> anyhow::Result<()> {
+        point_ort_at(&self.runtime);
+        let audio = audio_pcm::decode_stereo_44k(mix)?;
+        let separated = separation::separate(&self.model, &audio, separation::STEMS.len(), self.overlap, self.on_gpu, |_| {})?;
+        let vocals = separated.stems.into_iter().find(|stem| stem.name == "vocals").context("the separator returned no vocals")?;
+        separation::write_wav_stereo(out, &vocals.samples)
+    }
+}
+
+/// The separator when its model and runtime are installed; the runtime is
+/// chosen the way a song's separation chooses it.
+async fn vocal_separator(state: &AppState) -> Option<Arc<dyn training::VocalSeparator>> {
+    let runtime = state
+        .lyrics_sync
+        .onnxruntime_library_of(if state.lyrics_sync.has_cuda_libraries() { lyrics_sync::OnnxFlavour::Cuda } else { lyrics_sync::OnnxFlavour::Cpu })
+        .or_else(|| state.lyrics_sync.onnxruntime_library())?;
+    if !state.separator.is_installed() {
+        return None;
+    }
+    let config = state.separation_config.read().await.clone();
+    Some(Arc::new(StudioSeparator {
+        model: state.separator.model_path(),
+        runtime,
+        overlap: config.sane_overlap(),
+        on_gpu: !matches!(config.runtime, lyrics_sync::OnnxFlavour::Cpu) && state.lyrics_sync.has_cuda_libraries(),
+    }))
+}
+
+/// Everything the separator still lacks, through the same downloaders the
+/// separator's own panel uses; the card path unless the processor was chosen.
+async fn install_separator(state: &AppState) {
+    let card = !matches!(state.separation_config.read().await.runtime, lyrics_sync::OnnxFlavour::Cpu);
+    let separator = state.separator.clone();
+    let sync = state.lyrics_sync.clone();
+    let mut runtime: Vec<&'static lyrics_sync::Asset> = Vec::new();
+    if let Some(asset) = lyrics_sync::asset("onnxruntime") {
+        runtime.push(asset);
+    }
+    if card {
+        runtime.extend(CARD_ASSETS.iter().filter_map(|id| lyrics_sync::asset(id)));
+    }
+    runtime.retain(|asset| !sync.downloader().is_installed(asset));
+    if !separator.is_installed() {
+        if let Err(error) = separator.downloader().install_all("separation", &[&separation::MODEL]).await {
+            eprintln!("[ERROR] the separator model could not be installed: {error:#}");
+            return;
+        }
+    }
+    if !runtime.is_empty() {
+        if let Err(error) = sync.downloader().install_all("separation", &runtime).await {
+            eprintln!("[ERROR] the separator runtime could not be installed: {error:#}");
+        }
+    }
+}
+
 fn training_error(error: anyhow::Error) -> (StatusCode, Json<ApiError>) {
     api_error(StatusCode::BAD_REQUEST, format!("{error:#}"))
 }
@@ -1629,10 +1694,28 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
             value
         })
         .collect();
+    // Lyric timing is aligned on the vocals, so the separator is part of what
+    // training needs; its files come through its own downloaders.
+    let separator_ready = vocal_separator(&state).await.is_some();
+    let separator_download = match state.separator.downloader().active_for("separation").await {
+        Some(active) if !active.done => Some(active),
+        other => state.lyrics_sync.downloader().active_for("separation").await.filter(|active| !active.done).or(other),
+    };
+    let mut pack = training.pack_status();
+    pack.push(serde_json::json!({
+        "id": "vocal-separator",
+        "label": separation::MODEL.label,
+        "bytes": separation::MODEL.bytes,
+        "installed": separator_ready,
+    }));
+    let training_download = training.downloader().active_for(training::SCOPE).await;
     Json(serde_json::json!({
-        "pack": training.pack_status(),
-        "pack_ready": training.pack_ready(),
-        "download": training.downloader().active_for(training::SCOPE).await,
+        "pack": pack,
+        "pack_ready": training.pack_ready() && separator_ready,
+        "download": match training_download {
+            Some(active) if !active.done => Some(active),
+            other => separator_download.or(other),
+        },
         "datasets": training.datasets(),
         "runs": runs,
         "active": active,
@@ -1640,17 +1723,21 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
 }
 
 async fn install_training_pack(State(state): State<AppState>) -> Json<Value> {
-    let training = state.training.clone();
+    let background = state.clone();
     tokio::spawn(async move {
-        if let Err(error) = training.install_pack().await {
+        if let Err(error) = background.training.install_pack().await {
             eprintln!("[ERROR] training pack: {error:#}");
+            return;
         }
+        install_separator(&background).await;
     });
     Json(serde_json::json!({ "started": true }))
 }
 
 async fn cancel_training_pack(State(state): State<AppState>) -> Json<Value> {
     state.training.downloader().cancel();
+    state.separator.downloader().cancel();
+    state.lyrics_sync.downloader().cancel();
     Json(serde_json::json!({ "cancelled": true }))
 }
 
@@ -1776,7 +1863,7 @@ async fn start_training(State(state): State<AppState>, Json(input): Json<StartTr
     free_the_card_for_the_engine(&state).await;
     state
         .training
-        .start(Some(engine_bundle_root()), tokenizer, &input.dataset_id, &input.name, input.recipe)
+        .start(Some(engine_bundle_root()), tokenizer, vocal_separator(&state).await, &input.dataset_id, &input.name, input.recipe)
         .await
         .map(Json)
         .map_err(|error| api_error(StatusCode::CONFLICT, format!("{error:#}")))
@@ -1850,32 +1937,29 @@ async fn autofill_training_item(
     let audio = state.training.item_audio(&id, &item).map_err(training_error)?;
 
     // The vocals alone recognise far better than the mix; without the
-    // separator the whole song is used.
-    let runtime = state.lyrics_sync.onnxruntime_library_of(if state.lyrics_sync.has_cuda_libraries() {
-        lyrics_sync::OnnxFlavour::Cuda
+    // separator the whole song is used. They are kept with the dataset, where
+    // lyric timing reads them too.
+    let vocals = state.training.item_vocals(&id, &item).map_err(training_error)?;
+    let heard = if vocals.is_file() {
+        vocals
     } else {
-        lyrics_sync::OnnxFlavour::Cpu
-    });
-    let heard = match runtime.filter(|_| state.separator.is_installed()) {
-        Some(runtime) => {
-            let model = state.separator.model_path();
-            let overlap = state.separation_config.read().await.sane_overlap();
-            let on_gpu = state.lyrics_sync.has_cuda_libraries();
-            let source = audio.clone();
-            tokio::task::spawn_blocking(move || -> anyhow::Result<PathBuf> {
-                point_ort_at(&runtime);
-                let mix = audio_pcm::decode_stereo_44k(&source)?;
-                let separated = separation::separate(&model, &mix, separation::STEMS.len(), overlap, on_gpu, |_| {})?;
-                let vocals = separated.stems.into_iter().find(|stem| stem.name == "vocals").context("the separator returned no vocals")?;
-                let path = std::env::temp_dir().join(format!("training-vocals-{}.wav", uuid::Uuid::now_v7().simple()));
-                separation::write_wav_stereo(&path, &vocals.samples)?;
-                Ok(path)
-            })
-            .await
-            .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-            .map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("separating the vocals failed: {error:#}")))?
+        match vocal_separator(&state).await {
+            Some(separator) => {
+                let source = audio.clone();
+                tokio::task::spawn_blocking(move || -> anyhow::Result<PathBuf> {
+                    let folder = vocals.parent().context("vocals folder")?;
+                    std::fs::create_dir_all(folder)?;
+                    let partial = folder.join("vocals.part.wav");
+                    separator.separate(&source, &partial)?;
+                    std::fs::rename(&partial, &vocals)?;
+                    Ok(vocals)
+                })
+                .await
+                .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+                .map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("separating the vocals failed: {error:#}")))?
+            }
+            None => audio.clone(),
         }
-        None => audio.clone(),
     };
 
     let words = match config.provider {
@@ -1896,9 +1980,6 @@ async fn autofill_training_item(
         lyrics_sync::AsrProvider::OpenRouter => karaoke_words_from_openrouter(&state, &config, &heard.to_string_lossy(), input.language.as_deref()).await,
         lyrics_sync::AsrProvider::None => unreachable!("checked above"),
     };
-    if heard != audio {
-        let _ = std::fs::remove_file(&heard);
-    }
     let words = words.map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("recognition failed: {error:#}")))?;
     // Punctuation the recogniser hangs at the start of a line belongs to the
     // line before, and an unknown-token marker is not a word.

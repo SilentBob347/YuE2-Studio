@@ -30,8 +30,6 @@ pub struct TrainingFile {
     /// The name it is stored under, the one the trainer looks for.
     pub file: &'static str,
     pub bytes: u64,
-    /// Needed only for lyric-timing supervision.
-    pub optional: bool,
 }
 
 pub const TRAINING_FILES: &[TrainingFile] = &[
@@ -41,7 +39,6 @@ pub const TRAINING_FILES: &[TrainingFile] = &[
         source: "checkpoints/yue2_3b_int8_convrot.safetensors",
         file: "yue2_3b_int8_convrot.safetensors",
         bytes: 3_960_938_800,
-        optional: false,
     },
     TrainingFile {
         id: "yue2-vae-encoder",
@@ -49,7 +46,6 @@ pub const TRAINING_FILES: &[TrainingFile] = &[
         source: "yue2-vae-standard-f32.gguf",
         file: "yue2-vae-standard-f32.gguf",
         bytes: 530_348_768,
-        optional: false,
     },
     TrainingFile {
         id: "yue2-semantic-tokenizer",
@@ -57,7 +53,6 @@ pub const TRAINING_FILES: &[TrainingFile] = &[
         source: "yue2-tok-f16.gguf",
         file: "yue2-tok-f16.gguf",
         bytes: 1_211_632_224,
-        optional: false,
     },
     TrainingFile {
         id: "yue2-sheetsage",
@@ -65,7 +60,13 @@ pub const TRAINING_FILES: &[TrainingFile] = &[
         source: "sheetsage2-f16.gguf",
         file: "sheetsage2-f16.gguf",
         bytes: 1_360_020_736,
-        optional: false,
+    },
+    TrainingFile {
+        id: "yue2-lyric-aligner",
+        label: "MMS forced aligner (lyric timing)",
+        source: "mms-fa/mms-fa-f32.gguf",
+        file: "mms-fa-f32.gguf",
+        bytes: 1_261_892_736,
     },
 ];
 
@@ -84,12 +85,37 @@ pub struct TrainingInputs {
     pub tokenizer: PathBuf,
     /// The run's own folder; every stage writes below it.
     pub run: PathBuf,
+    /// Holds `<song>/vocals.wav` for every song with lyrics, the audio the
+    /// lyric timing is aligned against.
+    pub vocals: PathBuf,
     pub trigger: String,
+    /// A cap: the run stops earlier once the planner has moved `target_kl`
+    /// away from the base model.
     pub steps: u32,
     pub save_every: u32,
     pub seed: u32,
-    pub rank: Option<u32>,
-    pub learning_rate: Option<f64>,
+    /// 0 trains all the steps.
+    pub target_kl: f64,
+}
+
+/// HOT-Step's joint recipe as its training page sends it (Yue2AitkTrainCard
+/// DEFAULT_FORM at the pinned commit); the trainer's own flag defaults are the
+/// older baseline and are not what the author tuned by ear.
+pub mod recipe {
+    pub const STEPS: u32 = 750;
+    pub const SAVE_EVERY: u32 = 50;
+    pub const SEED: u32 = 42;
+    pub const TARGET_KL: f64 = 1.4;
+    pub const OPTIMIZER: &str = "prodigy";
+    pub const PRODIGY_D0: &str = "1e-6";
+    pub const RANK: &str = "64";
+    pub const ALPHA: &str = "256";
+    pub const LOKR_DIM: &str = "64";
+    pub const LOKR_FACTOR: &str = "4";
+    /// The planner learns at 0.3 of the renderer's rate: likeness lives in the
+    /// renderer, and a planner at full rate memorises the songs.
+    pub const PLANNER_LR_SCALE: &str = "0.3";
+    pub const CURSOR_WEIGHT: &str = "0.08";
 }
 
 /// One trainer invocation.
@@ -104,9 +130,9 @@ fn path(value: &Path) -> OsString {
     value.as_os_str().to_owned()
 }
 
-/// The stages of a run, in order: latents, semantic codes, scores, the joint
-/// dataset, then training. Lyric timing is left out: it needs a vocal stem and
-/// an aligner per song, and the recipe trains well without it.
+/// The trainer's stages of a run, in order: latents, semantic codes, lyric
+/// timing, scores, the joint dataset, then training. The vocal stems the
+/// timing stage reads are the studio's to separate before these start.
 pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
     let models = &inputs.models;
     let cache = inputs.run.join("cache");
@@ -130,14 +156,27 @@ pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
         arg(&inputs.seed.to_string()),
         arg("--device"),
         arg("CUDA0"),
+        arg("--rank"),
+        arg(recipe::RANK),
+        arg("--alpha"),
+        arg(recipe::ALPHA),
+        arg("--adapter-type"),
+        arg("lokr"),
+        arg("--lokr-dim"),
+        arg(recipe::LOKR_DIM),
+        arg("--lokr-factor"),
+        arg(recipe::LOKR_FACTOR),
+        arg("--optimizer"),
+        arg(recipe::OPTIMIZER),
+        arg("--prodigy-d0"),
+        arg(recipe::PRODIGY_D0),
+        arg("--planner-lr-scale"),
+        arg(recipe::PLANNER_LR_SCALE),
         arg("--cursor-weight"),
-        arg("0"),
+        arg(recipe::CURSOR_WEIGHT),
     ];
-    if let Some(rank) = inputs.rank {
-        train.extend([arg("--rank"), arg(&rank.to_string()), arg("--alpha"), arg(&rank.to_string())]);
-    }
-    if let Some(rate) = inputs.learning_rate {
-        train.extend([arg("--lr"), arg(&rate.to_string())]);
+    if inputs.target_kl > 0.0 {
+        train.extend([arg("--target-kl"), arg(&inputs.target_kl.to_string())]);
     }
     let mut prepare = vec![
         arg("yue2-prepare-aitk"),
@@ -156,7 +195,7 @@ pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
         arg("--model"),
         model("sheetsage", TRAINING_FILES[3].file),
         arg("--lyric-timing"),
-        arg("0"),
+        arg("1"),
     ];
     if !inputs.trigger.trim().is_empty() {
         prepare.extend([arg("--trigger"), arg(inputs.trigger.trim())]);
@@ -179,6 +218,18 @@ pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
             ],
         },
         TrainingStage { id: "codes", args: vec![arg("yue2-tokenize"), arg("--manifest"), path(&manifest), arg("--models"), path(models)] },
+        TrainingStage {
+            id: "align",
+            args: vec![
+                arg("yue2-align"),
+                arg("--manifest"),
+                path(&manifest),
+                arg("--mmsfa"),
+                path(&models.join(TRAINING_FILES[4].file)),
+                arg("--stems"),
+                path(&inputs.vocals),
+            ],
+        },
         TrainingStage { id: "scores", args: vec![arg("yue2-sheet"), arg("--manifest"), path(&manifest), arg("--models"), path(models)] },
         TrainingStage { id: "prepare", args: prepare },
         TrainingStage { id: "train", args: train },
@@ -267,20 +318,26 @@ mod tests {
             models: "m".into(),
             tokenizer: "t.gguf".into(),
             run: "r".into(),
+            vocals: "v".into(),
             trigger: "sks".into(),
-            steps: 150,
+            steps: 750,
             save_every: 50,
             seed: 42,
-            rank: Some(16),
-            learning_rate: None,
+            target_kl: 1.4,
         };
         let stages = training_stages(&inputs);
-        assert_eq!(stages.iter().map(|stage| stage.id).collect::<Vec<_>>(), ["latents", "codes", "scores", "prepare", "train"]);
-        let train: Vec<String> = stages[4].args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert_eq!(stages.iter().map(|stage| stage.id).collect::<Vec<_>>(), ["latents", "codes", "align", "scores", "prepare", "train"]);
+        let strings = |index: usize| -> Vec<String> { stages[index].args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect() };
+        let train = strings(5);
         assert_eq!(train[0], "yue2-joint-train");
-        assert!(train.windows(2).any(|pair| pair == ["--rank", "16"]));
-        let prepare: Vec<String> = stages[3].args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        for pair in [["--optimizer", "prodigy"], ["--adapter-type", "lokr"], ["--planner-lr-scale", "0.3"], ["--target-kl", "1.4"], ["--cursor-weight", "0.08"]] {
+            assert!(train.windows(2).any(|window| window == pair), "{pair:?}");
+        }
+        assert!(!train.iter().any(|arg| arg == "--lr"), "Prodigy sets its own step size");
+        let prepare = strings(4);
         assert!(prepare.windows(2).any(|pair| pair == ["--trigger", "sks"]));
+        assert!(prepare.windows(2).any(|pair| pair == ["--lyric-timing", "1"]));
+        assert!(strings(2).windows(2).any(|pair| pair == ["--stems", "v"]));
     }
 
     #[test]

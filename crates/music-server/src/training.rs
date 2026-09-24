@@ -60,22 +60,46 @@ fn dataset_format() -> String {
     "music-dataset-v1".into()
 }
 
-/// What a run is asked for; everything but the dataset has a default.
+/// What a run is asked for; the rest of the recipe is the engine's.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recipe {
+    /// The most steps the run may take.
+    #[serde(default = "default_steps")]
     pub steps: u32,
+    #[serde(default = "default_save_every")]
     pub save_every: u32,
     #[serde(default = "default_seed")]
     pub seed: u32,
-    #[serde(default)]
-    pub rank: Option<u32>,
-    #[serde(default)]
-    pub learning_rate: Option<f64>,
+    /// How far the adapter may pull the planner from the base model before
+    /// the run stops; 0 runs every step.
+    #[serde(default = "default_target_kl")]
+    pub target_kl: f64,
+}
+
+fn default_steps() -> u32 {
+    yue_train::recipe::STEPS
+}
+
+fn default_save_every() -> u32 {
+    yue_train::recipe::SAVE_EVERY
 }
 
 fn default_seed() -> u32 {
-    42
+    yue_train::recipe::SEED
 }
+
+fn default_target_kl() -> f64 {
+    yue_train::recipe::TARGET_KL
+}
+
+/// Separates the vocals of a song for lyric timing; the studio's separator.
+pub trait VocalSeparator: Send + Sync {
+    /// Writes the vocals of `mix` to `out` as WAV.
+    fn separate(&self, mix: &Path, out: &Path) -> Result<()>;
+}
+
+/// The studio-side stage that runs before the trainer's.
+const VOCALS_STAGE: &str = "vocals";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -257,6 +281,32 @@ impl Training {
         Ok(self.datasets_dir().join(safe_id(id)?))
     }
 
+    /// Where a dataset keeps its separated vocals: `<song>/vocals.wav`, the
+    /// layout the trainer's aligner reads.
+    fn vocals_dir(&self, id: &str) -> Result<PathBuf> {
+        Ok(self.dataset_dir(id)?.join("vocals"))
+    }
+
+    /// The separated vocals of one dataset song, whether or not made yet.
+    pub fn item_vocals(&self, id: &str, item_id: &str) -> Result<PathBuf> {
+        let dataset = self.dataset(id)?;
+        let item = dataset.items.iter().find(|item| item.id == item_id).with_context(|| format!("no song {item_id} in the dataset"))?;
+        Ok(self.vocals_dir(id)?.join(item.file.trim_end_matches(".wav")).join("vocals.wav"))
+    }
+
+    /// Songs with lyrics whose vocals are not separated yet.
+    fn missing_vocals(&self, dataset: &Dataset) -> Result<Vec<(PathBuf, PathBuf)>> {
+        let audio = self.dataset_dir(&dataset.id)?.join("audio");
+        let vocals = self.vocals_dir(&dataset.id)?;
+        Ok(dataset
+            .items
+            .iter()
+            .filter(|item| !item.instrumental && !item.lyrics.trim().is_empty())
+            .map(|item| (audio.join(&item.file), vocals.join(item.file.trim_end_matches(".wav")).join("vocals.wav")))
+            .filter(|(_, out)| !out.is_file())
+            .collect())
+    }
+
     fn run_dir(&self, id: &str) -> Result<PathBuf> {
         Ok(self.runs_dir().join(safe_id(id)?))
     }
@@ -389,6 +439,7 @@ impl Training {
         let position = dataset.items.iter().position(|item| item.id == item_id).with_context(|| format!("no song {item_id} in the dataset"))?;
         let item = dataset.items.remove(position);
         let _ = std::fs::remove_file(self.dataset_dir(id)?.join("audio").join(&item.file));
+        let _ = std::fs::remove_dir_all(self.vocals_dir(id)?.join(item.file.trim_end_matches(".wav")));
         self.save_dataset(&dataset)?;
         Ok(dataset)
     }
@@ -461,7 +512,15 @@ impl Training {
     /// Starts training a dataset; one run at a time, since each wants the card.
     /// `libraries` is where the CUDA runtime the trainer imports lives: the
     /// engine's, fetched on its first start, so it is not downloaded twice.
-    pub async fn start(self: &Arc<Self>, libraries: Option<PathBuf>, tokenizer: PathBuf, dataset_id: &str, name: &str, recipe: Recipe) -> Result<Run> {
+    pub async fn start(
+        self: &Arc<Self>,
+        libraries: Option<PathBuf>,
+        tokenizer: PathBuf,
+        separator: Option<Arc<dyn VocalSeparator>>,
+        dataset_id: &str,
+        name: &str,
+        recipe: Recipe,
+    ) -> Result<Run> {
         let trainer = self.trainer();
         if !self.pack_ready() {
             bail!("the training files are not downloaded yet");
@@ -476,6 +535,10 @@ impl Training {
         if recipe.steps == 0 {
             bail!("training needs at least one step");
         }
+        let missing = self.missing_vocals(&dataset)?;
+        if !missing.is_empty() && separator.is_none() {
+            bail!("the vocal separator is not installed; lyric timing needs the vocals of every song with lyrics");
+        }
         let mut active = self.active.write().await;
         if active.is_some() {
             bail!("a training run is already going");
@@ -488,12 +551,12 @@ impl Training {
             models: self.models_dir(),
             tokenizer,
             run: run_dir.clone(),
+            vocals: self.vocals_dir(&dataset.id)?,
             trigger: dataset.trigger.clone(),
             steps: recipe.steps,
             save_every: recipe.save_every,
             seed: recipe.seed,
-            rank: recipe.rank,
-            learning_rate: recipe.learning_rate,
+            target_kl: recipe.target_kl,
         };
         let stages = yue_train::training_stages(&inputs);
         let run = Run {
@@ -506,7 +569,7 @@ impl Training {
             recipe,
             status: RunStatus::Running,
             stage: None,
-            stages: stages.iter().map(|stage| stage.id.to_string()).collect(),
+            stages: std::iter::once(VOCALS_STAGE).chain(stages.iter().map(|stage| stage.id)).map(str::to_string).collect(),
             steps: Vec::new(),
             error: None,
             created_at: now(),
@@ -520,7 +583,10 @@ impl Training {
 
         let training = self.clone();
         tokio::spawn(async move {
-            let outcome = training.work(&trainer, libraries.as_deref(), &run_dir, &run_id, stages, cancel).await;
+            let outcome = match training.separate_vocals(&run_id, separator, missing, cancel.clone()).await {
+                Ok(true) => training.work(&trainer, libraries.as_deref(), &run_dir, &run_id, stages, cancel).await,
+                other => other,
+            };
             if let Ok(mut run) = training.run(&run_id) {
                 run.finished_at = Some(now());
                 match outcome {
@@ -539,6 +605,31 @@ impl Training {
             *training.active.write().await = None;
         });
         Ok(run)
+    }
+
+    /// Separates the vocals still missing, one song at a time; the result is
+    /// kept with the dataset, so the next run and lyric recognition reuse it.
+    async fn separate_vocals(&self, run_id: &str, separator: Option<Arc<dyn VocalSeparator>>, missing: Vec<(PathBuf, PathBuf)>, cancel: Arc<tokio::sync::Notify>) -> Result<bool> {
+        let mut run = self.run(run_id)?;
+        run.stage = Some(VOCALS_STAGE.into());
+        self.save_run(&run)?;
+        let Some(separator) = separator else { return Ok(true) };
+        for (mix, out) in missing {
+            let separator = separator.clone();
+            let job = tokio::task::spawn_blocking(move || -> Result<()> {
+                let folder = out.parent().context("vocals folder")?;
+                std::fs::create_dir_all(folder)?;
+                let partial = folder.join("vocals.part.wav");
+                separator.separate(&mix, &partial)?;
+                std::fs::rename(&partial, &out)?;
+                Ok(())
+            });
+            tokio::select! {
+                done = job => done.context("vocal separation")?.context("separating the vocals")?,
+                _ = cancel.notified() => return Ok(false),
+            }
+        }
+        Ok(true)
     }
 
     /// Runs the stages in order; `Ok(false)` when cancelled.

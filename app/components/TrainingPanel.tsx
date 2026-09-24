@@ -41,11 +41,8 @@ const PRIMARY =
   'inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-orange-500 to-pink-600 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50';
 const LABEL = 'text-[11px] font-bold uppercase tracking-wide text-zinc-500';
 
-const PRESETS = [
-  { id: 'quick', steps: 150 },
-  { id: 'normal', steps: 300 },
-  { id: 'long', steps: 600 },
-] as const;
+/** HOT-Step's recipe; the server fills the same values in when a field is left out. */
+const RECIPE = { steps: 750, saveEvery: 50, seed: 42, targetKl: 1.4 } as const;
 
 function useStrings() {
   const { t } = useI18n();
@@ -212,10 +209,14 @@ const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (mes
   const { t, tt } = useStrings();
   const running = run.status === 'running';
   const last = run.steps[run.steps.length - 1];
+  const target = run.recipe.target_kl ?? 0;
+  // the trainer stops on the mean KL of its last 20 steps
+  const window = run.steps.slice(-20).map(step => step.ar_kl).filter((kl): kl is number => typeof kl === 'number');
+  const kl = window.length ? window.reduce((a, b) => a + b, 0) / window.length : 0;
   const recent = run.steps.slice(-10).map(step => step.step_ms).filter((ms): ms is number => typeof ms === 'number');
   const perStep = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length / 1000 : 0;
-  const left = last && perStep ? (run.recipe.steps - last.step) * perStep : 0;
-  const percent = last ? (100 * last.step) / run.recipe.steps : 0;
+  const left = last && perStep && target <= 0 ? (run.recipe.steps - last.step) * perStep : 0;
+  const percent = last ? Math.min(100, 100 * Math.max(last.step / run.recipe.steps, target > 0 ? kl / target : 0)) : 0;
   const stageIndex = run.stage ? run.stages.indexOf(run.stage) : run.status === 'done' ? run.stages.length : -1;
   const tone = { running: 'text-pink-600 dark:text-pink-300', done: 'text-emerald-600 dark:text-emerald-400', failed: 'text-rose-600 dark:text-rose-300', cancelled: 'text-zinc-500', interrupted: 'text-amber-600 dark:text-amber-300' }[run.status];
   return (
@@ -223,7 +224,7 @@ const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (mes
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{run.name}</p>
-          <p className="mt-0.5 text-[11px] text-zinc-500">{run.dataset_name}{run.trigger ? ` · ${run.trigger}` : ''} · {run.recipe.steps} {t('trainingSteps')}</p>
+          <p className="mt-0.5 text-[11px] text-zinc-500">{run.dataset_name}{run.trigger ? ` · ${run.trigger}` : ''} · {target > 0 ? `KL ${target} · ` : ''}≤ {run.recipe.steps} {t('trainingSteps')}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className={`inline-flex items-center gap-1 text-xs font-semibold ${tone}`}>{running && <Loader2 size={12} className="animate-spin" />}{tt(`trainingStatus_${run.status}`)}</span>
@@ -251,7 +252,7 @@ const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (mes
       {last && (
         <>
           <div className="mt-3 flex items-baseline justify-between text-[11px] tabular-nums text-zinc-600 dark:text-zinc-300">
-            <span>{t('trainingStep')} {last.step} / {run.recipe.steps} · {t('trainingLoss')} {last.loss.toFixed(3)}{typeof last.ar_kl === 'number' ? ` · KL ${last.ar_kl.toFixed(2)}` : ''}</span>
+            <span>{t('trainingStep')} {last.step} · {t('trainingLoss')} {last.loss.toFixed(3)} · KL {kl.toFixed(2)}{target > 0 ? ` / ${target}` : ''}</span>
             {running && left > 0 && <span>{clock(left)} {t('trainingLeft')}</span>}
           </div>
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-white/10">
@@ -313,11 +314,10 @@ export const TrainingPanel: React.FC = () => {
   const [newTrigger, setNewTrigger] = useState('');
   const [picking, setPicking] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [preset, setPreset] = useState<(typeof PRESETS)[number]['id']>('quick');
   const [advanced, setAdvanced] = useState(false);
-  const [rank, setRank] = useState(32);
-  const [learningRate, setLearningRate] = useState('');
-  const [seed, setSeed] = useState(42);
+  const [steps, setSteps] = useState<number>(RECIPE.steps);
+  const [targetKl, setTargetKl] = useState<number>(RECIPE.targetKl);
+  const [seed, setSeed] = useState<number>(RECIPE.seed);
   const [starting, setStarting] = useState(false);
   const [deleting, setDeleting] = useState<{ kind: 'dataset' | 'run'; id: string } | null>(null);
   const [recognising, setRecognising] = useState<string[]>([]);
@@ -341,7 +341,6 @@ export const TrainingPanel: React.FC = () => {
   const datasets = state?.datasets ?? [];
   const dataset = datasets.find(entry => entry.id === selected) ?? datasets[0] ?? null;
   const replace = (next: Dataset) => setState(current => (current ? { ...current, datasets: current.datasets.map(entry => (entry.id === next.id ? next : entry)) } : current));
-  const steps = PRESETS.find(entry => entry.id === preset)!.steps;
   const total = dataset?.items.reduce((sum, item) => sum + item.seconds, 0) ?? 0;
   const exclude = useMemo(() => (dataset?.items ?? []).map(item => item.source.replace(/^song:/, '')), [dataset?.items]);
 
@@ -407,14 +406,7 @@ export const TrainingPanel: React.FC = () => {
     setStarting(true);
     setError(null);
     try {
-      const rate = Number(learningRate);
-      await startRun(dataset.id, dataset.name, {
-        steps,
-        save_every: Math.max(1, Math.round(steps / 6)),
-        seed,
-        rank,
-        learning_rate: learningRate.trim() && Number.isFinite(rate) && rate > 0 ? rate : null,
-      });
+      await startRun(dataset.id, dataset.name, { steps, save_every: RECIPE.saveEvery, seed, target_kl: targetKl });
       await refresh();
     } catch (problem) {
       setError(errorText(problem));
@@ -517,39 +509,29 @@ export const TrainingPanel: React.FC = () => {
       {dataset && (
         <section className={CARD}>
           <p className={LABEL}>{t('trainingTrain')}</p>
-          <div role="tablist" className="mt-2 flex rounded-lg bg-zinc-100 p-1 dark:bg-white/5">
-            {PRESETS.map(entry => (
-              <button
-                key={entry.id}
-                type="button"
-                role="tab"
-                aria-selected={preset === entry.id}
-                onClick={() => setPreset(entry.id)}
-                className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${preset === entry.id ? 'bg-white text-black shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'}`}
-              >
-                {tt(`trainingPreset_${entry.id}`)} · {entry.steps} {t('trainingSteps')}
-              </button>
-            ))}
-          </div>
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+            {t('trainingRecipe').replace('{kl}', String(targetKl)).replace('{steps}', String(steps)).replace('{every}', String(RECIPE.saveEvery))}
+          </p>
           <button type="button" onClick={() => setAdvanced(value => !value)} className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200" aria-expanded={advanced}>
             <ChevronDown size={13} className={`transition-transform ${advanced ? 'rotate-180' : ''}`} />{t('trainingAdvanced')}
           </button>
           {advanced && (
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
-              <label>
-                <span className={LABEL}>{t('trainingRank')}</span>
-                <select value={rank} onChange={event => setRank(Number(event.target.value))} className={`${CONTROL} mt-1`}>
-                  {[8, 16, 32, 64].map(value => <option key={value} value={value}>{value}</option>)}
-                </select>
-              </label>
-              <label>
-                <span className={LABEL}>{t('trainingLearningRate')}</span>
-                <input value={learningRate} onChange={event => setLearningRate(event.target.value)} placeholder="1e-4" className={`${CONTROL} mt-1`} />
-              </label>
-              <label>
-                <span className={LABEL}>{t('trainingSeed')}</span>
-                <input type="number" value={seed} onChange={event => setSeed(Number(event.target.value) || 0)} className={`${CONTROL} mt-1`} />
-              </label>
+            <div className="mt-2">
+              <div className="grid gap-2 sm:grid-cols-3">
+                <label>
+                  <span className={LABEL}>{t('trainingTargetKl')}</span>
+                  <input type="number" min={0} max={5} step={0.1} value={targetKl} onChange={event => setTargetKl(Math.max(0, Number(event.target.value) || 0))} className={`${CONTROL} mt-1`} />
+                </label>
+                <label>
+                  <span className={LABEL}>{t('trainingMaxSteps')}</span>
+                  <input type="number" min={RECIPE.saveEvery} step={50} value={steps} onChange={event => setSteps(Math.max(1, Math.round(Number(event.target.value) || 0)))} className={`${CONTROL} mt-1`} />
+                </label>
+                <label>
+                  <span className={LABEL}>{t('trainingSeed')}</span>
+                  <input type="number" value={seed} onChange={event => setSeed(Number(event.target.value) || 0)} className={`${CONTROL} mt-1`} />
+                </label>
+              </div>
+              <p className="mt-1.5 text-[11px] leading-4 text-zinc-500">{t('trainingTargetKlHint')}</p>
             </div>
           )}
           <div className="mt-4 flex flex-wrap items-center gap-3">
