@@ -171,6 +171,23 @@ deleting the folder removes the studio. Only an installation into a read-only lo
 such as Program Files falls back to `%LOCALAPPDATA%\YuE2 Studio`. The installed version
 updates itself: a new release is offered inside the studio and installed in place.
 
+## Drive it from an agent (MCP)
+
+While the studio is open it serves MCP at `http://127.0.0.1:8791/mcp`: an agent such as
+Claude Code, Claude Desktop or Cursor does everything the page does, through the same code -
+songs and scores, the library, covers, stems, karaoke, processing, video clips, the player,
+LoRA, and a LoRA from a folder of songs end to end - and sees and works the window itself:
+a screenshot, its controls, clicks and typing. 144 tools, grouped by area. The model's
+writing rules and official examples come with the server, so the agent writes the styles,
+lyrics and lyric layouts itself instead of the studio's small assistant.
+
+```bash
+claude mcp add --transport http yue2-studio http://127.0.0.1:8791/mcp
+```
+
+[docs/mcp-skill.md](docs/mcp-skill.md) is the skill an agent reads: every tool, what the
+model expects, and step-by-step recipes.
+
 ## Models
 
 A runnable YuE2 installation is a **backbone** (the 3B model that writes the score and the

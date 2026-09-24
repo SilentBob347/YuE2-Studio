@@ -61,6 +61,19 @@ pub struct PrepareRequest {
     /// Start this run once every song is ready.
     #[serde(default)]
     pub train: Option<TrainAfter>,
+    /// Who lays the lyrics out and writes the styles: the studio's assistant,
+    /// or an agent connected over MCP, which finds the songs left `found` and
+    /// `heard` with everything it needs and writes them itself.
+    #[serde(default)]
+    pub writer: Writer,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Writer {
+    #[default]
+    Studio,
+    Agent,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -80,6 +93,8 @@ struct Job {
     style: bool,
     language: Option<String>,
     train: Option<TrainAfter>,
+    #[serde(default)]
+    writer: Writer,
 }
 
 /// What the job is doing, for the training page to show.
@@ -185,6 +200,7 @@ pub async fn start(
         style: request.style != Fill::None,
         language: request.language,
         train: request.train,
+        writer: request.writer,
     };
     Ok(Json(launch(&state, job).map_err(crate::training_error)?))
 }
@@ -292,9 +308,9 @@ enum Passed {
 fn has_work(item: &training::DatasetItem, job: &Job, can_listen: bool, passed: Passed) -> bool {
     use training::{LyricsState, StyleState};
     (job.lyrics && item.lyrics_state == LyricsState::Wanted && passed < Passed::Lyrics)
-        || (job.lyrics && item.lyrics_state == LyricsState::Found && passed < Passed::Writing)
+        || (job.lyrics && job.writer == Writer::Studio && item.lyrics_state == LyricsState::Found && passed < Passed::Writing)
         || (job.style && can_listen && item.style_state == StyleState::Wanted && passed < Passed::Listening)
-        || (job.style && item.style_state == StyleState::Heard && passed < Passed::Styles)
+        || (job.style && job.writer == Writer::Studio && item.style_state == StyleState::Heard && passed < Passed::Styles)
 }
 
 /// The queue: the songs of the job with a step still ahead, failures out.
@@ -352,6 +368,10 @@ async fn run(state: &AppState, job: &Job) -> anyhow::Result<()> {
         }
     }
     settle_pending(&state.training, job, &shared, can_listen, Passed::Listening);
+    // an agent writes what is left found and heard itself
+    if job.writer == Writer::Agent {
+        return Ok(());
+    }
     let outcome = async {
         if job.lyrics {
             write_lyrics(state, job, &timed, can_listen).await?;
@@ -924,7 +944,7 @@ mod tests {
     #[test]
     fn a_song_leaves_the_queue_once_its_steps_are_behind() {
         use training::{LyricsState as L, StyleState as S};
-        let job = Job { dataset: "d".into(), items: None, lyrics: true, style: true, language: None, train: None };
+        let job = Job { dataset: "d".into(), items: None, lyrics: true, style: true, language: None, train: None, writer: Writer::Studio };
         // found lyrics wait for the writing, whatever else is done
         assert!(has_work(&song(L::Found, S::Done), &job, true, Passed::Listening));
         assert!(!has_work(&song(L::Found, S::Done), &job, true, Passed::Writing));

@@ -16,6 +16,7 @@ mod audio_pcm;
 mod downloads;
 mod engine_runtime;
 mod lyrics_db;
+mod mcp;
 mod lyrics_sync;
 mod credentials;
 mod model_manager;
@@ -722,6 +723,12 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/training/datasets/{id}/items/{item}", axum::routing::patch(update_training_item).delete(delete_training_item))
         .route("/v1/training/datasets/{id}/items/{item}/audio", get(training_item_audio))
         .route("/v1/training/datasets/{id}/prepare", post(prepare::start))
+        .route("/v1/lyrics/find", post(find_lyrics))
+        .route("/v1/videos", post(store_video))
+        .route("/v1/writing/guide", get(writing_guide))
+        .route("/v1/writing/examples", get(writing_examples))
+        .route("/v1/library/songs/{id}/files", get(library_song_files))
+        .route("/v1/training/datasets/{id}/items/{item}/files", get(dataset_song_files))
         .route("/v1/training/prepare/cancel", post(prepare::cancel))
         .route("/v1/training/prepare/train-after", post(prepare::set_train_after))
         .route("/v1/training/listen/install", post(install_listen_pack))
@@ -766,7 +773,13 @@ pub async fn serve() -> anyhow::Result<()> {
         // Covers and imported audio are megabytes, not kilobytes. The default
         // two-megabyte cap rejected a generated cover by dropping the
         // connection, which reaches the interface as "Failed to fetch".
-        .layer(DefaultBodyLimit::max(256 * 1024 * 1024))
+        .layer(DefaultBodyLimit::max(256 * 1024 * 1024));
+    // the MCP tools call the same routes, inside the process
+    mcp::install(app.clone());
+    let app = app
+        .route("/mcp", post(mcp::handle).get(mcp::info))
+        .route("/mcp/window", get(mcp::window_events))
+        .route("/mcp/window/result", post(mcp::window_result))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http());
 
@@ -4631,6 +4644,100 @@ async fn release_assistant_unless_kept(state: &AppState) {
     if state.assistant_runtime.base_url().await.is_some() {
         state.assistant_runtime.stop().await;
     }
+}
+
+/// Where a library song's files are, for an agent that reads or opens them.
+async fn library_song_files(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let song = state
+        .library
+        .get_song(&id)
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
+    let stems: Vec<Value> = stems_on_disk(&state, &id).into_iter().map(|stem| serde_json::json!({ "stem": stem, "path": stem_path(&state, &id, &stem) })).collect();
+    Ok(Json(serde_json::json!({
+        "audio": state.library.media_path_for_song(&song),
+        "cover": state.library.cover_path_for_song(&song).map(|(path, _)| path),
+        "stems": stems,
+    })))
+}
+
+/// Where a dataset song's audio and separated vocals are.
+async fn dataset_song_files(State(state): State<AppState>, Path((id, item)): Path<(String, String)>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let audio = state.training.item_audio(&id, &item).map_err(training_error)?;
+    let vocals = state.training.item_vocals(&id, &item).map_err(training_error)?;
+    Ok(Json(serde_json::json!({ "audio": audio, "vocals": vocals.is_file().then_some(vocals) })))
+}
+
+#[derive(Debug, Deserialize)]
+struct GuideQuery {
+    #[serde(default)]
+    topic: String,
+}
+
+/// How to write for YuE2, from the rules the studio's assistant follows.
+async fn writing_guide(Query(query): Query<GuideQuery>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let topics: Vec<Value> = assistant::GUIDE_TOPICS.iter().map(|(topic, about)| serde_json::json!({ "topic": topic, "about": about })).collect();
+    match assistant::writing_guide(query.topic.trim()) {
+        Some(guide) => Ok(Json(serde_json::json!({ "topic": query.topic, "guide": guide }))),
+        None if query.topic.trim().is_empty() => Ok(Json(serde_json::json!({ "topics": topics }))),
+        None => Err(api_error(StatusCode::BAD_REQUEST, format!("No guide '{}'; the topics are: {}", query.topic, assistant::GUIDE_TOPICS.iter().map(|(topic, _)| *topic).collect::<Vec<_>>().join(", ")))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ExamplesQuery {
+    #[serde(default)]
+    brief: String,
+}
+
+/// The official YuE2 requests closest to a brief, to write in their shape.
+async fn writing_examples(Query(query): Query<ExamplesQuery>) -> Json<Value> {
+    let found: Vec<Value> = skill::references(&query.brief).into_iter().map(|reference| serde_json::json!({ "title": reference.title, "style": reference.style, "lyrics": reference.lyrics })).collect();
+    Json(serde_json::json!({ "examples": found }))
+}
+
+#[derive(Debug, Deserialize)]
+struct VideoName {
+    name: String,
+}
+
+/// A clip the video editor rendered for an agent, kept in the studio's
+/// `videos` folder under a name that does not overwrite another.
+async fn store_video(Query(query): Query<VideoName>, body: axum::body::Bytes) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let folder = studio_data_root().unwrap_or_else(|| PathBuf::from(".")).join("videos");
+    std::fs::create_dir_all(&folder).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("create {}: {error}", folder.display())))?;
+    let name = std::path::Path::new(&query.name).file_name().and_then(|name| name.to_str()).filter(|name| !name.is_empty()).unwrap_or("clip.mp4").to_string();
+    let (stem, extension) = name.rsplit_once('.').map_or((name.clone(), "mp4".to_string()), |(stem, extension)| (stem.to_string(), extension.to_string()));
+    let mut path = folder.join(&name);
+    let mut number = 2;
+    while path.exists() {
+        path = folder.join(format!("{stem}-{number}.{extension}"));
+        number += 1;
+    }
+    std::fs::write(&path, &body).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("write {}: {error}", path.display())))?;
+    Ok(Json(serde_json::json!({ "path": path })))
+}
+
+#[derive(Debug, Deserialize)]
+struct FindLyricsRequest {
+    #[serde(default)]
+    artist: String,
+    title: String,
+    #[serde(default)]
+    seconds: f64,
+}
+
+/// A song's published lyrics from the lyric databases, for the MCP tools.
+async fn find_lyrics(Json(request): Json<FindLyricsRequest>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let sources = lyrics_db::Sources::new().map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")))?;
+    let mut failed = Vec::new();
+    let song = lyrics_db::Song { artist: request.artist, title: request.title, seconds: request.seconds };
+    let found = match sources.find(&song, &mut failed).await {
+        Some(lyrics_db::Found::Lyrics { plain, timed, source }) => serde_json::json!({ "source": source, "lyrics": plain, "timed": timed }),
+        Some(lyrics_db::Found::Instrumental { source }) => serde_json::json!({ "source": source, "instrumental": true }),
+        None => serde_json::json!({ "found": false }),
+    };
+    Ok(Json(serde_json::json!({ "result": found, "unreachable": failed })))
 }
 
 /// What was asked of the cloud and what came back, newest last.

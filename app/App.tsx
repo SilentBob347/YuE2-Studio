@@ -10,6 +10,7 @@ import { CoverRegenModal } from './components/CoverRegenModal';
 import { ReplayModal } from './components/ReplayModal';
 import { ProcessingModal } from './components/ProcessingModal';
 import { VideoGeneratorModal } from './components/VideoGeneratorModal';
+import { useBridgeCommand } from './services/mcpBridge';
 import { SettingsModal } from './components/SettingsModal';
 import { Song, YueRequest, YueJob, YueProgress, View, Playlist } from './types';
 // Resizable panel hook
@@ -1046,6 +1047,76 @@ function AppContent() {
     }
     setShowRightSidebar(true);
   };
+
+  // An agent connected over MCP works this window like a user
+  const VIEWS: View[] = ['create', 'library', 'tools', 'adapters', 'playlist', 'search', 'news'];
+  const songById = (id: unknown) => {
+    const song = songs.find(entry => entry.id === id);
+    if (!song) throw new Error(`No song ${String(id)} in the library; list_songs gives the ids.`);
+    return song;
+  };
+  useBridgeCommand('navigate', ({ view }) => {
+    if (!VIEWS.includes(view as View)) throw new Error(`Pages: ${VIEWS.join(', ')}.`);
+    setCurrentView(view as View);
+    return { text: `On ${String(view)}.` };
+  });
+  useBridgeCommand('open_settings', ({ section }) => {
+    setSettingsSection(typeof section === 'string' ? section : null);
+    setShowSettingsModal(true);
+    return { text: 'Settings are open.' };
+  });
+  useBridgeCommand('player_state', () => ({
+    song: currentSong ? { id: currentSong.id, title: currentSong.title } : null,
+    playing: isPlaying,
+    position_seconds: Math.round(currentTime * 10) / 10,
+    duration_seconds: Math.round(duration * 10) / 10,
+    volume,
+    shuffle: isShuffle,
+    repeat: repeatMode,
+    queue: playQueue.length,
+  }));
+  useBridgeCommand('player_play', ({ song_id }) => {
+    if (song_id) {
+      const song = songById(song_id);
+      if (currentSong?.id !== song.id) playSong(song);
+      else setIsPlaying(true);
+      return { text: `Playing ${song.title}.` };
+    }
+    if (!currentSong) throw new Error('Nothing is loaded; pass song_id.');
+    setIsPlaying(true);
+    return { text: `Playing ${currentSong.title}.` };
+  });
+  useBridgeCommand('player_pause', () => {
+    setIsPlaying(false);
+    return { text: 'Paused.' };
+  });
+  useBridgeCommand('player_seek', ({ seconds }) => {
+    handleSeek(Number(seconds) || 0);
+    return { text: `At ${Number(seconds) || 0} s.` };
+  });
+  useBridgeCommand('player_next', () => {
+    playNext();
+    return { text: 'Next song.' };
+  });
+  useBridgeCommand('player_previous', () => {
+    playPrevious();
+    return { text: 'Previous song.' };
+  });
+  useBridgeCommand('player_set', ({ volume: level, shuffle, repeat }) => {
+    if (level !== undefined) setVolume(Math.max(0, Math.min(1, Number(level))));
+    if (shuffle !== undefined) setIsShuffle(Boolean(shuffle));
+    if (repeat === 'none' || repeat === 'all' || repeat === 'one') setRepeatMode(repeat);
+    return { text: 'Set.' };
+  });
+  useBridgeCommand('video_open', ({ song_id }) => {
+    const song = songById(song_id);
+    setSongForVideo(song);
+    return { text: `The video editor is open for ${song.title}.` };
+  });
+  useBridgeCommand('video_close', () => {
+    setSongForVideo(null);
+    return { text: 'The video editor is closed.' };
+  });
 
   const handleSeek = (time: number) => {
     const audio = audioRef.current;

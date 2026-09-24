@@ -7,6 +7,13 @@ Windows build.
 
 ### Added
 
+- **An MCP server in the studio.** `http://127.0.0.1:8791/mcp` gives an agent 144 tools: every
+  route of the studio's API, called inside the process, and the window itself - a
+  screenshot, its controls, the player and the video editor - through a bridge the page
+  answers. Files are passed by their path; the model's writing rules and official
+  examples are tools, resources and prompts, so a connected agent writes instead of the
+  studio's small assistant. `docs/mcp-skill.md` is the
+  skill an agent reads.
 - **A dataset in one drop.** The training page is a three-step wizard: drop a folder of
   songs, check them, train. Albums with a cue sheet are cut into songs; titles and artists
   come from the tags, the file name and the folders.

@@ -7,6 +7,8 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { createHardwareEncoder, type HardwareEncoder } from '../services/videoEncoder';
 import { lineProgress } from '../services/lrc-parser';
 import { useResponsive } from '../context/ResponsiveContext';
+import { useBridgeCommand } from '../services/mcpBridge';
+import { apiUrl } from '../services/apiBase';
 
 interface VideoGeneratorModalProps {
   isOpen: boolean;
@@ -193,6 +195,9 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   const [exportStage, setExportStage] = useState<'idle' | 'capturing' | 'encoding'>('idle');
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
   const [ffmpegLoading, setFfmpegLoading] = useState(false);
+  // An export started by an agent goes to the studio's folder instead of a download
+  const exportTargetRef = useRef<((blob: Blob) => Promise<void>) | null>(null);
+  const [savedVideo, setSavedVideo] = useState<string | null>(null);
 
   // Config State
   const [config, setConfig] = useState<VisualizerConfig>({
@@ -1169,6 +1174,16 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     /// Hands the finished file to the user and tears the export down. Both the
     /// hardware and the WebAssembly path end here.
     const finishExport = async (blob: Blob) => {
+      const target = exportTargetRef.current;
+      if (target) {
+        exportTargetRef.current = null;
+        await target(blob);
+        await audioCtx.close().catch(() => undefined);
+        setExportProgress(100);
+        setIsExporting(false);
+        setExportStage('idle');
+        return;
+      }
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.style.display = 'none';
@@ -2215,6 +2230,103 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   const removeTextLayer = (id: string) => {
       setTextLayers(textLayers.filter(l => l.id !== id));
   };
+
+  // What an agent connected over MCP reads and sets in the editor
+  const editorState = () => ({
+    song: song ? { id: song.id, title: song.title } : null,
+    presets: PRESETS.map(preset => preset.id),
+    aspect_ratios: Object.keys(RESOLUTIONS),
+    config,
+    effects,
+    intensities,
+    text_layers: textLayers,
+    lyrics: {
+      available: lrcLinesRef.current.length > 0,
+      enabled: lyricsEnabled, style: lyricsStyle, position: lyricsPosition, font_size: lyricsFontSize, lines: lyricsLines,
+      show_sections: lyricsShowSections, color: lyricsColor, background_color: lyricsBgColor, background_opacity: lyricsBgOpacity,
+      highlight_color: lyricsHighlightColor, offset_seconds: lyricsOffset,
+    },
+    background: { type: backgroundType, image: customImage ? 'set' : null, video: videoUrl || null },
+    album_art: customAlbumArt ? 'set' : 'the song cover',
+    playback: { playing: isPlaying, position_seconds: playbackTime, duration_seconds: playbackDuration },
+    export: { running: isExporting, progress: exportProgress, stage: exportStage, saved: savedVideo },
+  });
+  const requireOpen = () => {
+    if (!isOpen || !song) throw new Error('The video editor is closed; video_open opens it for a song.');
+  };
+  useBridgeCommand('video_get', () => {
+    requireOpen();
+    return editorState();
+  });
+  useBridgeCommand('video_set', (args) => {
+    requireOpen();
+    const object = (value: unknown) => (value && typeof value === 'object' ? value as Record<string, unknown> : null);
+    const nextConfig = object(args.config);
+    if (nextConfig) {
+      if (nextConfig.preset !== undefined && !PRESETS.some(preset => preset.id === nextConfig.preset)) throw new Error(`Presets: ${PRESETS.map(preset => preset.id).join(', ')}.`);
+      setConfig(current => ({ ...current, ...nextConfig }));
+    }
+    const nextEffects = object(args.effects);
+    if (nextEffects) setEffects(current => ({ ...current, ...nextEffects }));
+    const nextIntensities = object(args.intensities);
+    if (nextIntensities) setIntensities(current => ({ ...current, ...nextIntensities }));
+    if (Array.isArray(args.text_layers)) {
+      setTextLayers((args.text_layers as Partial<TextLayer>[]).map((layer, index) => ({ id: String(layer.id ?? index + 1), text: String(layer.text ?? ''), x: Number(layer.x ?? 50), y: Number(layer.y ?? 50), size: Number(layer.size ?? 36), color: String(layer.color ?? '#ffffff'), font: String(layer.font ?? 'Inter') })));
+    }
+    const lyrics = object(args.lyrics);
+    if (lyrics) {
+      if (lyrics.enabled !== undefined) setLyricsEnabled(Boolean(lyrics.enabled));
+      if (lyrics.style === 'lines' || lyrics.style === 'scroll' || lyrics.style === 'karaoke') setLyricsStyle(lyrics.style);
+      if (lyrics.position === 'bottom' || lyrics.position === 'center' || lyrics.position === 'top') setLyricsPosition(lyrics.position);
+      if (lyrics.font_size !== undefined) setLyricsFontSize(Number(lyrics.font_size));
+      if (lyrics.lines !== undefined) setLyricsLines(Number(lyrics.lines));
+      if (lyrics.show_sections !== undefined) setLyricsShowSections(Boolean(lyrics.show_sections));
+      if (typeof lyrics.color === 'string') setLyricsColor(lyrics.color);
+      if (typeof lyrics.background_color === 'string') setLyricsBgColor(lyrics.background_color);
+      if (lyrics.background_opacity !== undefined) setLyricsBgOpacity(Number(lyrics.background_opacity));
+      if (typeof lyrics.highlight_color === 'string') setLyricsHighlightColor(lyrics.highlight_color);
+      if (lyrics.offset_seconds !== undefined) setLyricsOffset(Number(lyrics.offset_seconds));
+    }
+    const background = object(args.background);
+    if (background) {
+      if (typeof background.image === 'string') { setCustomImage(background.image); setBackgroundType('custom'); }
+      else if (typeof background.video === 'string') { setVideoUrl(background.video); setBackgroundType('video'); }
+      else if (background.type === 'random') { setBackgroundType('random'); setBackgroundSeed(Date.now()); }
+    }
+    if (args.album_art === null) setCustomAlbumArt(null);
+    else if (typeof args.album_art === 'string') setCustomAlbumArt(args.album_art);
+    return { text: 'Set; video_get shows the result, ui_screenshot shows the frame.' };
+  });
+  useBridgeCommand('video_render', ({ name }) => {
+    requireOpen();
+    if (isExporting) throw new Error('A render is already running; video_get shows its progress.');
+    setSavedVideo(null);
+    exportTargetRef.current = async (blob: Blob) => {
+      const file = `${String(name || song?.title || 'clip').replace(/[\\/:*?"<>|]+/g, '_')}.mp4`;
+      const response = await fetch(apiUrl(`/v1/videos?name=${encodeURIComponent(file)}`), { method: 'POST', body: blob });
+      if (!response.ok) throw new Error(`The studio could not keep the video: HTTP ${response.status}`);
+      const saved = await response.json() as { path: string };
+      setSavedVideo(saved.path);
+    };
+    void startRecording();
+    return { text: 'Rendering; video_get shows the progress and, when done, the saved file under export.saved.' };
+  });
+  useBridgeCommand('video_play', async () => {
+    requireOpen();
+    if (!isPlaying) await togglePlay();
+    return { text: 'Playing.' };
+  });
+  useBridgeCommand('video_pause', async () => {
+    requireOpen();
+    if (isPlaying) await togglePlay();
+    return { text: 'Paused.' };
+  });
+  useBridgeCommand('video_seek', ({ seconds }) => {
+    requireOpen();
+    if (audioRef.current) audioRef.current.currentTime = Number(seconds) || 0;
+    setPlaybackTime(Number(seconds) || 0);
+    return { text: `At ${Number(seconds) || 0} s.` };
+  });
 
   if (!isOpen || !song) return null;
 

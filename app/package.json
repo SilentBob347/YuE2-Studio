@@ -21,6 +21,7 @@
     "@tauri-apps/api": "^2.9.1",
     "abcjs": "^6.7.1",
     "lucide-react": "^0.563.0",
+    "modern-screenshot": "^4.7.0",
     "mp4-muxer": "^5.2.2",
     "partial-json": "^0.1.7",
     "react": "^19.2.4",

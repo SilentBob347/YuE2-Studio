@@ -51,6 +51,31 @@ Two voices: describe both singers in the style ("male and female duet, warm bari
 /// planning stage and of SheetSage2's transcriptions.
 const SCORE_CONTRACT: &str = r#"abc: the complete revised ABC score in YuE2's native dialect. Keep the source's header exactly - X:1, T:, M:, L: (keep the exported unit length), Q:1/4=<bpm>, the declarations V: Vocal and V: Ins, K: - and its layout: sections opened by comment lines ("% verse", "% chorus", "% bridge", "% interlude"), each group of one to four bars written as a "V: Vocal" block followed by a "V: Ins" block. Both voices are single melody lines; Ins is an instrumental theme or solo, never a chord staff. Harmony is written as quoted chord symbols in the Vocal voice before the note or rest they start on, including while the voice rests ("Am7"z16). Native chord qualities only: major (no suffix), m, dim, aug, 7, maj7, m7, dim7, m7b5, sus4, sus2, 6, m6, 7sus4, m(maj7), with optional slash bass (F#m7/C#); anything else (maj9, 13, alt) is not native. Durations are multiples of L from 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48 only; any other length is tied (C8-C2), a tie joins equal pitches, a rest is never tied, and a chord change inside a held note splits it with a tie ("C"E16-"Am7"E16). Every bar adds up to the metre (with L:1/32 a 4/4 bar is 32 units, 3/4 is 24); Z, Z2, Z3 are whole resting bars counted by measures, never used across a chord or key change. Accidentals last to the barline and carry across octaves by letter (after ^F, a later f in the bar is sharp too). No tuplets, grace notes, chords of stacked notes, repeat signs, slurs, decorations or w: lyric lines. A metre or key change starts a new group with matching M: or K: in both voices. Chord symbols belong to a full-mode score only: keep them if the score has them, and do not add them to a melody-only score unless asked. Make exactly the change the request asks for - reharmonise, transpose, change the tempo, lengthen or shorten a section, write a solo - and keep every other bar of both voices note for note: same pitches, onsets and durations. When the melody changes, keep the syllable count of the lyric lines it carries. A tempo change is a new Q: and the same BPM in the style."#;
 
+/// The topics `writing_guide` answers, each with what it covers.
+pub const GUIDE_TOPICS: &[(&str, &str)] = &[
+    ("song", "writing a whole song for create_song: style, lyrics, title, cover prompt"),
+    ("style", "the style sentence YuE2 reads, for a new song and for a dataset song from what MOSS heard"),
+    ("lyrics", "lyrics: sections, density, diction, duets"),
+    ("score", "editing an ABC score in YuE2's dialect"),
+    ("transcript", "turning recognised words into a lyric sheet"),
+    ("sections", "marking the sections of a published lyric sheet without changing a word"),
+];
+
+/// The rules the studio's own assistant is prompted with, as a guide for an
+/// agent connected over MCP: the same text, so an agent writes the way the
+/// model expects.
+pub fn writing_guide(topic: &str) -> Option<String> {
+    Some(match topic {
+        "song" => format!("{STYLE_CONTRACT}\n\n{LYRICS_RULES}{DICTION_RULE}{DUET_RULE}\n\n{EXTRA}\n\n{VALIDATION}"),
+        "style" => format!("For a new song:\n{STYLE_CONTRACT}\n\nFor a dataset song, from what MOSS heard (its heard note: genre, caption, bpm):\n{}", crate::listen::YUE2_SYSTEM_PROMPT),
+        "lyrics" => format!("{LYRICS_RULES}{DICTION_RULE}{DUET_RULE}"),
+        "score" => SCORE_CONTRACT.to_string(),
+        "transcript" => TRANSCRIPT_RULES.to_string(),
+        "sections" => SHEET_SECTIONS_PROMPT.to_string(),
+        _ => return None,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AssistTarget {
