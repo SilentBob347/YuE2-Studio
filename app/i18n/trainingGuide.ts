@@ -36,9 +36,10 @@ const ru: Guide = {
       title: "Порядок работы",
       steps: [
         "Перетащите папку с песнями одного исполнителя или стиля в зону на странице «Обучение» или выберите папку и файлы кнопками. Студия сама создаст набор с именем папки. Подходят WAV, MP3, FLAC, OGG, M4A; альбом одним файлом с .cue режется на песни, текст из .txt или .lrc рядом берётся как есть.",
-        "Шаг «1 · Песни»: подготовка начинается сама. Студия отделяет вокал, распознаёт тексты, слушает каждую песню и пишет её стиль с измеренным темпом. У каждой песни свой статус, общий ход — сверху.",
+        "Шаг «1 · Песни»: подготовка начинается сама. Студия берёт тексты из баз, отделяет вокал и распознаёт только те, что не нашлись, слушает каждую песню и пишет её стиль с измеренным темпом. У каждой песни свой статус, общий ход — сверху.",
+        "Каждая песня хранит, на чём остановилась. Если студию закрыть или она упадёт посреди подготовки, после запуска работа продолжится сама с того же места, сделанное не повторяется. У песни с ошибкой есть кнопка «Повторить», у недоделанной — «Доделать»: они доделывают только эту песню.",
         "Проверьте результат: нажмите на песню — она раскроется с плеером, стилем и текстом. Поправьте, что нужно; «Описать заново» и «Распознать заново» переделывают только эту песню.",
-        "Шаг «2 · Обучение»: название LoRA, слово-триггер (редкое слово, например имя латиницей без пробелов), проверка готовности и кнопка «Обучить». Файлы обучения (около 8.6 ГБ, один раз) скачиваются здесь же. Нужна NVIDIA RTX 30-й серии или новее и около 11 ГБ видеопамяти.",
+        "Шаг «2 · Обучение»: название LoRA, слово-триггер (студия сама делает редкое слово из названия набора, например nrmnkhffn для «Нейромонах Феофан»; его можно поменять или стереть), проверка готовности и кнопка «Обучить». Файлы обучения (около 8.6 ГБ, один раз) скачиваются здесь же. Нужна NVIDIA RTX 30-й серии или новее и около 11 ГБ видеопамяти.",
         "Можно не ждать: пока идёт подготовка, поставьте галочку «Начать обучение самому, когда все песни будут готовы».",
         "Шаг «3 · Результат»: послушайте чекпоинты и нажмите «В LoRA» под лучшим — он появится на странице LoRA. Пока идёт обучение, генерация, ассистент, караоке и разделение на дорожки недоступны.",
       ],
@@ -47,7 +48,7 @@ const ru: Guide = {
       title: "Автоописание песен",
       text: [
         "Необязательный пакет (около 10.5 ГБ), скачивается один раз карточкой «Автоописание песен» на шаге «Песни». Без него студия всё равно распознает тексты, а стиль придётся написать самому.",
-        "Каждая модель загружается один раз на весь набор и выгружается, когда её этап закончен: вокал, затем тексты, затем прослушивание, затем ассистент. Поэтому набор из пятидесяти песен готовится не в пятьдесят раз дольше одной.",
+        "Каждая модель загружается один раз на весь набор и выгружается, когда её этап закончен: базы текстов, затем вокал и распознавание для ненайденного, затем прослушивание, затем ассистент. На видеокарте всегда одна модель. Поэтому набор из пятидесяти песен готовится не в пятьдесят раз дольше одной.",
       ],
       list: [
         "MOSS-Music-8B — модель, которая слушает песню и описывает, что в ней звучит: жанр, вокал, инструменты, настроение, продакшн. Тот же способ использует автор тренера HOT-Step: описание по звуку заметно точнее, чем по названию.",
@@ -117,6 +118,7 @@ const ru: Guide = {
       text: ['Настройки по умолчанию — рецепт автора тренера HOT-Step. Без причины их лучше не трогать.'],
       list: [
         'Остановить на KL = 1.4. Сходство с исполнителем начинается примерно с 1.25, около 1.9 модель начинает портиться (зацикленные концовки). Значение одинаково для любого исполнителя.',
+        'Остановку можно переключить на «по эпохам»: одна эпоха — один проход по всем песням набора, число шагов студия считает сама. Удобно, если KL не доходит до 1.4 или нужен предсказуемый объём обучения.',
         'Предел шагов 750 — это потолок, а не цель: если к нему KL не дошёл до 1.4, дальше обычно не дойдёт.',
         'Сохранять каждые 50 шагов — будет из чего выбрать; последний чекпоинт сохраняется в момент остановки.',
         'LoKr 64 / фактор 4 / alpha 256 и оптимизатор Prodigy — лёгкий адаптер (около 106 МБ) с подбором скорости обучения.',
@@ -169,9 +171,10 @@ const en: Guide = {
       title: "Workflow",
       steps: [
         "Drop a folder of songs by one artist or in one style onto the Training page, or pick a folder or files with the buttons. The studio makes a dataset named after the folder. WAV, MP3, FLAC, OGG and M4A work; an album in one file with a .cue is cut into its songs, lyrics in a .txt or .lrc beside a song are taken as they are.",
-        "Step 1 · Songs: preparation starts by itself. The studio separates the vocals, recognises the lyrics, listens to every song and writes its style with the measured tempo. Every song shows its own status, the overall progress is on top.",
+        "Step 1 · Songs: preparation starts by itself. The studio takes the lyrics from the databases, separates the vocals and recognises only the songs they do not know, listens to every song and writes its style with the measured tempo. Every song shows its own status, the overall progress is on top.",
+        "Every song keeps where it stopped. If the studio is closed or crashes during preparation, the work carries on by itself from the same place at the next start, and nothing done is done again. A song that failed has a Retry button, an unfinished one Finish this song: they finish just that song.",
         "Check the result: click a song and it opens with a player, its style and its lyrics. Fix what needs fixing; Describe again and Recognise again redo just that song.",
-        "Step 2 · Training: the LoRA name, a trigger word (a rare word, such as a name in Latin letters without spaces), the readiness check and the Train button. The training files (about 8.6 GB, once) download right there. It needs an NVIDIA RTX 30-series card or newer and about 11 GB of video memory.",
+        "Step 2 · Training: the LoRA name, a trigger word (the studio makes a rare word from the dataset name, such as nrmnkhffn for \"Нейромонах Феофан\"; change or clear it as you like), the readiness check and the Train button. The training files (about 8.6 GB, once) download right there. It needs an NVIDIA RTX 30-series card or newer and about 11 GB of video memory.",
         "No need to wait: while preparation runs, tick \"Start training by itself when every song is ready\".",
         "Step 3 · Result: listen to the checkpoints and press To LoRA under the best one; it appears on the LoRA page. While training runs, generation, the assistant, karaoke and stem separation are unavailable.",
       ],
@@ -180,7 +183,7 @@ const en: Guide = {
       title: "Auto-describing songs",
       text: [
         "An optional pack (about 10.5 GB), downloaded once from the Auto-describe songs card on the Songs step. Without it the studio still recognises the lyrics, and you write the style yourself.",
-        "Each model loads once for the whole dataset and is let go when its stage is done: vocals, then lyrics, then listening, then the assistant. So a dataset of fifty songs does not take fifty times as long as one.",
+        "Each model loads once for the whole dataset and is let go when its stage is done: the lyric databases, then vocals and recognition for what they miss, then listening, then the assistant. The card holds one model at a time. So a dataset of fifty songs does not take fifty times as long as one.",
       ],
       list: [
         "MOSS-Music-8B is a model that listens to a song and describes what is in it: genre, vocals, instruments, mood, production. The author of the HOT-Step trainer does it the same way: a description by ear is far more accurate than one by title.",
@@ -250,6 +253,7 @@ const en: Guide = {
       text: ['The defaults are the recipe of the HOT-Step trainer\'s author. Leave them alone without a reason.'],
       list: [
         'Stop at KL = 1.4. Likeness to the artist starts around 1.25; around 1.9 the model starts to degrade (looping endings). The value means the same for any artist.',
+        'The stop can be switched to by epochs: one epoch is one pass over every song of the dataset, and the studio works out the steps. Useful when KL does not reach 1.4 or a set amount of training is wanted.',
         'The 750-step limit is a ceiling, not a target: if KL has not reached 1.4 by then, it usually will not.',
         'Save every 50 steps — there will be something to choose from; the last checkpoint is saved when the run stops.',
         'LoKr 64 / factor 4 / alpha 256 with the Prodigy optimiser — a light adapter (about 106 MB) that finds its own learning rate.',
@@ -302,9 +306,10 @@ const zh: Guide = {
       title: "操作流程",
       steps: [
         "把同一艺人或同一风格的歌曲文件夹拖到“训练”页面，或用按钮选择文件夹和文件。工作室会以文件夹名自动建立数据集。支持 WAV、MP3、FLAC、OGG、M4A；带 .cue 的整轨专辑会切成单曲，旁边 .txt 或 .lrc 中的歌词直接采用。",
-        "第 1 步“歌曲”：准备会自动开始。工作室分离人声、识别歌词、聆听每首歌，并用测得的速度写出风格。每首歌都有自己的状态，整体进度在上方。",
+        "第 1 步“歌曲”：准备会自动开始。工作室先从歌词库取词，只对找不到的歌分离人声并识别，聆听每首歌，并用测得的速度写出风格。每首歌都有自己的状态，整体进度在上方。",
+        "每首歌都会记住进行到哪一步。如果准备过程中关闭工作室或它崩溃，下次启动时会从同一处自动继续，已完成的不会重做。出错的歌有“重试”按钮，未完成的有“完成这首”按钮，只处理这一首。",
         "检查结果：点击一首歌，它会展开播放器、风格和歌词。按需修改；“重新描述”和“重新识别”只重做这一首。",
-        "第 2 步“训练”：LoRA 名称、触发词（少见的词，例如不带空格的拉丁字母名字）、就绪检查和“训练”按钮。训练文件（约 8.6 GB，只需一次）就在这里下载。需要 NVIDIA RTX 30 系列或更新的显卡和约 11 GB 显存。",
+        "第 2 步“训练”：LoRA 名称、触发词（工作室会用数据集名称生成一个少见的词，可以修改或清空）、就绪检查和“训练”按钮。训练文件（约 8.6 GB，只需一次）就在这里下载。需要 NVIDIA RTX 30 系列或更新的显卡和约 11 GB 显存。",
         "不必等待：准备进行时勾选“所有歌曲就绪后自动开始训练”。",
         "第 3 步“结果”：试听检查点，在最好的那个下面点“加入 LoRA”，它会出现在 LoRA 页面。训练期间无法生成、使用助手、卡拉OK和分轨。",
       ],
@@ -313,7 +318,7 @@ const zh: Guide = {
       title: "自动描述歌曲",
       text: [
         "可选的包（约 10.5 GB），在“歌曲”步骤的“自动描述歌曲”卡片中下载一次。没有它，工作室仍会识别歌词，但风格需要你自己写。",
-        "每个模型对整个数据集只加载一次，并在其阶段结束后释放：人声、歌词、聆听、助手依次进行。因此五十首歌的数据集并不需要单首的五十倍时间。",
+        "每个模型对整个数据集只加载一次，并在其阶段结束后释放：先查歌词库，再对找不到的歌分离人声并识别，然后聆听，最后是助手。显卡上始终只有一个模型。因此五十首歌的数据集并不需要单首的五十倍时间。",
       ],
       list: [
         "MOSS-Music-8B 会聆听歌曲并描述其中的内容：流派、人声、乐器、情绪、制作。HOT-Step 训练器作者也这样做：按声音描述比按标题准确得多。",
@@ -383,6 +388,7 @@ const zh: Guide = {
       text: ['默认值是 HOT-Step 训练器作者的配方。没有理由时不要改动。'],
       list: [
         'KL = 1.4 时停止。约 1.25 开始像这位艺人，约 1.9 模型开始变差（结尾循环）。这个值对任何艺人都一样。',
+        '停止方式也可以改为按轮次：一轮就是把数据集中的每首歌都过一遍，步数由工作室计算。KL 达不到 1.4 或想要固定的训练量时很方便。',
         '750 步上限是天花板而不是目标：如果到那时 KL 还没到 1.4，通常也不会再到。',
         '每 50 步保存一次——这样有得选；停止时会保存最后一个检查点。',
         'LoKr 64 / 因子 4 / alpha 256，配 Prodigy 优化器——轻量适配器（约 106 MB），会自己找学习率。',
@@ -435,9 +441,10 @@ const ja: Guide = {
       title: "作業の流れ",
       steps: [
         "同じアーティストやスタイルの曲のフォルダーを「学習」ページにドロップするか、ボタンでフォルダーやファイルを選びます。スタジオがフォルダー名でデータセットを作ります。WAV、MP3、FLAC、OGG、M4A に対応。.cue 付きの一枚ファイルのアルバムは曲ごとに分割され、横の .txt や .lrc の歌詞はそのまま使われます。",
-        "ステップ 1「曲」：準備は自動で始まります。ボーカルを分離し、歌詞を認識し、各曲を聴いて、測定したテンポ付きでスタイルを書きます。曲ごとに状態が表示され、全体の進行は上に出ます。",
+        "ステップ 1「曲」：準備は自動で始まります。歌詞はまずデータベースから取り、見つからない曲だけボーカルを分離して認識し、各曲を聴いて、測定したテンポ付きでスタイルを書きます。曲ごとに状態が表示され、全体の進行は上に出ます。",
+        "各曲はどこまで進んだかを覚えています。準備中にスタジオを閉じたり落ちたりしても、次に起動すると同じところから自動で続き、済んだ作業は繰り返しません。失敗した曲には「再試行」、途中の曲には「この曲を仕上げる」ボタンがあり、その曲だけを仕上げます。",
         "結果を確認：曲をクリックすると、プレーヤー、スタイル、歌詞が開きます。必要に応じて修正し、「もう一度説明」「もう一度認識」はその曲だけをやり直します。",
-        "ステップ 2「学習」：LoRA の名前、トリガーワード（珍しい単語、たとえば空白なしのローマ字名）、準備状況の確認と「学習」ボタン。学習ファイル（約 8.6 GB、一度だけ）もここでダウンロードします。NVIDIA RTX 30 シリーズ以降と約 11 GB のビデオメモリが必要です。",
+        "ステップ 2「学習」：LoRA の名前、トリガーワード（データセット名からスタジオが珍しい単語を作ります。変更も削除もできます）、準備状況の確認と「学習」ボタン。学習ファイル（約 8.6 GB、一度だけ）もここでダウンロードします。NVIDIA RTX 30 シリーズ以降と約 11 GB のビデオメモリが必要です。",
         "待つ必要はありません：準備中に「全曲の準備ができたら自動で学習を開始」にチェックを入れてください。",
         "ステップ 3「結果」：チェックポイントを聴き比べ、一番良いものの下の「LoRA へ」を押すと LoRA ページに表示されます。学習中は生成、アシスタント、カラオケ、ステム分離は使えません。",
       ],
@@ -446,7 +453,7 @@ const ja: Guide = {
       title: "曲の自動説明",
       text: [
         "任意のパック（約 10.5 GB）で、「曲」ステップの「曲の自動説明」カードから一度だけダウンロードします。なくても歌詞は認識されますが、スタイルは自分で書く必要があります。",
-        "各モデルはデータセット全体で一度だけ読み込まれ、その段階が終わると解放されます：ボーカル、歌詞、聴き取り、アシスタントの順です。だから 50 曲のデータセットでも 1 曲の 50 倍はかかりません。",
+        "各モデルはデータセット全体で一度だけ読み込まれ、その段階が終わると解放されます：歌詞データベース、見つからない曲のボーカル分離と認識、聴き取り、アシスタントの順です。GPU に載るモデルは常に一つです。だから 50 曲のデータセットでも 1 曲の 50 倍はかかりません。",
       ],
       list: [
         "MOSS-Music-8B は曲を聴いて、ジャンル、ボーカル、楽器、雰囲気、プロダクションを説明するモデルです。HOT-Step トレーナーの作者も同じ方法を使っています。音で説明するほうがタイトルからよりずっと正確です。",
@@ -516,6 +523,7 @@ const ja: Guide = {
       text: ['既定値は HOT-Step 学習器の作者のレシピです。理由がなければ変えないでください。'],
       list: [
         'KL = 1.4 で停止。1.25 前後からアーティストに似始め、1.9 前後でモデルが崩れ始めます（エンディングのループ）。この値はどのアーティストでも同じ意味です。',
+        '停止方法はエポック単位にも切り替えられます。1 エポックはデータセットの全曲を一巡すること、ステップ数はスタジオが計算します。KL が 1.4 に届かないときや、決まった量だけ学習したいときに便利です。',
         '750 ステップは上限であって目標ではありません。そこまでに KL が 1.4 に届かなければ、たいていその先も届きません。',
         '50 ステップごとに保存。選べる候補が残り、止まった時点の最後のチェックポイントも保存されます。',
         'LoKr 64 / 係数 4 / alpha 256 と Prodigy オプティマイザ。軽いアダプタ（約 106 MB）で、学習率を自分で見つけます。',
@@ -568,9 +576,10 @@ const ko: Guide = {
       title: "작업 순서",
       steps: [
         "한 아티스트나 한 스타일의 노래 폴더를 \"학습\" 페이지에 끌어다 놓거나 버튼으로 폴더와 파일을 고르세요. 스튜디오가 폴더 이름으로 데이터셋을 만듭니다. WAV, MP3, FLAC, OGG, M4A를 지원하고, .cue가 있는 한 파일짜리 앨범은 곡별로 나뉘며, 옆의 .txt나 .lrc 가사는 그대로 사용합니다.",
-        "1단계 \"곡\": 준비가 저절로 시작됩니다. 보컬을 분리하고, 가사를 인식하고, 각 곡을 듣고, 측정한 템포로 스타일을 씁니다. 곡마다 상태가 보이고, 전체 진행은 위에 있습니다.",
+        "1단계 \"곡\": 준비가 저절로 시작됩니다. 가사는 먼저 데이터베이스에서 가져오고, 없는 곡만 보컬을 분리해 인식하며, 각 곡을 듣고, 측정한 템포로 스타일을 씁니다. 곡마다 상태가 보이고, 전체 진행은 위에 있습니다.",
+        "곡마다 어디까지 했는지 기억합니다. 준비 중에 스튜디오를 닫거나 멈추면 다음 실행 때 같은 곳에서 저절로 이어지고, 끝난 작업은 다시 하지 않습니다. 실패한 곡에는 '다시 시도', 덜 된 곡에는 '이 곡 마무리' 버튼이 있어 그 곡만 마무리합니다.",
         "결과를 확인하세요: 곡을 누르면 플레이어, 스타일, 가사가 펼쳐집니다. 필요한 것을 고치세요. \"다시 설명\"과 \"다시 인식\"은 그 곡만 다시 합니다.",
-        "2단계 \"학습\": LoRA 이름, 트리거 단어(드문 단어, 예: 띄어쓰기 없는 로마자 이름), 준비 확인과 \"학습\" 버튼. 학습 파일(약 8.6GB, 한 번)도 여기서 내려받습니다. NVIDIA RTX 30 시리즈 이상과 약 11GB의 비디오 메모리가 필요합니다.",
+        "2단계 \"학습\": LoRA 이름, 트리거 단어(데이터셋 이름으로 스튜디오가 드문 단어를 만들어 줍니다. 바꾸거나 지울 수 있습니다), 준비 확인과 \"학습\" 버튼. 학습 파일(약 8.6GB, 한 번)도 여기서 내려받습니다. NVIDIA RTX 30 시리즈 이상과 약 11GB의 비디오 메모리가 필요합니다.",
         "기다릴 필요 없습니다: 준비 중에 \"모든 곡이 준비되면 자동으로 학습 시작\"을 체크하세요.",
         "3단계 \"결과\": 체크포인트를 들어 보고 가장 좋은 것 아래의 \"LoRA로\"를 누르면 LoRA 페이지에 나타납니다. 학습 중에는 생성, 어시스턴트, 가라오케, 스템 분리를 쓸 수 없습니다.",
       ],
@@ -579,7 +588,7 @@ const ko: Guide = {
       title: "곡 자동 설명",
       text: [
         "선택 패키지(약 10.5GB)로, \"곡\" 단계의 \"곡 자동 설명\" 카드에서 한 번 내려받습니다. 없어도 가사는 인식되지만 스타일은 직접 써야 합니다.",
-        "각 모델은 데이터셋 전체에 한 번만 로드되고, 그 단계가 끝나면 해제됩니다: 보컬, 가사, 듣기, 어시스턴트 순서입니다. 그래서 50곡짜리 데이터셋도 한 곡의 50배가 걸리지 않습니다.",
+        "각 모델은 데이터셋 전체에 한 번만 로드되고, 그 단계가 끝나면 해제됩니다: 가사 데이터베이스, 없는 곡의 보컬 분리와 인식, 듣기, 어시스턴트 순서입니다. 그래픽 카드에는 항상 모델 하나만 올라갑니다. 그래서 50곡짜리 데이터셋도 한 곡의 50배가 걸리지 않습니다.",
       ],
       list: [
         "MOSS-Music-8B는 곡을 듣고 장르, 보컬, 악기, 분위기, 프로덕션을 설명하는 모델입니다. HOT-Step 트레이너 작성자도 같은 방법을 씁니다. 소리로 쓴 설명이 제목으로 쓴 것보다 훨씬 정확합니다.",
@@ -649,6 +658,7 @@ const ko: Guide = {
       text: ['기본값은 HOT-Step 학습기 제작자의 레시피입니다. 이유 없이 바꾸지 마세요.'],
       list: [
         'KL = 1.4에서 멈춤. 1.25 부근부터 아티스트와 닮기 시작하고, 1.9 부근에서 모델이 망가지기 시작합니다(엔딩 반복). 이 값은 어느 아티스트에게나 같은 의미입니다.',
+        '멈춤 방식을 에포크 단위로 바꿀 수 있습니다. 에포크 하나는 데이터셋의 모든 곡을 한 번 도는 것이고, 단계 수는 스튜디오가 계산합니다. KL이 1.4에 닿지 않거나 정해진 만큼만 학습하고 싶을 때 편합니다.',
         '750 스텝은 목표가 아니라 상한입니다. 그때까지 KL이 1.4에 닿지 않으면 보통 그 뒤에도 닿지 않습니다.',
         '50 스텝마다 저장 — 고를 거리가 남고, 멈춘 순간의 마지막 체크포인트도 저장됩니다.',
         'LoKr 64 / 계수 4 / alpha 256과 Prodigy 옵티마이저 — 가벼운 어댑터(약 106 MB)로 학습률을 스스로 찾습니다.',
