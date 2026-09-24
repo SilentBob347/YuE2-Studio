@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, CheckSquare, ChevronDown, Download, FolderInput, FolderOpen, Library, Loader2, Mic2, Plus, Search, Square, Trash2, Wand2, X } from 'lucide-react';
+import { AlertTriangle, BookOpen, Check, CheckSquare, ChevronDown, Download, FolderInput, FolderOpen, Library, Loader2, Mic2, Plus, Search, Square, Trash2, Wand2, X } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { ConfirmDialog } from './ConfirmDialog';
+import { TrainingGuide } from './TrainingGuide';
 import {
   Dataset,
   DatasetItem,
@@ -464,6 +465,7 @@ export const TrainingPanel: React.FC = () => {
   const filePicker = useRef<HTMLInputElement | null>(null);
   const folderPicker = useRef<HTMLInputElement | null>(null);
   const [importing, setImporting] = useState(false);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   // a folder picker is not a React attribute; it has to be set on the element
   useEffect(() => {
@@ -616,7 +618,13 @@ export const TrainingPanel: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">{t('trainingIntro')}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="min-w-0 flex-1 text-sm text-zinc-600 dark:text-zinc-400">{t('trainingIntro')}</p>
+        <button type="button" onClick={() => setGuideOpen(value => !value)} className={OUTLINE} aria-pressed={guideOpen}>
+          <BookOpen size={13} />{t('trainingGuideOpen')}
+        </button>
+      </div>
+      {guideOpen && <TrainingGuide onClose={() => setGuideOpen(false)} />}
       {!ready && <PackCard state={state} onError={setError} onChanged={() => void refresh()} />}
 
       <section className={CARD}>
