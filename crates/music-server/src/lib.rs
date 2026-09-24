@@ -2803,12 +2803,12 @@ async fn delete_library_song(State(state):State<AppState>,Path(id):Path<String>)
 fn song_files(state: &AppState, song: &library::Song) -> Vec<PathBuf> {
     let media = state.library.media_dir();
     let mut files: Vec<PathBuf> = separation::STEMS.iter().map(|stem| stem_path(state, &song.id, stem)).collect();
-    if let Some(audio) = song.audio_path.as_deref().map(PathBuf::from) {
+    if let Some(audio) = state.library.media_path_for_song(song) {
         files.push(audio);
     }
     // a processed track owns its original and every version besides the one playing
-    if let Some(original) = song.metadata.get("original_audio_path").and_then(Value::as_str) {
-        files.push(PathBuf::from(original));
+    if let Some(original) = song.metadata.get("original_audio_path").and_then(Value::as_str).and_then(|path| state.library.resolve_media(path)) {
+        files.push(original);
     }
     for version in song.metadata.get("audio_versions").and_then(Value::as_array).into_iter().flatten() {
         if let Some(file) = version.get("file").and_then(Value::as_str) {
@@ -4047,9 +4047,10 @@ async fn create_song_karaoke(
         .get_song(&id)
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "no such song".into()))?;
-    let audio = song
-        .audio_path
-        .clone()
+    let audio = state
+        .library
+        .media_path_for_song(&song)
+        .map(|path| path.to_string_lossy().into_owned())
         .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "this track has no audio to listen to".into()))?;
     if !auto_title::has_sung_lines(&song.lyrics) {
         return Err(api_error(StatusCode::BAD_REQUEST, "karaoke.instrumental".into()));

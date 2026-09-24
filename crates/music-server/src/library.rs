@@ -181,7 +181,18 @@ impl Library {
  /// sit beside the track they came from.
  pub fn media_dir(&self)->&Path{&self.media_dir}
  pub fn media_file(&self,filename:&str)->Option<PathBuf>{if filename.is_empty()||filename.contains(['/', '\\'])||Path::new(filename).file_name().and_then(|x|x.to_str())!=Some(filename){return None}let path=self.media_dir.join(filename);path.is_file().then_some(path)}
- pub fn media_path_for_song(&self,song:&Song)->Option<PathBuf>{let candidate=PathBuf::from(song.audio_path.as_ref()?);let root=self.media_dir.canonicalize().ok()?;let resolved=candidate.canonicalize().ok()?;resolved.starts_with(root).then_some(resolved)}
+ /// Where a stored audio path is now. Paths are stored whole, so a library whose
+ /// folder moved - a portable copied elsewhere, a drive back under another
+ /// letter - finds its files by name in its own media folder; nothing outside
+ /// that folder is ever served.
+ pub fn resolve_media(&self,stored:&str)->Option<PathBuf>{
+  let root=self.media_dir.canonicalize().ok()?;
+  let stored=PathBuf::from(stored);
+  if let Ok(path)=stored.canonicalize(){if path.starts_with(&root){return Some(path)}}
+  let by_name=self.media_dir.join(stored.file_name()?).canonicalize().ok()?;
+  by_name.starts_with(&root).then_some(by_name)
+ }
+ pub fn media_path_for_song(&self,song:&Song)->Option<PathBuf>{self.resolve_media(song.audio_path.as_ref()?)}
  /// Stores karaoke timings with the track. They live in the metadata rather
  /// than a column of their own so an existing library needs no migration, and
  /// a track without them is simply a track nobody has timed yet.
@@ -223,7 +234,8 @@ impl Library {
   let Some(mut song)=self.get_song(id)? else{return Ok(None)};
   let original=song.metadata.get("original_audio_path").and_then(|v|v.as_str()).map(str::to_owned);
   let audio=if version=="original"{
-   original.context("this track has no other version")?
+   let original=original.context("this track has no other version")?;
+   self.resolve_media(&original).context("the original's file is missing")?.to_string_lossy().into_owned()
   }else{
    let file=song.metadata.get("audio_versions").and_then(|v|v.as_array()).and_then(|list|list.iter().find(|v|v.get("id").and_then(|x|x.as_str())==Some(version))).and_then(|v|v.get("file")).and_then(|v|v.as_str()).map(str::to_owned).context("no such version")?;
    self.media_file(&file).context("the version's file is missing")?.to_string_lossy().into_owned()
@@ -311,5 +323,25 @@ mod edit_tests {
         assert_eq!(merged["active_version"], "v1");
         assert_eq!(merged["audio_versions"][0]["file"], "v1.wav");
         assert_eq!(merged["original_audio_path"], "song.mp3");
+    }
+}
+
+#[cfg(test)]
+mod media_tests {
+    use super::*;
+
+    #[test]
+    fn a_library_whose_folder_moved_still_finds_its_songs() {
+        let root = std::env::temp_dir().join(format!("library-moved-{}", uuid::Uuid::now_v7().simple()));
+        let db = Library::open_at(root.join("library.sqlite"), root.join("media")).unwrap();
+        fs::create_dir_all(root.join("media")).unwrap();
+        fs::write(root.join("media").join("song.mp3"), b"ID3").unwrap();
+        // stored while the portable folder sat on another drive
+        let found = db.resolve_media(r"Z:\old place\data\media\song.mp3").unwrap();
+        assert_eq!(found, root.join("media").join("song.mp3").canonicalize().unwrap());
+        assert!(db.resolve_media(r"Z:\old place\data\media\gone.mp3").is_none());
+        fs::write(root.join("outside.mp3"), b"ID3").unwrap();
+        assert!(db.resolve_media(&root.join("outside.mp3").to_string_lossy()).is_none());
+        let _ = fs::remove_dir_all(root);
     }
 }
