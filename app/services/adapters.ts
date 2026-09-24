@@ -28,7 +28,7 @@ export interface InstalledAdapter {
   scales: Record<string, number>;
   range?: [number, number] | null;
   slots: string[];
-  origin: { type: 'catalog' | 'imported' | 'trained'; catalog_id?: string };
+  origin: { type: 'catalog' | 'imported' | 'trained' | 'hub'; catalog_id?: string; repo?: string; revision?: string; file?: string };
   created_at: string;
   bytes: number;
   error?: string | null;
@@ -94,6 +94,61 @@ export async function installCatalogAdapters(ids: string[]): Promise<void> {
     const body = await response.json().catch(() => null);
     throw new Error(body?.error || `LoRA download: HTTP ${response.status}`);
   }
+}
+
+/** A repository of adapters on Hugging Face. */
+export interface HubRepo {
+  repo: string;
+  author: string;
+  likes: number;
+  downloads: number;
+  updated?: string | null;
+  tags: string[];
+}
+
+/** One weight file of a repository and the adapter it becomes. */
+export interface HubFile {
+  path: string;
+  bytes: number;
+  adapter_id: string;
+  installed: boolean;
+}
+
+export interface HubListing {
+  repo: string;
+  revision: string;
+  page: string;
+  files: HubFile[];
+}
+
+async function hubJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.error || `Hugging Face: HTTP ${response.status}`);
+  return body as T;
+}
+
+export async function searchHub(query: string): Promise<HubRepo[]> {
+  return (await hubJson<{ repos: HubRepo[] }>(`/v1/adapters/hub?q=${encodeURIComponent(query)}`)).repos;
+}
+
+/** A repository's files; `reference` may be its id or any link into it, a link to one file naming that file. */
+export async function hubFiles(reference: string): Promise<{ listing: HubListing; file: string | null }> {
+  return hubJson(`/v1/adapters/hub/files?repo=${encodeURIComponent(reference)}`);
+}
+
+export async function installHubAdapters(repo: string, paths: string[]): Promise<void> {
+  await hubJson('/v1/adapters/hub/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo, paths }),
+  });
+}
+
+/** Whether typed text is a link or an `owner/name` id rather than words to search for. */
+export function looksLikeHubReference(text: string): boolean {
+  const value = text.trim();
+  return /huggingface\.co\//i.test(value) || /^[\w.-]+\/[\w.-]+$/.test(value);
 }
 
 export async function cancelAdapterDownload(): Promise<void> {

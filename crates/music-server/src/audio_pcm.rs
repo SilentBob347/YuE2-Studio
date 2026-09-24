@@ -99,16 +99,33 @@ pub fn write_wav24(path: &Path, audio: &audio_post::Stereo) -> Result<()> {
 /// Every channel kept apart, at the file's own sample rate.
 fn decode_channels(path: &Path) -> Result<(Vec<Vec<f32>>, u32)> {
     let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
-    let stream = MediaSourceStream::new(Box::new(file), Default::default());
+    let extension = path.extension().and_then(|value| value.to_str());
+    decode_source(Box::new(file), extension).with_context(|| format!("decode {}", path.display()))
+}
+
+/// Decodes audio held in memory - a track as the engine sent it - to stereo
+/// at its own rate; a mono source is doubled.
+pub fn decode_stereo_bytes(bytes: Vec<u8>, extension: &str) -> Result<audio_post::Stereo> {
+    let (mut channels, rate) = decode_source(Box::new(std::io::Cursor::new(bytes)), Some(extension))?;
+    if channels.is_empty() || channels[0].is_empty() {
+        bail!("the engine's audio decoded to nothing");
+    }
+    let left = channels.remove(0);
+    let right = if channels.is_empty() { left.clone() } else { channels.remove(0) };
+    Ok(audio_post::Stereo::new(left, right, rate))
+}
+
+fn decode_source(source: Box<dyn symphonia::core::io::MediaSource>, extension: Option<&str>) -> Result<(Vec<Vec<f32>>, u32)> {
+    let stream = MediaSourceStream::new(source, Default::default());
 
     let mut hint = Hint::new();
-    if let Some(extension) = path.extension().and_then(|value| value.to_str()) {
+    if let Some(extension) = extension {
         hint.with_extension(extension);
     }
 
     let probed = symphonia::default::get_probe()
         .format(&hint, stream, &FormatOptions::default(), &MetadataOptions::default())
-        .with_context(|| format!("recognise the format of {}", path.display()))?;
+        .context("recognise the audio format")?;
     let mut format = probed.format;
     let track = format
         .tracks()

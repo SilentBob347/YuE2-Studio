@@ -28,7 +28,7 @@ use anyhow::Context;
 use futures_util::StreamExt;
 
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     body::Body,
     http::{header, HeaderMap, StatusCode},
     routing::{get, post},
@@ -641,6 +641,9 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/adapters/import", post(import_adapter))
         .route("/v1/adapters/cancel", post(cancel_adapter_download))
         .route("/v1/adapters/install", post(install_catalog_adapters))
+        .route("/v1/adapters/hub", get(search_hub_adapters))
+        .route("/v1/adapters/hub/files", get(list_hub_files))
+        .route("/v1/adapters/hub/install", post(install_hub_adapters))
         .route("/v1/adapters/{id}", axum::routing::patch(update_adapter).delete(delete_adapter))
         .route("/v1/library/songs/{id}/process", post(start_processing))
         .route("/v1/library/songs/{id}/version", axum::routing::put(select_song_version))
@@ -1241,6 +1244,43 @@ async fn install_catalog_adapters(
     Json(input): Json<InstallAdaptersRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     state.adapters.begin_install(&input.ids).map_err(|error| api_error(StatusCode::CONFLICT, error.to_string()))?;
+    Ok(Json(serde_json::json!({ "started": true })))
+}
+
+#[derive(Debug, Deserialize)]
+struct HubQuery {
+    #[serde(default)]
+    q: String,
+    #[serde(default)]
+    repo: String,
+}
+
+async fn search_hub_adapters(State(state): State<AppState>, Query(query): Query<HubQuery>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let found = state.adapters.hub_search(&sizes::client(), &query.q).await.map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("{error:#}")))?;
+    Ok(Json(serde_json::json!({ "repos": found })))
+}
+
+/// The weight files of a repository; `repo` may be an id or any link into it,
+/// and a link to one file comes back with that file named.
+async fn list_hub_files(State(state): State<AppState>, Query(query): Query<HubQuery>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let (repo, file) = adapters::hub_reference(&query.repo)
+        .ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "that is not a Hugging Face repository or file link".into()))?;
+    let listing = state.adapters.hub_files(&sizes::client(), &repo).await.map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("{error:#}")))?;
+    Ok(Json(serde_json::json!({ "listing": listing, "file": file })))
+}
+
+#[derive(Debug, Deserialize)]
+struct InstallHubRequest {
+    repo: String,
+    paths: Vec<String>,
+}
+
+async fn install_hub_adapters(State(state): State<AppState>, Json(input): Json<InstallHubRequest>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    state
+        .adapters
+        .begin_hub_install(&sizes::client(), &input.repo, &input.paths)
+        .await
+        .map_err(|error| api_error(StatusCode::CONFLICT, format!("{error:#}")))?;
     Ok(Json(serde_json::json!({ "started": true })))
 }
 
@@ -4227,7 +4267,7 @@ async fn create_music_job(
         Ok(value) => value,
         Err(error) => return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, error))),
     };
-    match state.music_server.submit(body.clone()).await {
+    match state.music_server.submit(engine_submission(&body)).await {
         Ok(remote) => {
             let job = MusicJob {
                 id: remote.id,
@@ -4284,7 +4324,7 @@ async fn replay_music_job(
     let lyrics = body.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_owned();
     let remote = state
         .music_server
-        .submit(body.clone())
+        .submit(engine_submission(&body))
         .await
         .map_err(|error| api_error(StatusCode::SERVICE_UNAVAILABLE, format!("the engine refused the job: {error}")))?;
     let title = request.title.clone().filter(|value| !value.trim().is_empty()).or(source_title);
@@ -4450,7 +4490,7 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
     let count = tracks.len();
     let mut imported = Vec::with_capacity(count);
     for (index, track) in tracks.into_iter().enumerate() {
-        let replay = track.replay_request;
+        let mut replay = track.replay_request;
         let style = replay.get("style").and_then(Value::as_str).unwrap_or_default().to_owned();
         let lyrics = replay.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_owned();
         let semantic_tokens = replay
@@ -4481,10 +4521,29 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
         settings.remove("semantic_tokens");
         settings.insert("lm_batch_size".into(), Value::from(1));
         settings.insert("synth_batch_size".into(), Value::from(1));
-        let extension = engine_result::audio_extension(&track.audio_content_type)?;
+        let mut extension = engine_result::audio_extension(&track.audio_content_type)?;
+        let mut audio = track.audio;
+        if studio_encodes_mp3(&job.generation_settings) && extension == "wav" {
+            let kbps = job.generation_settings.get("mp3_bitrate").and_then(Value::as_u64).map_or(DEFAULT_MP3_KBPS, |value| value as u32);
+            let peak_clip = job.generation_settings.get("peak_clip").and_then(Value::as_u64).map_or(DEFAULT_PEAK_CLIP, |value| value as u32);
+            audio = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<u8>> {
+                let mut stereo = audio_pcm::decode_stereo_bytes(audio, "wav")?;
+                audio_post::encode::normalize_peak(&mut stereo, peak_clip);
+                audio_post::encode::mp3(&stereo, kbps)
+            })
+            .await
+            .context("the MP3 encoder stopped")??;
+            extension = "mp3";
+            // the track says what it is: an MP3 at the rate LAME wrote
+            let written = Value::from(audio_post::encode::mp3_bitrate(kbps));
+            for record in [&mut *settings, replay.as_object_mut().context("the replay request is not a JSON object")?] {
+                record.insert("output_format".into(), Value::from("mp3"));
+                record.insert("mp3_bitrate".into(), written.clone());
+            }
+        }
         let metadata = serde_json::json!({
             "duration_seconds": library::audio_duration_seconds(
-                &track.audio,
+                &audio,
                 extension,
                 replay.get("mp3_bitrate").and_then(Value::as_u64).map(|value| value as u32),
             ),
@@ -4512,7 +4571,7 @@ async fn import_completed_result(state: &AppState, job: &MusicJob, job_id: &str)
             profile_id: profile_id.clone(),
             source: "local_generation".into(),
             audio_extension: extension,
-            audio: track.audio,
+            audio,
         })?;
         let audio_url = format!("/v1/library/media/{}", imported_song.song.id);
         tag_stored_song(state, &imported_song.song.id).await;
@@ -4939,6 +4998,31 @@ fn validate_semantic_tokens(tokens: &str) -> Result<(), String> {
 /// Builds the yue-server request. Only what the user set travels: an absent
 /// field is the engine's protocol default, and the replay request the engine
 /// returns records the values it actually used.
+/// The bitrate a track is encoded at when the request names none.
+const DEFAULT_MP3_KBPS: u32 = 320;
+/// Samples per million allowed to clip when the level is set, as the engines do.
+const DEFAULT_PEAK_CLIP: u32 = 10;
+
+/// Whether the studio makes this track's MP3 itself; the engine's own default
+/// output is MP3, so a request naming no format counts.
+fn studio_encodes_mp3(settings: &Value) -> bool {
+    settings.get("output_format").and_then(Value::as_str).is_none_or(|format| format == "mp3")
+}
+
+/// What the engine is asked for. An MP3 is made by the studio with LAME from
+/// the engine's unencoded 32-bit float output - the model's own rate and
+/// precision - so no track is ever encoded twice or by an engine's own encoder.
+fn engine_submission(body: &Value) -> Value {
+    let mut engine = body.clone();
+    if studio_encodes_mp3(body) {
+        if let Some(fields) = engine.as_object_mut() {
+            fields.insert("output_format".into(), Value::from("wav32"));
+            fields.remove("mp3_bitrate");
+        }
+    }
+    engine
+}
+
 fn yue_request_from(request: &CreateMusicJobRequest, max_batch: u32) -> Result<Value, String> {
     let semantic_tokens = request.semantic_tokens.as_deref().map(str::trim).filter(|value| !value.is_empty());
     if request.style.trim().is_empty() && request.lyrics.trim().is_empty() && semantic_tokens.is_none() {
@@ -5185,6 +5269,17 @@ mod tests {
             lyrics: "[Verse]\r\none line".into(),
             ..CreateMusicJobRequest::default()
         }
+    }
+
+    #[test]
+    fn the_engine_is_asked_for_float_when_the_studio_makes_the_mp3() {
+        let mp3 = serde_json::json!({ "style": "x", "output_format": "mp3", "mp3_bitrate": 320 });
+        let sent = engine_submission(&mp3);
+        assert_eq!(sent["output_format"], "wav32");
+        assert!(sent.get("mp3_bitrate").is_none());
+        assert_eq!(engine_submission(&serde_json::json!({ "style": "x" }))["output_format"], "wav32");
+        let wav = serde_json::json!({ "style": "x", "output_format": "wav24" });
+        assert_eq!(engine_submission(&wav), wav);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, CheckSquare, Download, ExternalLink, FolderOpen, Layers, Loader2, Pencil, Square, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, CheckSquare, ChevronDown, Download, ExternalLink, FolderOpen, Heart, Layers, Loader2, Pencil, Search, Square, Trash2, X } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { openExternal } from '../services/externalLinks';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -8,7 +8,13 @@ import {
   AdapterState,
   InstalledAdapter,
   OfferedAdapter,
+  HubListing,
+  HubRepo,
   cancelAdapterDownload,
+  hubFiles,
+  installHubAdapters,
+  looksLikeHubReference,
+  searchHub,
   deleteAdapter,
   fetchAdapters,
   importAdapter,
@@ -33,7 +39,7 @@ const PRIMARY =
   'inline-flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-orange-500 to-pink-600 px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50';
 const KIND_ORDER = ['style', 'artist', 'composition', 'sound', 'slider', 'other'];
 
-type Tab = 'installed' | 'catalog';
+type Tab = 'installed' | 'catalog' | 'hub';
 
 const byKind = <T extends { kind: string }>(list: T[]) =>
   [...list].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
@@ -228,6 +234,147 @@ const InstalledCard: React.FC<{
   );
 };
 
+/**
+ * Adapters on Hugging Face: a search over the ones tagged for this model, or a
+ * link pasted straight in. A repository opens into its weight files; the
+ * ticked ones download together, each becoming its own adapter.
+ */
+const HubPanel: React.FC<{ downloading: boolean; onStarted: () => void; onError: (message: string) => void }> = ({ downloading, onStarted, onError }) => {
+  const { t } = useStrings();
+  const [query, setQuery] = useState('');
+  const [repos, setRepos] = useState<HubRepo[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [open, setOpen] = useState<HubListing | null>(null);
+  const [opening, setOpening] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [starting, setStarting] = useState(false);
+
+  const openRepo = useCallback(async (reference: string) => {
+    setOpening(reference);
+    try {
+      const { listing, file } = await hubFiles(reference);
+      setOpen(listing);
+      setPicked(file && listing.files.some(entry => entry.path === file && !entry.installed) ? [file] : []);
+    } catch (problem) {
+      onError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setOpening(null);
+    }
+  }, [onError]);
+
+  const search = useCallback(async (text: string) => {
+    if (looksLikeHubReference(text)) {
+      await openRepo(text.trim());
+      return;
+    }
+    setSearching(true);
+    try {
+      setRepos(await searchHub(text));
+    } catch (problem) {
+      onError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setSearching(false);
+    }
+  }, [onError, openRepo]);
+
+  // searches as the user types or pastes, once the text settles
+  useEffect(() => {
+    const timer = window.setTimeout(() => void search(query), query ? 400 : 0);
+    return () => window.clearTimeout(timer);
+  }, [query, search]);
+
+  const files = open?.files ?? [];
+  const chosen = files.filter(file => picked.includes(file.path));
+  const download = async () => {
+    if (!open) return;
+    setStarting(true);
+    try {
+      await installHubAdapters(open.repo, chosen.map(file => file.path));
+      setPicked([]);
+      onStarted();
+    } catch (problem) {
+      onError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setStarting(false);
+    }
+  };
+
+  return (
+    <>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">{t('adaptersHubHint')}</p>
+      <form onSubmit={event => { event.preventDefault(); void search(query); }} className="relative">
+        <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+        <input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('adaptersHubSearch')} aria-label={t('adaptersHubSearch')} className={`${CONTROL} pl-9 pr-9`} />
+        {query && (
+          <button type="button" onClick={() => setQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200" aria-label={t('adaptersCancel')}>
+            <X size={15} />
+          </button>
+        )}
+      </form>
+      {searching && <p className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 size={14} className="animate-spin" />{t('adaptersHubSearching')}</p>}
+      {repos && !searching && repos.length === 0 && !open && <p className="text-sm text-zinc-500">{t('adaptersHubEmpty')}</p>}
+      <div className="space-y-3">
+        {[...(open && !(repos ?? []).some(repo => repo.repo === open.repo) ? [{ repo: open.repo, author: open.repo.split('/')[0], likes: 0, downloads: 0, tags: [] } as HubRepo] : []), ...(repos ?? [])].map(repo => {
+          const expanded = open?.repo === repo.repo;
+          return (
+            <section key={repo.repo} className={`${CARD} ${expanded ? 'border-pink-400 dark:border-pink-500/60' : ''}`}>
+              <button type="button" onClick={() => (expanded ? setOpen(null) : void openRepo(repo.repo))} className="flex w-full items-start justify-between gap-3 text-left" aria-expanded={expanded}>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{repo.repo.split('/')[1]}</p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-zinc-500">
+                    <span>{repo.author}</span>
+                    {repo.likes > 0 && <span className="inline-flex items-center gap-0.5"><Heart size={10} />{repo.likes}</span>}
+                    {repo.updated && <span>{new Date(repo.updated).toLocaleDateString()}</span>}
+                  </p>
+                  {repo.tags.length > 0 && (
+                    <span className="mt-1.5 flex flex-wrap gap-1">
+                      {repo.tags.map(tag => <span key={tag} className="rounded-md border border-zinc-200 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:border-white/10">{tag}</span>)}
+                    </span>
+                  )}
+                </div>
+                {opening === repo.repo ? <Loader2 size={15} className="mt-0.5 shrink-0 animate-spin text-pink-500" /> : <ChevronDown size={15} className={`mt-0.5 shrink-0 text-zinc-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />}
+              </button>
+              {expanded && open && (
+                <div className="mt-3 space-y-1.5 border-t border-zinc-200 pt-3 dark:border-white/10">
+                  {files.length === 0 && <p className="text-xs text-zinc-500">{t('adaptersHubNoFiles')}</p>}
+                  {files.map(file => (
+                    <div key={file.path} className="flex items-center justify-between gap-3">
+                      <span className="min-w-0 truncate text-xs text-zinc-700 dark:text-zinc-200" title={file.path}>{file.path}</span>
+                      {file.installed ? (
+                        <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><Check size={13} />{t('adaptersInstalled')}</span>
+                      ) : (
+                        <button
+                          type="button"
+                          role="checkbox"
+                          aria-checked={picked.includes(file.path)}
+                          onClick={() => setPicked(current => (current.includes(file.path) ? current.filter(path => path !== file.path) : [...current, file.path]))}
+                          className={`${OUTLINE} shrink-0 ${picked.includes(file.path) ? 'border-pink-400 text-pink-600 dark:border-pink-500/60 dark:text-pink-300' : ''}`}
+                        >
+                          {picked.includes(file.path) ? <CheckSquare size={13} /> : <Square size={13} />}
+                          {megabytes(file.bytes)}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => openExternal(open.page)} className={`${OUTLINE} mt-2`}><ExternalLink size={13} />{t('adaptersHubOpen')}</button>
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+      {!downloading && chosen.length > 0 && (
+        <div className="sticky bottom-0 -mx-1 bg-white/90 px-1 py-3 backdrop-blur dark:bg-suno/90">
+          <button type="button" onClick={() => void download()} disabled={starting} className={PRIMARY}>
+            {starting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            {t('adaptersDownloadSelected')} · {chosen.length} · {megabytes(chosen.reduce((sum, file) => sum + file.bytes, 0))}
+          </button>
+        </div>
+      )}
+    </>
+  );
+};
+
 export function AdaptersPage(): React.ReactElement {
   const { t, language } = useStrings();
   const [state, setState] = useState<AdapterState | null>(null);
@@ -329,7 +476,7 @@ export function AdaptersPage(): React.ReactElement {
         </div>
 
         <div role="tablist" className="flex rounded-lg bg-zinc-100 p-1 dark:bg-white/5">
-          {(['installed', 'catalog'] as Tab[]).map(value => (
+          {(['installed', 'catalog', 'hub'] as Tab[]).map(value => (
             <button
               key={value}
               type="button"
@@ -338,7 +485,7 @@ export function AdaptersPage(): React.ReactElement {
               onClick={() => setTab(value)}
               className={`flex-1 rounded-md py-1.5 text-xs font-semibold transition-all ${tab === value ? 'bg-white text-black shadow-sm dark:bg-zinc-800 dark:text-white' : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300'}`}
             >
-              {value === 'installed' ? `${t('adaptersInstalledTab')} · ${state?.installed.length ?? 0}` : t('adaptersCatalogTab')}
+              {value === 'installed' ? `${t('adaptersInstalledTab')} · ${state?.installed.length ?? 0}` : value === 'catalog' ? t('adaptersCatalogTab') : t('adaptersHubTab')}
             </button>
           ))}
         </div>
@@ -439,6 +586,8 @@ export function AdaptersPage(): React.ReactElement {
             )}
           </>
         )}
+
+        {tab === 'hub' && <HubPanel downloading={downloading} onStarted={() => void refresh()} onError={setError} />}
 
         {error && <p role="alert" className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">{error}</p>}
       </div>

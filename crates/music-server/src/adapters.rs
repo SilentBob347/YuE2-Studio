@@ -81,6 +81,12 @@ struct CatalogItem {
     assets: Vec<&'static Asset>,
 }
 
+/// An adapter about to be downloaded: what will be recorded, and its files.
+struct Planned {
+    meta: AdapterMeta,
+    assets: Vec<&'static Asset>,
+}
+
 fn catalog() -> &'static [CatalogItem] {
     static CATALOG: OnceLock<Vec<CatalogItem>> = OnceLock::new();
     CATALOG.get_or_init(|| {
@@ -124,6 +130,8 @@ pub enum Origin {
     Catalog { catalog_id: String },
     Imported,
     Trained,
+    /// A file of a Hugging Face repository, pinned to the commit it came from.
+    Hub { repo: String, revision: String, file: String },
 }
 
 /// What the studio remembers about an installed adapter.
@@ -325,21 +333,27 @@ impl AdapterLibrary {
             .collect()
     }
 
-    /// Starts downloading catalogue entries as one set and records each once
-    /// its files are there. The record is written last, so a folder without
-    /// one is an unfinished download the list leaves out.
+    /// Starts downloading catalogue entries as one set.
     pub fn begin_install(self: &Arc<Self>, catalog_ids: &[String]) -> Result<()> {
-        let mut items = Vec::new();
+        let mut planned: Vec<Planned> = Vec::new();
         for id in catalog_ids {
             let item = catalog()
                 .iter()
                 .find(|item| item.entry.id == *id && item.entry.engine == self.engine)
                 .with_context(|| format!("no catalogue adapter {id}"))?;
-            if !items.iter().any(|known: &&CatalogItem| known.entry.id == item.entry.id) {
-                items.push(item);
+            if !planned.iter().any(|known| known.meta.id == item.entry.id) {
+                planned.push(Planned { meta: self.catalog_meta(&item.entry), assets: item.assets.clone() });
             }
         }
-        if items.is_empty() {
+        self.start(planned)
+    }
+
+    /// Downloads planned adapters as one set, the way the model screen fetches
+    /// its components, and records each once its files are there. The record
+    /// is written last, so a folder without one is an unfinished download the
+    /// list leaves out.
+    fn start(self: &Arc<Self>, planned: Vec<Planned>) -> Result<()> {
+        if planned.is_empty() {
             bail!("choose at least one adapter to download");
         }
         {
@@ -347,17 +361,18 @@ impl AdapterLibrary {
             if !installing.is_empty() {
                 bail!("a LoRA download is already running");
             }
-            *installing = items.iter().map(|item| item.entry.id.clone()).collect();
+            *installing = planned.iter().map(|plan| plan.meta.id.clone()).collect();
         }
         let library = self.clone();
         tokio::spawn(async move {
-            let assets: Vec<&'static Asset> = items.iter().flat_map(|item| item.assets.iter().copied()).collect();
+            let assets: Vec<&'static Asset> = planned.iter().flat_map(|plan| plan.assets.iter().copied()).collect();
             let downloaded = library.downloader.install_all(SCOPE, &assets).await;
-            // an entry whose files all arrived is kept even when another failed
-            for item in &items {
-                if item.assets.iter().all(|asset| library.downloader.is_installed(asset)) {
-                    if let Err(error) = library.record(&item.entry) {
-                        eprintln!("[ERROR] adapter {} did not record: {error:#}", item.entry.id);
+            // an adapter whose files all arrived is kept even when another failed
+            for plan in &planned {
+                if plan.assets.iter().all(|asset| library.downloader.is_installed(asset)) {
+                    let meta = AdapterMeta { created_at: now(), ..plan.meta.clone() };
+                    if let Err(error) = library.write_meta(&meta) {
+                        eprintln!("[ERROR] adapter {} did not record: {error:#}", meta.id);
                     }
                 }
             }
@@ -369,8 +384,8 @@ impl AdapterLibrary {
         Ok(())
     }
 
-    fn record(&self, entry: &CatalogEntry) -> Result<()> {
-        self.write_meta(&AdapterMeta {
+    fn catalog_meta(&self, entry: &CatalogEntry) -> AdapterMeta {
+        AdapterMeta {
             id: entry.id.clone(),
             engine: self.engine.clone(),
             name: entry.name.clone(),
@@ -383,8 +398,8 @@ impl AdapterLibrary {
             range: entry.range,
             slots: entry.scales.keys().cloned().collect(),
             origin: Origin::Catalog { catalog_id: entry.id.clone() },
-            created_at: now(),
-        })
+            created_at: String::new(),
+        }
     }
 
     /// Stores uploaded weight files as a new adapter. An `adapter_config.json`
@@ -462,6 +477,231 @@ impl AdapterLibrary {
     }
 }
 
+/// The Hugging Face tags that mark an engine's adapters, from the catalogue file.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct HubConfig {
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+fn hub_config(engine: &str) -> Option<&'static HubConfig> {
+    #[derive(Deserialize)]
+    struct HubSection {
+        #[serde(default)]
+        hub: BTreeMap<String, HubConfig>,
+    }
+    static HUB: OnceLock<BTreeMap<String, HubConfig>> = OnceLock::new();
+    HUB.get_or_init(|| {
+        serde_json::from_str::<HubSection>(include_str!("../../../config/adapter-catalog.json"))
+            .expect("config/adapter-catalog.json is valid")
+            .hub
+    })
+    .get(engine)
+}
+
+const HUB: &str = "https://huggingface.co";
+
+/// A repository of adapters on Hugging Face, as a search lists it.
+#[derive(Debug, Clone, Serialize)]
+pub struct HubRepo {
+    pub repo: String,
+    pub author: String,
+    pub likes: u64,
+    pub downloads: u64,
+    pub updated: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// One weight file of a repository, and the adapter it becomes.
+#[derive(Debug, Clone, Serialize)]
+pub struct HubFile {
+    pub path: String,
+    pub bytes: u64,
+    pub adapter_id: String,
+    pub installed: bool,
+}
+
+/// A repository's adapter files at one commit.
+#[derive(Debug, Clone, Serialize)]
+pub struct HubListing {
+    pub repo: String,
+    pub revision: String,
+    pub page: String,
+    pub files: Vec<HubFile>,
+    /// Every file of the commit with its size, for the configs that travel along.
+    #[serde(skip)]
+    all: BTreeMap<String, u64>,
+}
+
+/// `owner/name` of a repository, from a bare id or any huggingface.co link to
+/// it or to one of its files; the file path comes back when the link names one.
+pub fn hub_reference(text: &str) -> Option<(String, Option<String>)> {
+    let text = text.trim().trim_end_matches('/');
+    let rest = text
+        .strip_prefix("https://huggingface.co/")
+        .or_else(|| text.strip_prefix("http://huggingface.co/"))
+        .or_else(|| text.strip_prefix("huggingface.co/"))
+        .unwrap_or(text);
+    let rest = rest.split(['?', '#']).next()?;
+    let parts: Vec<&str> = rest.split('/').collect();
+    if parts.len() < 2 || matches!(parts[0], "datasets" | "spaces") {
+        return None;
+    }
+    let valid = |part: &str| !part.is_empty() && !part.starts_with('.') && part.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if !valid(parts[0]) || !valid(parts[1]) {
+        return None;
+    }
+    let file = match parts.get(2) {
+        Some(&"resolve") | Some(&"blob") if parts.len() > 4 => Some(parts[4..].join("/")),
+        _ => None,
+    };
+    Some((format!("{}/{}", parts[0], parts[1]), file))
+}
+
+/// A stable adapter id for a file of a repository: readable, and unique even
+/// where two long names share their start.
+fn hub_adapter_id(repo: &str, path: &str) -> String {
+    let stem = Path::new(path).file_stem().and_then(|stem| stem.to_str()).unwrap_or("adapter");
+    let mut hash: u32 = 0x811c9dc5;
+    for byte in format!("{repo}/{path}").bytes() {
+        hash = (hash ^ byte as u32).wrapping_mul(0x0100_0193);
+    }
+    format!("hf-{}-{hash:08x}", slug(stem))
+}
+
+impl AdapterLibrary {
+    /// Adapters for this engine on Hugging Face, the most liked first; the
+    /// query narrows them by name.
+    pub async fn hub_search(&self, http: &reqwest::Client, query: &str) -> Result<Vec<HubRepo>> {
+        let config = hub_config(&self.engine).context("this engine has no adapters on Hugging Face")?;
+        let mut url = reqwest::Url::parse(&format!("{HUB}/api/models"))?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            for tag in &config.tags {
+                pairs.append_pair("filter", tag);
+            }
+            let query = query.trim();
+            if !query.is_empty() {
+                pairs.append_pair("search", query);
+            }
+            pairs.append_pair("sort", "likes").append_pair("direction", "-1").append_pair("limit", "100").append_pair("full", "true");
+        }
+        let found: Vec<Value> = http.get(url).send().await?.error_for_status()?.json().await?;
+        Ok(found
+            .into_iter()
+            .filter_map(|model| {
+                let repo = model.get("id").and_then(Value::as_str)?.to_string();
+                let skip = |tag: &str| config.tags.iter().any(|known| known == tag) || tag.contains(':');
+                Some(HubRepo {
+                    author: repo.split('/').next().unwrap_or_default().to_string(),
+                    likes: model.get("likes").and_then(Value::as_u64).unwrap_or(0),
+                    downloads: model.get("downloads").and_then(Value::as_u64).unwrap_or(0),
+                    updated: model.get("lastModified").and_then(Value::as_str).map(str::to_owned),
+                    tags: model
+                        .get("tags")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .filter(|tag| !skip(tag))
+                        .take(6)
+                        .map(str::to_owned)
+                        .collect(),
+                    repo,
+                })
+            })
+            .collect())
+    }
+
+    /// The weight files of a repository at its current commit.
+    pub async fn hub_files(&self, http: &reqwest::Client, repo: &str) -> Result<HubListing> {
+        let (repo, _) = hub_reference(repo).with_context(|| format!("not a Hugging Face repository: {repo}"))?;
+        let info: Value = http.get(format!("{HUB}/api/models/{repo}")).send().await?.error_for_status()?.json().await?;
+        let revision = info.get("sha").and_then(Value::as_str).context("the repository names no commit")?.to_string();
+        let tree: Vec<Value> = http
+            .get(format!("{HUB}/api/models/{repo}/tree/{revision}?recursive=true"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        let mut all = BTreeMap::new();
+        for item in &tree {
+            if item.get("type").and_then(Value::as_str) != Some("file") {
+                continue;
+            }
+            let Some(path) = item.get("path").and_then(Value::as_str) else { continue };
+            let bytes = item.pointer("/lfs/size").or_else(|| item.get("size")).and_then(Value::as_u64).unwrap_or(0);
+            all.insert(path.to_string(), bytes);
+        }
+        let files = all
+            .iter()
+            .filter(|(path, _)| path.ends_with(".safetensors"))
+            .map(|(path, bytes)| {
+                let adapter_id = hub_adapter_id(&repo, path);
+                HubFile { installed: self.read_meta(&adapter_id).is_some(), path: path.clone(), bytes: *bytes, adapter_id }
+            })
+            .collect();
+        Ok(HubListing { page: format!("{HUB}/{repo}"), repo, revision, files, all })
+    }
+
+    /// Downloads files of a repository as one set, each its own adapter; an
+    /// `adapter_config.json` beside a file goes with it, since that is where
+    /// a PEFT export keeps its alpha.
+    pub async fn begin_hub_install(self: &Arc<Self>, http: &reqwest::Client, repo: &str, paths: &[String]) -> Result<()> {
+        let listing = self.hub_files(http, repo).await?;
+        let leak = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
+        // one asset per file the user fetches; leaked like the catalogue's,
+        // because the shared downloader works on 'static assets
+        let asset = |id: &str, path: &str, bytes: u64| -> &'static Asset {
+            let file = Path::new(path).file_name().and_then(|name| name.to_str()).unwrap_or("adapter.safetensors");
+            Box::leak(Box::new(Asset {
+                id: leak(format!("{id}/{file}")),
+                label: leak(file.to_string()),
+                kind: AssetKind::Model,
+                url: leak(format!("{HUB}/{}/resolve/{}/{path}", listing.repo, listing.revision)),
+                relative_path: leak(format!("{id}/{file}")),
+                bytes,
+                unzip_into: None,
+                marker: "",
+                pick: &[],
+                vram_gb: None,
+                note: "",
+            }))
+        };
+        let mut planned = Vec::new();
+        for path in paths {
+            let file = listing.files.iter().find(|file| file.path == *path).with_context(|| format!("{} has no file {path}", listing.repo))?;
+            let mut assets = vec![asset(&file.adapter_id, &file.path, file.bytes)];
+            let folder = Path::new(&file.path).parent().and_then(|parent| parent.to_str()).unwrap_or("");
+            let config = if folder.is_empty() { "adapter_config.json".to_string() } else { format!("{folder}/adapter_config.json") };
+            if let Some(bytes) = listing.all.get(&config) {
+                assets.push(asset(&file.adapter_id, &config, *bytes));
+            }
+            let stem = Path::new(&file.path).file_stem().and_then(|stem| stem.to_str()).unwrap_or("adapter");
+            planned.push(Planned {
+                meta: AdapterMeta {
+                    id: file.adapter_id.clone(),
+                    engine: self.engine.clone(),
+                    name: Text::Plain(stem.replace(['_', '-'], " ")),
+                    description: Text::Plain(format!("{} · {}", listing.repo, file.path)),
+                    kind: "other".into(),
+                    trigger: None,
+                    author: listing.repo.split('/').next().map(str::to_owned),
+                    page: Some(listing.page.clone()),
+                    scales: BTreeMap::new(),
+                    range: None,
+                    slots: Vec::new(),
+                    origin: Origin::Hub { repo: listing.repo.clone(), revision: listing.revision.clone(), file: file.path.clone() },
+                    created_at: String::new(),
+                },
+                assets,
+            });
+        }
+        self.start(planned)
+    }
+}
+
 fn folder_bytes(folder: &Path) -> u64 {
     fs::read_dir(folder)
         .map(|entries| entries.flatten().filter_map(|entry| entry.metadata().ok()).map(|meta| meta.len()).sum())
@@ -485,6 +725,31 @@ fn now() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hub_links_name_the_repository_and_the_file() {
+        assert_eq!(hub_reference("monsterovich/yue2-steps-from-hell"), Some(("monsterovich/yue2-steps-from-hell".into(), None)));
+        assert_eq!(
+            hub_reference("https://huggingface.co/becausereasons/yue2-mltnt-militant-reggae/tree/main"),
+            Some(("becausereasons/yue2-mltnt-militant-reggae".into(), None))
+        );
+        assert_eq!(
+            hub_reference("https://huggingface.co/monsterovich/yue2-steps-from-hell/resolve/main/adapter-ar-195/lora.safetensors?download=true"),
+            Some(("monsterovich/yue2-steps-from-hell".into(), Some("adapter-ar-195/lora.safetensors".into())))
+        );
+        assert_eq!(hub_reference("https://huggingface.co/datasets/a/b"), None);
+        assert_eq!(hub_reference("not a link"), None);
+        assert_eq!(hub_reference("../etc"), None);
+    }
+
+    #[test]
+    fn hub_adapter_ids_are_stable_and_tell_same_named_files_apart() {
+        let ar = hub_adapter_id("monsterovich/yue2-steps-from-hell", "adapter-ar-195/lora.safetensors");
+        let nar = hub_adapter_id("monsterovich/yue2-steps-from-hell", "adapter-nar-194/lora.safetensors");
+        assert_ne!(ar, nar);
+        assert_eq!(ar, hub_adapter_id("monsterovich/yue2-steps-from-hell", "adapter-ar-195/lora.safetensors"));
+        assert!(ar.starts_with("hf-lora-"));
+    }
 
     fn library(label: &str) -> AdapterLibrary {
         let root = std::env::temp_dir().join(format!("adapters-test-{label}-{}", uuid::Uuid::now_v7().simple()));

@@ -1,4 +1,12 @@
 {
+  "hub": {
+    "yue2-cpp": {
+      "tags": [
+        "yue2",
+        "lora"
+      ]
+    }
+  },
   "version": 1,
   "adapters": [
     {
