@@ -109,6 +109,8 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
   const [query, setQuery] = useState('');
 
   const [run, setRun] = useState<Run | null>(null);
+  // what the running preview was made with, fixed when it starts
+  const [runLabel, setRunLabel] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [keeping, setKeeping] = useState(false);
   const kept = useRef(false);
@@ -116,22 +118,25 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
 
   useEffect(() => {
     void fetch('/v1/library/songs')
-      .then(response => response.json())
-      .then((body: LibraryEntry[] | { songs: LibraryEntry[] }) => {
-        const list = Array.isArray(body) ? body : body.songs ?? [];
-        setLibrary(list.filter(entry => entry.audio_path && entry.id !== song.id));
+      .then(async response => {
+        if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+        return response.json() as Promise<LibraryEntry[]>;
       })
-      .catch(() => undefined);
+      .then(list => setLibrary(list.filter(entry => entry.audio_path && entry.id !== song.id)))
+      .catch((problem: unknown) => setError(problem instanceof Error ? problem.message : String(problem)));
   }, [song.id]);
 
   useEffect(() => {
     void fetch('/v1/processing/vst')
-      .then(response => response.json())
-      .then((body: { available: boolean; plugins: VstPlugin[] | null }) => {
+      .then(async response => {
+        if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+        return response.json() as Promise<{ available: boolean; plugins: VstPlugin[] | null }>;
+      })
+      .then(body => {
         setVstAvailable(body.available);
         setVstPlugins(body.plugins);
       })
-      .catch(() => undefined);
+      .catch((problem: unknown) => setError(problem instanceof Error ? problem.message : String(problem)));
   }, []);
 
   const scanVst = async () => {
@@ -180,9 +185,12 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
     if (!running) return;
     const timer = window.setInterval(() => {
       void fetch('/v1/processing')
-        .then(response => response.json())
-        .then((body: { run: Run | null }) => setRun(body.run))
-        .catch(() => undefined);
+        .then(async response => {
+          if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+          return response.json() as Promise<{ run: Run | null }>;
+        })
+        .then(body => setRun(body.run))
+        .catch((problem: unknown) => setError(problem instanceof Error ? problem.message : String(problem)));
     }, 500);
     return () => window.clearInterval(timer);
   }, [running]);
@@ -226,6 +234,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
 
   const start = async () => {
     setError(null);
+    setRunLabel(label());
     const request: Record<string, unknown> = {};
     if (denoiseOn) request.denoise = { strength: denoiseStrength };
     if (lifterOn) request.lifter = { denoise_strength: lifterGate, shimmer_reduction_db: shimmer, hf_mix: highBand, transient_boost: punch };
@@ -270,7 +279,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
       const response = await fetch('/v1/processing/keep', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: label() }),
+        body: JSON.stringify({ label: runLabel }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
@@ -449,7 +458,7 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
           {preview && (
             <>
               <p className="text-xs leading-5 text-zinc-700 dark:text-zinc-200">
-                <span className="font-semibold">{t('processApplied')}:</span> {label()}
+                <span className="font-semibold">{t('processApplied')}:</span> {runLabel}
               </p>
               <Compare original={song.audioUrl ?? ''} processed={previewUrl} />
             </>

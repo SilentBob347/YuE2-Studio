@@ -49,25 +49,46 @@ const LABEL = 'text-[11px] font-bold uppercase tracking-wide text-zinc-500';
 
 const HINT = 'mt-1 text-[11px] leading-4 text-zinc-500';
 
-const NumberField: React.FC<{ label: string; value: number; onChange: (value: number) => void; min?: number; max?: number; step?: number; disabled?: boolean; hint?: string }> = ({ label, value, onChange, min, max, step, disabled, hint }) => (
-  <label className="block">
-    <span className={LABEL}>{label}</span>
-    <input
-      type="number"
-      value={value}
-      min={min}
-      max={max}
-      step={step}
-      disabled={disabled}
-      onChange={event => {
-        const next = Number(event.target.value);
-        if (Number.isFinite(next)) onChange(next);
-      }}
-      className={`${CONTROL} mt-1`}
-    />
-    {hint && <span className={`block ${HINT}`}>{hint}</span>}
-  </label>
-);
+/** A number typed freely: the text is kept as typed, a value inside the bounds
+ * is taken at once, and leaving the field brings it inside them. */
+const NumberField: React.FC<{ label: string; value: number; onChange: (value: number) => void; min?: number; max?: number; step?: number; integer?: boolean; disabled?: boolean; hint?: string }> = ({ label, value, onChange, min, max, step, integer, disabled, hint }) => {
+  const [text, setText] = useState(String(value));
+  useEffect(() => {
+    setText(current => (Number(current) === value && current.trim() !== '' ? current : String(value)));
+  }, [value]);
+  const inside = (next: number) => (min === undefined || next >= min) && (max === undefined || next <= max);
+  const settle = () => {
+    const parsed = Number(text);
+    if (text.trim() === '' || !Number.isFinite(parsed)) {
+      setText(String(value));
+      return;
+    }
+    const bounded = Math.min(max ?? parsed, Math.max(min ?? parsed, integer ? Math.round(parsed) : parsed));
+    setText(String(bounded));
+    if (bounded !== value) onChange(bounded);
+  };
+  return (
+    <label className="block">
+      <span className={LABEL}>{label}</span>
+      <input
+        type="number"
+        value={text}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        onChange={event => {
+          setText(event.target.value);
+          const next = Number(event.target.value);
+          if (event.target.value.trim() !== '' && Number.isFinite(next) && inside(next) && (!integer || Number.isInteger(next))) onChange(next);
+        }}
+        onBlur={settle}
+        className={`${CONTROL} mt-1`}
+      />
+      {hint && <span className={`block ${HINT}`}>{hint}</span>}
+    </label>
+  );
+};
 
 const Choice = <T extends string>({ label, value, options, onChange }: { label: string; value: T; options: { value: T; label: string }[]; onChange: (value: T) => void }) => (
   <label className="block">
@@ -118,12 +139,10 @@ const RecipeForm: React.FC<{ recipe: Recipe; defaults: Recipe; fields: RecipeFie
         min={field.min}
         max={field.max}
         step={field.step}
+        integer={field.kind === 'integer'}
         disabled={off}
         hint={hint}
-        onChange={next => {
-          const bounded = Math.min(field.max ?? next, Math.max(field.min ?? next, next));
-          onChange({ ...recipe, [field.key]: field.kind === 'integer' ? Math.round(bounded) : bounded });
-        }}
+        onChange={next => onChange({ ...recipe, [field.key]: next })}
       />
     );
   };
@@ -201,19 +220,21 @@ const PackCard: React.FC<{ state: TrainingState; onError: (message: string) => v
 /** Library songs with audio, searchable, several picked at once. */
 const LibraryPicker: React.FC<{ exclude: string[]; onAdd: (ids: string[]) => void; onClose: () => void }> = ({ exclude, onAdd, onClose }) => {
   const { t } = useStrings();
-  const [songs, setSongs] = useState<{ id: string; title: string; caption: string }[]>([]);
+  const [library, setLibrary] = useState<{ id: string; title: string; caption: string }[]>([]);
+  const [failed, setFailed] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
   useEffect(() => {
     void fetch('/v1/library/songs')
-      .then(response => response.json())
-      .then((body: { id: string; title: string; caption: string; audio_path?: string | null }[] | { songs: never[] }) => {
-        const list = Array.isArray(body) ? body : body.songs ?? [];
-        setSongs(list.filter(song => song.audio_path && !exclude.includes(song.id)));
+      .then(async response => {
+        if (!response.ok) throw new Error(`${response.status} ${await response.text()}`);
+        return response.json() as Promise<{ id: string; title: string; caption: string; audio_path?: string | null }[]>;
       })
-      .catch(() => undefined);
-  }, [exclude]);
+      .then(list => setLibrary(list.filter(song => song.audio_path)))
+      .catch((error: unknown) => setFailed(error instanceof Error ? error.message : String(error)));
+  }, []);
   const needle = query.trim().toLowerCase();
+  const songs = library.filter(song => !exclude.includes(song.id));
   const visible = needle ? songs.filter(song => song.title.toLowerCase().includes(needle) || song.caption.toLowerCase().includes(needle)) : songs;
   return (
     <div className="mt-3 rounded-xl border border-zinc-200 p-3 dark:border-white/10">
@@ -221,6 +242,7 @@ const LibraryPicker: React.FC<{ exclude: string[]; onAdd: (ids: string[]) => voi
         <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
         <input value={query} onChange={event => setQuery(event.target.value)} placeholder={t('trainingSearchLibrary')} aria-label={t('trainingSearchLibrary')} className={`${CONTROL} pl-9`} />
       </div>
+      {failed && <p className="mt-2 text-xs text-red-500">{t('trainingLibraryFailed')} {failed}</p>}
       <div className="mt-2 max-h-56 overflow-y-auto rounded-lg border border-zinc-200 dark:border-white/10">
         {visible.map(song => {
           const on = picked.includes(song.id);

@@ -465,9 +465,13 @@ impl Training {
         let written = (|| -> Result<()> {
             let audio = dir.join("audio");
             std::fs::create_dir_all(&audio)?;
-            for item in &dataset.items {
-                let source = by_name(&item.file).context("song vanished")?;
-                std::fs::copy(source, audio.join(&item.file)).with_context(|| format!("copy {}", item.file))?;
+            // every song takes a fresh id and file name here, whatever the other
+            // studio called it
+            for item in &mut dataset.items {
+                let source = by_name(&item.file).context("song vanished")?.clone();
+                item.id = new_id();
+                item.file = format!("{}.wav", item.id);
+                std::fs::copy(&source, audio.join(&item.file)).with_context(|| format!("copy {}", item.title))?;
             }
             self.save_dataset(&dataset)
         })();
@@ -535,6 +539,14 @@ impl Training {
             run.status = RunStatus::Interrupted;
             run.finished_at = Some(now());
             let _ = self.save_run(&run);
+        }
+    }
+
+    /// Whether the run going now trains on this dataset.
+    pub async fn dataset_in_use(&self, dataset_id: &str) -> bool {
+        match self.active_run().await {
+            Some(run_id) => self.run(&run_id).is_ok_and(|run| run.dataset_id == dataset_id),
+            None => false,
         }
     }
 
@@ -668,17 +680,24 @@ impl Training {
         let Some(separator) = separator else { return Ok(true) };
         for (mix, out) in missing {
             let separator = separator.clone();
-            let job = tokio::task::spawn_blocking(move || -> Result<()> {
+            let mut job = tokio::task::spawn_blocking(move || -> Result<()> {
                 let folder = out.parent().context("vocals folder")?;
                 std::fs::create_dir_all(folder)?;
-                let partial = folder.join("vocals.part.wav");
-                separator.separate(&mix, &partial)?;
-                std::fs::rename(&partial, &out)?;
-                Ok(())
+                let partial = folder.join(format!("vocals.{}.part.wav", new_id()));
+                let separated = separator.separate(&mix, &partial).and_then(|()| Ok(std::fs::rename(&partial, &out)?));
+                if separated.is_err() {
+                    let _ = std::fs::remove_file(&partial);
+                }
+                separated
             });
             tokio::select! {
-                done = job => done.context("vocal separation")?.context("separating the vocals")?,
-                _ = cancel.notified() => return Ok(false),
+                done = &mut job => done.context("vocal separation")?.context("separating the vocals")?,
+                _ = cancel.notified() => {
+                    // the separator cannot be stopped mid-song; the run ends
+                    // once it has let go of the card
+                    let _ = job.await;
+                    return Ok(false);
+                }
             }
         }
         Ok(true)

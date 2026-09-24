@@ -264,9 +264,15 @@ impl Downloader {
             return Ok(());
         }
 
-        self.cancel.store(false, std::sync::atomic::Ordering::Relaxed);
         let total: u64 = pending.iter().map(|asset| asset.bytes).sum();
-        *self.progress.lock().await = Some(DownloadProgress {
+        let mut progress = self.progress.lock().await;
+        // a second press before the first set finished would write the same
+        // partial files twice
+        if progress.as_ref().is_some_and(|active| !active.done && active.error.is_none()) {
+            bail!("another download is already running");
+        }
+        self.cancel.store(false, std::sync::atomic::Ordering::Relaxed);
+        *progress = Some(DownloadProgress {
             // A set of one is that one file, as far as anyone watching is
             // concerned; only a real set needs a name of its own.
             asset_id: if pending.len() == 1 { pending[0].id.to_string() } else { SET.to_string() },
@@ -276,6 +282,7 @@ impl Downloader {
             done: false,
             error: None,
         });
+        drop(progress);
 
         let mut finished = 0u64;
         let mut failure = None;

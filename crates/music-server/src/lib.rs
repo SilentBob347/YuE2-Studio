@@ -1875,6 +1875,9 @@ async fn update_training_dataset(State(state): State<AppState>, Path(id): Path<S
 }
 
 async fn delete_training_dataset(State(state): State<AppState>, Path(id): Path<String>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    if state.training.dataset_in_use(&id).await {
+        return Err(api_error(StatusCode::CONFLICT, "a LoRA is training on this dataset; change it once the run ends".into()));
+    }
     state.training.remove_dataset(&id).map_err(training_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1956,6 +1959,9 @@ async fn update_training_item(
 }
 
 async fn delete_training_item(State(state): State<AppState>, Path((id, item)): Path<(String, String)>) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    if state.training.dataset_in_use(&id).await {
+        return Err(api_error(StatusCode::CONFLICT, "a LoRA is training on this dataset; change it once the run ends".into()));
+    }
     state.training.remove_item(&id, &item).map(Json).map_err(training_error)
 }
 
@@ -2101,7 +2107,7 @@ async fn autofill_training_item(
                 tokio::task::spawn_blocking(move || -> anyhow::Result<PathBuf> {
                     let folder = vocals.parent().context("vocals folder")?;
                     std::fs::create_dir_all(folder)?;
-                    let partial = folder.join("vocals.part.wav");
+                    let partial = folder.join(format!("vocals.{}.part.wav", uuid::Uuid::now_v7().simple()));
                     separator.separate(&source, &partial)?;
                     std::fs::rename(&partial, &vocals)?;
                     Ok(vocals)
