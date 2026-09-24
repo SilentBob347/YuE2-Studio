@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use audio_post::{denoise, lifter, mastering, naturalize, quality, Stereo};
+use audio_post::{denoise, lifter, mastering, naturalize, Stereo};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -57,6 +57,8 @@ impl ProcessRequest {
 /// The run in progress or the last one, as the interface polls it.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProcessRun {
+    /// Tells a finishing worker whether its run is still the current one.
+    pub id: String,
     pub song_id: String,
     pub stages: Vec<&'static str>,
     /// The stage working now, once started.
@@ -68,8 +70,29 @@ pub struct ProcessRun {
     pub preview: Option<String>,
     pub preview_ready: bool,
     pub request: ProcessRequest,
-    pub quality_before: Option<quality::QualityReport>,
-    pub quality_after: Option<quality::QualityReport>,
+}
+
+impl ProcessRun {
+    /// The files only this run owns: its preview and an uploaded reference.
+    pub fn leftovers(&self, media: &Path) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = self.preview.iter().filter_map(|name| workspace_file(media, name)).collect();
+        if let Some(MasterSource::Upload { upload_id }) = &self.request.master {
+            files.extend(workspace_file(media, upload_id));
+        }
+        files
+    }
+}
+
+/// Empties the workspace: previews and references live for one sitting.
+pub fn clear_workspace(media: &Path) {
+    let Ok(entries) = std::fs::read_dir(workspace(media)) else { return };
+    for entry in entries.flatten() {
+        if entry.path().is_file() {
+            if let Err(error) = std::fs::remove_file(entry.path()) {
+                eprintln!("[ERROR] processing: remove {}: {error}", entry.path().display());
+            }
+        }
+    }
 }
 
 /// Where previews and uploaded references wait, inside the media folder.
@@ -87,9 +110,11 @@ pub fn workspace_file(media: &Path, name: &str) -> Option<PathBuf> {
 }
 
 /// Runs the stages on `source`, calling `on_stage` as each begins.
-pub fn run(source: &Path, reference: Option<&Path>, request: &ProcessRequest, on_stage: impl Fn(&'static str)) -> Result<(Stereo, quality::QualityReport, quality::QualityReport)> {
+pub fn run(source: &Path, reference: Option<&Path>, request: &ProcessRequest, on_stage: impl Fn(&'static str)) -> Result<Stereo> {
+    if request.stages().is_empty() {
+        bail!("choose at least one kind of processing");
+    }
     let mut audio = crate::audio_pcm::decode_stereo(source)?;
-    let before = quality::evaluate(&audio);
     if let Some(settings) = &request.denoise {
         on_stage("denoise");
         audio = denoise::denoise(&audio, settings);
@@ -108,11 +133,7 @@ pub fn run(source: &Path, reference: Option<&Path>, request: &ProcessRequest, on
         let reference = crate::audio_pcm::decode_stereo(reference)?;
         audio = mastering::master(&audio, &reference, &mastering::MasteringConfig::default())?;
     }
-    if request.stages().is_empty() {
-        bail!("choose at least one kind of processing");
-    }
-    let after = quality::evaluate(&audio);
-    Ok((audio, before, after))
+    Ok(audio)
 }
 
 /// The processing settings a kept version records, for showing and repeating.

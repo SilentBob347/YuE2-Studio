@@ -61,8 +61,8 @@ export interface AdapterState {
   catalog: OfferedAdapter[];
   engine_checked: boolean;
   download: AdapterDownload | null;
-  /** The catalogue entry downloading now. */
-  installing: string | null;
+  /** The catalogue entries of the download running now. */
+  installing: string[];
 }
 
 /** One adapter of a song: its folder and a strength per slot. */
@@ -83,9 +83,17 @@ export async function fetchAdapters(): Promise<AdapterState> {
   return response.json();
 }
 
-export async function installCatalogAdapter(id: string): Promise<void> {
-  const response = await fetch(`/v1/adapters/catalog/${encodeURIComponent(id)}`, { method: 'POST' });
-  if (!response.ok) throw new Error(`LoRA download: HTTP ${response.status}`);
+/** Fetches catalogue entries as one download, the way the model screen fetches its components. */
+export async function installCatalogAdapters(ids: string[]): Promise<void> {
+  const response = await fetch('/v1/adapters/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.error || `LoRA download: HTTP ${response.status}`);
+  }
 }
 
 export async function cancelAdapterDownload(): Promise<void> {

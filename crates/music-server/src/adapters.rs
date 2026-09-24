@@ -20,6 +20,8 @@ use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use std::sync::Arc;
+
 use crate::downloads::{Asset, AssetKind, Downloader};
 
 /// The downloader scope the adapters page reads its progress under.
@@ -223,34 +225,34 @@ pub struct AdapterLibrary {
     root: PathBuf,
     engine: String,
     downloader: Downloader,
-    /// The catalogue entry downloading now. A set of files reports as one
-    /// download, so the file names alone cannot say which entry it is.
-    installing: std::sync::Mutex<Option<String>>,
+    /// The catalogue entries of the download running now. Several go as one
+    /// set, the way the model screen fetches its components: one progress,
+    /// one cancel, the files four at a time.
+    installing: std::sync::Mutex<Vec<String>>,
 }
 
 impl AdapterLibrary {
     /// The library of one engine's adapters, under the studio data root.
     pub fn new(data_root: &Path, engine: &str) -> Self {
         let root = data_root.join("adapters");
-        Self {
-            downloader: Downloader::new(root.clone()),
-            root,
-            engine: engine.to_string(),
-            installing: std::sync::Mutex::new(None),
-        }
+        Self { downloader: Downloader::new(root.clone()), root, engine: engine.to_string(), installing: std::sync::Mutex::new(Vec::new()) }
     }
 
-    pub fn installing(&self) -> Option<String> {
-        self.installing.lock().ok().and_then(|current| current.clone())
+    fn installing_now(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
+        self.installing.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn installing(&self) -> Vec<String> {
+        self.installing_now().clone()
+    }
+
+    pub fn downloader(&self) -> &Downloader {
+        &self.downloader
     }
 
     /// The folder the engine is pointed at.
     pub fn root(&self) -> &Path {
         &self.root
-    }
-
-    pub fn downloader(&self) -> &Downloader {
-        &self.downloader
     }
 
     fn folder(&self, id: &str) -> Result<PathBuf> {
@@ -323,22 +325,51 @@ impl AdapterLibrary {
             .collect()
     }
 
-    /// Downloads a catalogue entry and records it. The record is written last,
-    /// so a folder without one is an unfinished download the list leaves out.
-    pub async fn install(&self, catalog_id: &str) -> Result<()> {
-        let item = catalog()
-            .iter()
-            .find(|item| item.entry.id == catalog_id && item.entry.engine == self.engine)
-            .with_context(|| format!("no catalogue adapter {catalog_id}"))?;
-        if let Ok(mut current) = self.installing.lock() {
-            *current = Some(catalog_id.to_string());
+    /// Starts downloading catalogue entries as one set and records each once
+    /// its files are there. The record is written last, so a folder without
+    /// one is an unfinished download the list leaves out.
+    pub fn begin_install(self: &Arc<Self>, catalog_ids: &[String]) -> Result<()> {
+        let mut items = Vec::new();
+        for id in catalog_ids {
+            let item = catalog()
+                .iter()
+                .find(|item| item.entry.id == *id && item.entry.engine == self.engine)
+                .with_context(|| format!("no catalogue adapter {id}"))?;
+            if !items.iter().any(|known: &&CatalogItem| known.entry.id == item.entry.id) {
+                items.push(item);
+            }
         }
-        let downloaded = self.downloader.install_all(SCOPE, &item.assets).await;
-        if let Ok(mut current) = self.installing.lock() {
-            *current = None;
+        if items.is_empty() {
+            bail!("choose at least one adapter to download");
         }
-        downloaded?;
-        let entry = &item.entry;
+        {
+            let mut installing = self.installing_now();
+            if !installing.is_empty() {
+                bail!("a LoRA download is already running");
+            }
+            *installing = items.iter().map(|item| item.entry.id.clone()).collect();
+        }
+        let library = self.clone();
+        tokio::spawn(async move {
+            let assets: Vec<&'static Asset> = items.iter().flat_map(|item| item.assets.iter().copied()).collect();
+            let downloaded = library.downloader.install_all(SCOPE, &assets).await;
+            // an entry whose files all arrived is kept even when another failed
+            for item in &items {
+                if item.assets.iter().all(|asset| library.downloader.is_installed(asset)) {
+                    if let Err(error) = library.record(&item.entry) {
+                        eprintln!("[ERROR] adapter {} did not record: {error:#}", item.entry.id);
+                    }
+                }
+            }
+            if let Err(error) = downloaded {
+                eprintln!("[ERROR] LoRA download: {error:#}");
+            }
+            library.installing_now().clear();
+        });
+        Ok(())
+    }
+
+    fn record(&self, entry: &CatalogEntry) -> Result<()> {
         self.write_meta(&AdapterMeta {
             id: entry.id.clone(),
             engine: self.engine.clone(),

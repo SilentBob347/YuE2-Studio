@@ -159,17 +159,18 @@ export const ProcessingModal: React.FC<ProcessingModalProps> = ({ song, onClose,
     if (lifterOn) request.lifter = { denoise_strength: lifterGate, shimmer_reduction_db: shimmer, hf_mix: highBand, transient_boost: punch };
     if (naturalizeOn) request.naturalize = { amount: naturalizeAmount };
     if (masterOn && reference) request.master = reference;
-    const response = await fetch(`/v1/library/songs/${encodeURIComponent(song.id)}/process`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setError(body.error || `HTTP ${response.status}`);
-      return;
+    try {
+      const response = await fetch(`/v1/library/songs/${encodeURIComponent(song.id)}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+      setRun({ song_id: song.id, stages: [], stage: null, done: false, error: null, preview_ready: false });
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
     }
-    setRun({ song_id: song.id, stages: [], stage: null, done: false, error: null, preview_ready: false });
   };
 
   // names the version, its downloaded file and the line above the comparison

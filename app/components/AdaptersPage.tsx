@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Download, ExternalLink, FolderOpen, Layers, Loader2, Pencil, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Check, CheckSquare, Download, ExternalLink, FolderOpen, Layers, Loader2, Pencil, Square, Trash2, X } from 'lucide-react';
 import { useI18n } from '../context/I18nContext';
 import { openExternal } from '../services/externalLinks';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -12,7 +12,7 @@ import {
   deleteAdapter,
   fetchAdapters,
   importAdapter,
-  installCatalogAdapter,
+  installCatalogAdapters,
   localized,
   megabytes,
   updateAdapter,
@@ -79,13 +79,13 @@ const SlotBadges: React.FC<{ ids: string[]; slots: AdapterSlot[] }> = ({ ids, sl
 const CatalogCard: React.FC<{
   entry: OfferedAdapter;
   slots: AdapterSlot[];
-  busy: boolean;
-  active: boolean;
-  onInstall: () => void;
-}> = ({ entry, slots, busy, active, onInstall }) => {
+  selected: boolean;
+  downloading: boolean;
+  onToggle: () => void;
+}> = ({ entry, slots, selected, downloading, onToggle }) => {
   const { t, language } = useStrings();
   return (
-    <section className={`${CARD} flex flex-col`}>
+    <section className={`${CARD} flex flex-col ${selected ? 'border-pink-400 dark:border-pink-500/60' : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{localized(entry.name, language)}</p>
@@ -104,10 +104,12 @@ const CatalogCard: React.FC<{
           )}
           {entry.installed ? (
             <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400"><Check size={13} />{t('adaptersInstalled')}</span>
+          ) : downloading ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-pink-600 dark:text-pink-300"><Loader2 size={13} className="animate-spin" />{t('adaptersDownloading')}</span>
           ) : (
-            <button type="button" onClick={onInstall} disabled={busy} className={OUTLINE}>
-              {active ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-              {t('adaptersDownload')} · {megabytes(entry.bytes)}
+            <button type="button" role="checkbox" aria-checked={selected} onClick={onToggle} className={`${OUTLINE} ${selected ? 'border-pink-400 text-pink-600 dark:border-pink-500/60 dark:text-pink-300' : ''}`}>
+              {selected ? <CheckSquare size={13} /> : <Square size={13} />}
+              {megabytes(entry.bytes)}
             </button>
           )}
         </div>
@@ -234,6 +236,8 @@ export function AdaptersPage(): React.ReactElement {
   const [importName, setImportName] = useState('');
   const [importing, setImporting] = useState(false);
   const [deleting, setDeleting] = useState<InstalledAdapter | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [starting, setStarting] = useState(false);
   const filePicker = useRef<HTMLInputElement | null>(null);
 
   const refresh = useCallback(async () => {
@@ -297,6 +301,23 @@ export function AdaptersPage(): React.ReactElement {
 
   const slots = state?.slots ?? [];
   const download = state?.download;
+  const offered = state?.catalog ?? [];
+  const chosen = offered.filter(entry => selected.includes(entry.id) && !entry.installed);
+  const toggle = (id: string) => setSelected(current => (current.includes(id) ? current.filter(value => value !== id) : [...current, id]));
+
+  const downloadSelected = async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      await installCatalogAdapters(chosen.map(entry => entry.id));
+      setSelected([]);
+      await refresh();
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setStarting(false);
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto bg-white px-5 py-6 dark:bg-suno md:px-8">
@@ -394,18 +415,29 @@ export function AdaptersPage(): React.ReactElement {
         )}
 
         {tab === 'catalog' && (
-          <div className="grid gap-3 md:grid-cols-2">
-            {byKind<OfferedAdapter>(state?.catalog ?? []).map(entry => (
-              <CatalogCard
-                key={entry.id}
-                entry={entry}
-                slots={slots}
-                busy={downloading}
-                active={state?.installing === entry.id}
-                onInstall={() => void installCatalogAdapter(entry.id).then(refresh).catch(problem => setError(String(problem)))}
-              />
-            ))}
-          </div>
+          <>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">{t('adaptersSelectHint')}</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              {byKind<OfferedAdapter>(offered).map(entry => (
+                <CatalogCard
+                  key={entry.id}
+                  entry={entry}
+                  slots={slots}
+                  selected={selected.includes(entry.id)}
+                  downloading={downloading && (state?.installing ?? []).includes(entry.id)}
+                  onToggle={() => toggle(entry.id)}
+                />
+              ))}
+            </div>
+            {!downloading && (
+              <div className="sticky bottom-0 -mx-1 bg-white/90 px-1 py-3 backdrop-blur dark:bg-suno/90">
+                <button type="button" onClick={() => void downloadSelected()} disabled={starting || chosen.length === 0} className={PRIMARY}>
+                  {starting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  {t('adaptersDownloadSelected')}{chosen.length > 0 ? ` · ${chosen.length} · ${megabytes(chosen.reduce((sum, entry) => sum + entry.bytes, 0))}` : ''}
+                </button>
+              </div>
+            )}
+          </>
         )}
 
         {error && <p role="alert" className="rounded-lg bg-rose-500/10 px-3 py-2 text-sm text-rose-700 dark:text-rose-300">{error}</p>}

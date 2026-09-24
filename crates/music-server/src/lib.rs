@@ -596,6 +596,7 @@ pub async fn serve() -> anyhow::Result<()> {
             persisted.as_ref().map(|settings| settings.lyrics_sync.clone()).unwrap_or_default(),
         )),
     };
+    processing::clear_workspace(state.library.media_dir());
 
     let app = Router::new()
         .route("/health", get(health))
@@ -639,7 +640,7 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/adapters", get(list_adapters))
         .route("/v1/adapters/import", post(import_adapter))
         .route("/v1/adapters/cancel", post(cancel_adapter_download))
-        .route("/v1/adapters/catalog/{id}", post(install_catalog_adapter))
+        .route("/v1/adapters/install", post(install_catalog_adapters))
         .route("/v1/adapters/{id}", axum::routing::patch(update_adapter).delete(delete_adapter))
         .route("/v1/library/songs/{id}/process", post(start_processing))
         .route("/v1/library/songs/{id}/version", axum::routing::put(select_song_version))
@@ -1229,14 +1230,18 @@ async fn list_adapters(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
-async fn install_catalog_adapter(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
-    let library = state.adapters.clone();
-    tokio::spawn(async move {
-        if let Err(error) = library.install(&id).await {
-            eprintln!("[ERROR] adapter {id} did not install: {error:#}");
-        }
-    });
-    Json(serde_json::json!({ "started": true }))
+#[derive(Debug, Deserialize)]
+struct InstallAdaptersRequest {
+    /// Catalogue entries to fetch as one download.
+    ids: Vec<String>,
+}
+
+async fn install_catalog_adapters(
+    State(state): State<AppState>,
+    Json(input): Json<InstallAdaptersRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    state.adapters.begin_install(&input.ids).map_err(|error| api_error(StatusCode::CONFLICT, error.to_string()))?;
+    Ok(Json(serde_json::json!({ "started": true })))
 }
 
 async fn cancel_adapter_download(State(state): State<AppState>) -> Json<Value> {
@@ -1298,9 +1303,6 @@ async fn start_processing(
     Path(id): Path<String>,
     Json(request): Json<processing::ProcessRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
-    if state.processing_run.read().await.as_ref().is_some_and(|run| !run.done) {
-        return Err(api_error(StatusCode::CONFLICT, "a track is already being processed".into()));
-    }
     if request.stages().is_empty() {
         return Err(api_error(StatusCode::BAD_REQUEST, "choose at least one kind of processing".into()));
     }
@@ -1335,54 +1337,71 @@ async fn start_processing(
         ),
     };
 
-    // a new run replaces the last preview nobody kept
-    let stale = state.processing_run.read().await.as_ref().and_then(|run| run.preview.clone());
-    if let Some(name) = stale.and_then(|name| processing::workspace_file(&media, &name)) {
-        let _ = std::fs::remove_file(name);
+    let run_id = uuid::Uuid::now_v7().simple().to_string();
+    {
+        // checked and claimed under one lock, so two requests cannot both start
+        let mut current = state.processing_run.write().await;
+        if current.as_ref().is_some_and(|run| !run.done) {
+            return Err(api_error(StatusCode::CONFLICT, "a track is already being processed".into()));
+        }
+        // a new run replaces the last preview nobody kept; its reference stays
+        // when this run masters to the same upload
+        if let Some(previous) = current.take() {
+            let keep = reference.clone();
+            for file in previous.leftovers(&media).into_iter().filter(|file| Some(file) != keep.as_ref()) {
+                let _ = std::fs::remove_file(file);
+            }
+        }
+        *current = Some(processing::ProcessRun {
+            id: run_id.clone(),
+            song_id: id.clone(),
+            stages: request.stages(),
+            stage: None,
+            done: false,
+            error: None,
+            preview: None,
+            preview_ready: false,
+            request: request.clone(),
+        });
     }
-    *state.processing_run.write().await = Some(processing::ProcessRun {
-        song_id: id.clone(),
-        stages: request.stages(),
-        stage: None,
-        done: false,
-        error: None,
-        preview: None,
-        preview_ready: false,
-        request: request.clone(),
-        quality_before: None,
-        quality_after: None,
-    });
 
     let background = state.clone();
     tokio::task::spawn_blocking(move || {
         let handle = tokio::runtime::Handle::current();
-        let outcome = (|| -> anyhow::Result<(String, audio_post::quality::QualityReport, audio_post::quality::QualityReport)> {
-            let (audio, before, after) = processing::run(&source, reference.as_deref(), &request, |stage| {
+        let current = |run: &Option<processing::ProcessRun>| run.as_ref().is_some_and(|run| run.id == run_id);
+        let outcome = (|| -> anyhow::Result<std::path::PathBuf> {
+            let audio = processing::run(&source, reference.as_deref(), &request, |stage| {
                 let state = background.clone();
+                let run_id = run_id.clone();
                 handle.spawn(async move {
-                    if let Some(run) = state.processing_run.write().await.as_mut() {
+                    if let Some(run) = state.processing_run.write().await.as_mut().filter(|run| run.id == run_id) {
                         run.stage = Some(stage);
                     }
                 });
             })?;
             let folder = processing::workspace(&media);
             std::fs::create_dir_all(&folder)?;
-            let name = format!("{}-{}.wav", id, &uuid::Uuid::now_v7().simple().to_string()[..8]);
-            audio_pcm::write_wav24(&folder.join(&name), &audio)?;
-            Ok((name, before, after))
+            let path = folder.join(format!("{id}-{}.wav", &run_id[run_id.len() - 8..]));
+            audio_pcm::write_wav24(&path, &audio)?;
+            Ok(path)
         })();
         handle.block_on(async {
-            if let Some(run) = background.processing_run.write().await.as_mut() {
-                run.done = true;
-                match outcome {
-                    Ok((name, before, after)) => {
-                        run.preview = Some(name);
-                        run.preview_ready = true;
-                        run.quality_before = Some(before);
-                        run.quality_after = Some(after);
-                    }
-                    Err(error) => run.error = Some(format!("{error:#}")),
+            let mut guard = background.processing_run.write().await;
+            if !current(&guard) {
+                // discarded while it worked: nothing will ever ask for the preview
+                if let Ok(path) = &outcome {
+                    let _ = std::fs::remove_file(path);
                 }
+                return;
+            }
+            let run = guard.as_mut().expect("checked above");
+            run.done = true;
+            match outcome {
+                Ok(path) => {
+                    run.preview = path.file_name().and_then(|name| name.to_str()).map(str::to_owned);
+                    run.preview_ready = run.preview.is_some();
+                }
+                Err(error) => run.error = Some(format!("{error:#}")),
             }
         });
     });
@@ -1421,25 +1440,44 @@ async fn keep_processing(
         .and_then(|name| processing::workspace_file(&media, name))
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "the preview file is gone".into()))?;
     let filename = format!("{}-v{}-{}.wav", run.song_id, &uuid::Uuid::now_v7().simple().to_string()[..8], run.stages.join("-"));
-    std::fs::rename(&preview, media.join(&filename)).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("store the version: {error}")))?;
+    let stored = media.join(&filename);
+    std::fs::rename(&preview, &stored).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("store the version: {error}")))?;
     let reference_title = match &run.request.master {
         Some(processing::MasterSource::Song { song_id }) => state.library.get_song(song_id).ok().flatten().map(|song| song.title),
         _ => None,
     };
     let settings = processing::settings_record(&run.request, reference_title.as_deref());
-    let song = state
-        .library
-        .add_song_version(&run.song_id, &filename, input.label.trim(), settings)
-        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
-    *state.processing_run.write().await = None;
+    let recorded = match state.library.add_song_version(&run.song_id, &filename, input.label.trim(), settings) {
+        Ok(Some(song)) => Ok(song),
+        Ok(None) => Err(api_error(StatusCode::NOT_FOUND, "Song not found".into())),
+        Err(error) => Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
+    };
+    let song = match recorded {
+        Ok(song) => song,
+        Err(problem) => {
+            // the preview goes back where it was, so the run can still be kept or discarded
+            if let Err(error) = std::fs::rename(&stored, &preview) {
+                eprintln!("[ERROR] processing: return {} to the workspace: {error}", stored.display());
+            }
+            return Err(problem);
+        }
+    };
+    let mut current = state.processing_run.write().await;
+    if current.as_ref().is_some_and(|now| now.id == run.id) {
+        for file in current.take().map(|run| run.leftovers(&media)).unwrap_or_default() {
+            let _ = std::fs::remove_file(file);
+        }
+    }
     Ok(Json(song))
 }
 
+/// Forgets the run, finished or not. A worker still going sees it is no longer
+/// current and removes its own output.
 async fn discard_processing(State(state): State<AppState>) -> Json<Value> {
-    let run = state.processing_run.write().await.take();
-    if let Some(path) = run.and_then(|run| run.preview).and_then(|name| processing::workspace_file(state.library.media_dir(), &name)) {
-        let _ = std::fs::remove_file(path);
+    if let Some(run) = state.processing_run.write().await.take() {
+        for file in run.leftovers(state.library.media_dir()) {
+            let _ = std::fs::remove_file(file);
+        }
     }
     Json(serde_json::json!({ "discarded": true }))
 }

@@ -234,7 +234,6 @@ impl Downloader {
     pub async fn active(&self) -> Option<DownloadProgress> {
         self.progress.lock().await.clone()
     }
-
     /// Stops the running download.
     pub fn cancel(&self) {
         self.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
