@@ -16,6 +16,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Video memory a run of the default recipe needs, in GB: the INT8 ConvRot
+/// base, the LoKr factors with Prodigy's state and the activations of a
+/// ten-second window.
+pub const MIN_VRAM_GB: u32 = 11;
+
 /// The Hugging Face repository and commit the training weights come from.
 pub const WEIGHTS_REPOSITORY: &str = "scragnog/YuE2-GGUF";
 pub const WEIGHTS_REVISION: &str = "eb7de0903bf4dfbd14a2384ae0c0d14150cfa2c7";
@@ -141,6 +146,83 @@ impl Default for Recipe {
             cursor_weight: 0.08,
         }
     }
+}
+
+/// How the training page shows one setting of a recipe. The page renders
+/// whatever an engine lists, so each engine brings its own settings; labels
+/// and hints are looked up as `trainingField_<key>` and `trainingHint_<key>`.
+#[derive(Debug, Clone, Serialize)]
+pub struct RecipeField {
+    pub key: &'static str,
+    /// Fields sharing a group are shown together, under `trainingGroup_<group>`.
+    pub group: &'static str,
+    pub kind: FieldKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    pub choices: &'static [&'static str],
+    /// Shown only while another field holds one of these values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shown_when: Option<FieldCondition>,
+    /// Greyed out, with `trainingHint_<key>_off`, while another field holds one of these values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub off_when: Option<FieldCondition>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldKind {
+    Number,
+    Integer,
+    Choice,
+    Toggle,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct FieldCondition {
+    pub field: &'static str,
+    pub values: &'static [&'static str],
+}
+
+const fn number(key: &'static str, group: &'static str, min: f64, max: f64, step: f64) -> RecipeField {
+    RecipeField { key, group, kind: FieldKind::Number, min: Some(min), max: Some(max), step: Some(step), choices: &[], shown_when: None, off_when: None }
+}
+
+const fn integer(key: &'static str, group: &'static str, min: f64, max: f64, step: f64) -> RecipeField {
+    RecipeField { key, group, kind: FieldKind::Integer, min: Some(min), max: Some(max), step: Some(step), choices: &[], shown_when: None, off_when: None }
+}
+
+const fn choice(key: &'static str, group: &'static str, choices: &'static [&'static str]) -> RecipeField {
+    RecipeField { key, group, kind: FieldKind::Choice, min: None, max: None, step: None, choices, shown_when: None, off_when: None }
+}
+
+const fn toggle(key: &'static str, group: &'static str) -> RecipeField {
+    RecipeField { key, group, kind: FieldKind::Toggle, min: None, max: None, step: None, choices: &[], shown_when: None, off_when: None }
+}
+
+/// The settings of a YuE2 run, in the order the page shows them.
+pub fn recipe_fields() -> Vec<RecipeField> {
+    let lokr = FieldCondition { field: "adapter", values: &["lokr"] };
+    vec![
+        number("target_kl", "stop", 0.0, 5.0, 0.1),
+        integer("steps", "stop", 1.0, 5000.0, 50.0),
+        integer("save_every", "stop", 1.0, 1000.0, 10.0),
+        integer("seed", "stop", 0.0, 4_294_967_295.0, 1.0),
+        choice("adapter", "adapter", &["lokr", "lora"]),
+        integer("rank", "adapter", 1.0, 512.0, 8.0),
+        number("alpha", "adapter", 1.0, 1024.0, 8.0),
+        RecipeField { shown_when: Some(lokr), ..integer("lokr_dim", "adapter", 1.0, 512.0, 8.0) },
+        RecipeField { shown_when: Some(lokr), ..integer("lokr_factor", "adapter", 1.0, 64.0, 1.0) },
+        choice("optimizer", "optimizer", &["prodigy", "adamw"]),
+        RecipeField { off_when: Some(FieldCondition { field: "optimizer", values: &["prodigy"] }), ..number("learning_rate", "optimizer", 0.0, 0.01, 0.00005) },
+        number("planner_lr_scale", "optimizer", 0.05, 1.0, 0.05),
+        toggle("lyric_timing", "lyrics"),
+        RecipeField { off_when: Some(FieldCondition { field: "lyric_timing", values: &["false"] }), ..number("cursor_weight", "lyrics", 0.0, 1.0, 0.01) },
+    ]
 }
 
 impl Recipe {
@@ -399,6 +481,19 @@ mod tests {
         assert!(train.windows(2).any(|window| window == ["--cursor-weight", "0"]));
         assert!(train.windows(2).any(|window| window == ["--lr", "0.0002"]));
         assert!(!train.iter().any(|arg| arg == "--lokr-dim"));
+    }
+
+    #[test]
+    fn every_recipe_setting_has_a_field() {
+        let recipe = serde_json::to_value(Recipe::default()).unwrap();
+        let keys: Vec<&str> = recipe.as_object().unwrap().keys().map(String::as_str).collect();
+        let fields: Vec<&str> = recipe_fields().iter().map(|field| field.key).collect();
+        for key in &keys {
+            assert!(fields.contains(key), "{key} has no field");
+        }
+        for field in &fields {
+            assert!(keys.contains(field), "{field} is not a recipe setting");
+        }
     }
 
     #[test]

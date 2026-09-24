@@ -5,7 +5,9 @@ import { ConfirmDialog } from './ConfirmDialog';
 import {
   Dataset,
   DatasetItem,
+  FieldCondition,
   Recipe,
+  RecipeField,
   TrainingRun,
   TrainingState,
   addFiles,
@@ -73,58 +75,70 @@ const Choice = <T extends string>({ label, value, options, onChange }: { label: 
   </label>
 );
 
-/** Every setting of a run, starting from HOT-Step's recipe. */
-const RecipeForm: React.FC<{ recipe: Recipe; defaults: Recipe; onChange: (recipe: Recipe) => void }> = ({ recipe, defaults, onChange }) => {
-  const { t } = useStrings();
-  const set = <K extends keyof Recipe>(key: K) => (value: Recipe[K]) => onChange({ ...recipe, [key]: value });
+/** Every setting of a run, as the engine lists them, starting from its recipe. */
+const RecipeForm: React.FC<{ recipe: Recipe; defaults: Recipe; fields: RecipeField[]; onChange: (recipe: Recipe) => void }> = ({ recipe, defaults, fields, onChange }) => {
+  const { tt } = useStrings();
+  const holds = (condition?: FieldCondition) => condition !== undefined && condition.values.includes(String(recipe[condition.field]));
+  const groups: string[] = [];
+  for (const field of fields) if (!groups.includes(field.group)) groups.push(field.group);
   const changed = JSON.stringify(recipe) !== JSON.stringify(defaults);
+  const control = (field: RecipeField) => {
+    const label = tt(`trainingField_${field.key}`);
+    const off = holds(field.off_when);
+    const hint = off ? tt(`trainingHint_${field.key}_off`) : undefined;
+    const value = recipe[field.key];
+    if (field.kind === 'toggle') {
+      return (
+        <label key={field.key} className="flex items-center gap-2 pb-2 text-sm text-zinc-700 dark:text-zinc-200">
+          <input type="checkbox" checked={value === true} onChange={event => onChange({ ...recipe, [field.key]: event.target.checked })} className="accent-pink-500" />
+          {label}
+        </label>
+      );
+    }
+    if (field.kind === 'choice') {
+      return (
+        <React.Fragment key={field.key}>
+          <Choice
+            label={label}
+            value={String(value)}
+            options={(field.choices ?? []).map(choice => ({ value: choice, label: tt(`trainingChoice_${choice}`) }))}
+            onChange={next => onChange({ ...recipe, [field.key]: next })}
+          />
+        </React.Fragment>
+      );
+    }
+    return (
+      <NumberField
+        key={field.key}
+        label={label}
+        value={Number(value)}
+        min={field.min}
+        max={field.max}
+        step={field.step}
+        disabled={off}
+        hint={hint}
+        onChange={next => {
+          const bounded = Math.min(field.max ?? next, Math.max(field.min ?? next, next));
+          onChange({ ...recipe, [field.key]: field.kind === 'integer' ? Math.round(bounded) : bounded });
+        }}
+      />
+    );
+  };
   return (
     <div className="mt-3 space-y-4">
-      <div>
-        <p className={LABEL}>{t('trainingGroupLength')}</p>
-        <div className="mt-1.5 grid gap-2 sm:grid-cols-4">
-          <NumberField label={t('trainingTargetKl')} value={recipe.target_kl} min={0} max={5} step={0.1} onChange={set('target_kl')} />
-          <NumberField label={t('trainingMaxSteps')} value={recipe.steps} min={1} step={50} onChange={value => set('steps')(Math.max(1, Math.round(value)))} />
-          <NumberField label={t('trainingSaveEvery')} value={recipe.save_every} min={1} step={10} onChange={value => set('save_every')(Math.max(1, Math.round(value)))} />
-          <NumberField label={t('trainingSeed')} value={recipe.seed} min={0} step={1} onChange={value => set('seed')(Math.max(0, Math.round(value)))} />
-        </div>
-        <p className={HINT}>{t('trainingTargetKlHint')}</p>
-      </div>
-      <div>
-        <p className={LABEL}>{t('trainingGroupAdapter')}</p>
-        <div className="mt-1.5 grid gap-2 sm:grid-cols-4">
-          <Choice label={t('trainingAdapter')} value={recipe.adapter} options={[{ value: 'lokr', label: 'LoKr' }, { value: 'lora', label: 'LoRA' }]} onChange={set('adapter')} />
-          <NumberField label={t('trainingRank')} value={recipe.rank} min={1} step={8} onChange={value => set('rank')(Math.max(1, Math.round(value)))} />
-          <NumberField label="Alpha" value={recipe.alpha} min={1} step={8} onChange={set('alpha')} />
-          {recipe.adapter === 'lokr' && (
-            <div className="grid grid-cols-2 gap-2">
-              <NumberField label={t('trainingLokrDim')} value={recipe.lokr_dim} min={1} step={8} onChange={value => set('lokr_dim')(Math.max(1, Math.round(value)))} />
-              <NumberField label={t('trainingLokrFactor')} value={recipe.lokr_factor} min={1} step={1} onChange={value => set('lokr_factor')(Math.max(1, Math.round(value)))} />
-            </div>
-          )}
-        </div>
-      </div>
-      <div>
-        <p className={LABEL}>{t('trainingGroupOptimizer')}</p>
-        <div className="mt-1.5 grid gap-2 sm:grid-cols-3">
-          <Choice label={t('trainingOptimizer')} value={recipe.optimizer} options={[{ value: 'prodigy', label: 'Prodigy' }, { value: 'adamw', label: 'AdamW' }]} onChange={set('optimizer')} />
-          <NumberField label={t('trainingLearningRate')} value={recipe.learning_rate} min={0} step={0.00005} disabled={recipe.optimizer === 'prodigy'} hint={recipe.optimizer === 'prodigy' ? t('trainingLrAuto') : undefined} onChange={set('learning_rate')} />
-          <NumberField label={t('trainingPlannerScale')} value={recipe.planner_lr_scale} min={0.05} max={1} step={0.05} hint={t('trainingPlannerScaleHint')} onChange={set('planner_lr_scale')} />
-        </div>
-      </div>
-      <div>
-        <p className={LABEL}>{t('trainingGroupLyrics')}</p>
-        <div className="mt-1.5 grid items-end gap-2 sm:grid-cols-3">
-          <label className="flex items-center gap-2 pb-2 text-sm text-zinc-700 dark:text-zinc-200">
-            <input type="checkbox" checked={recipe.lyric_timing} onChange={event => set('lyric_timing')(event.target.checked)} className="accent-pink-500" />
-            {t('trainingLyricTiming')}
-          </label>
-          <NumberField label={t('trainingCursorWeight')} value={recipe.cursor_weight} min={0} max={1} step={0.01} disabled={!recipe.lyric_timing} onChange={set('cursor_weight')} />
-        </div>
-        <p className={HINT}>{t('trainingLyricTimingHint')}</p>
-      </div>
+      {groups.map(group => {
+        const shown = fields.filter(field => field.group === group && (field.shown_when === undefined || holds(field.shown_when)));
+        const hints = shown.map(field => ({ key: field.key, text: tt(`trainingHint_${field.key}`) })).filter(entry => entry.text !== `trainingHint_${entry.key}`);
+        return (
+          <div key={group}>
+            <p className={LABEL}>{tt(`trainingGroup_${group}`)}</p>
+            <div className="mt-1.5 grid items-end gap-2 sm:grid-cols-4">{shown.map(control)}</div>
+            {hints.map(entry => <p key={entry.key} className={HINT}>{entry.text}</p>)}
+          </div>
+        );
+      })}
       {changed && (
-        <button type="button" onClick={() => onChange(defaults)} className={OUTLINE}>{t('trainingResetRecipe')}</button>
+        <button type="button" onClick={() => onChange(defaults)} className={OUTLINE}>{tt('trainingResetRecipe')}</button>
       )}
     </div>
   );
@@ -147,7 +161,7 @@ const PackCard: React.FC<{ state: TrainingState; onError: (message: string) => v
   return (
     <section className={CARD}>
       <p className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-white"><Download size={16} className="text-pink-500" />{t('trainingSetupTitle')}</p>
-      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{t('trainingSetupNeeds').replace('{size}', gigabytes(total))}</p>
+      <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{t('trainingSetupNeeds').replace('{size}', gigabytes(total)).replace('{vram}', String(state.min_vram_gb))}</p>
       <ul className="mt-3 space-y-1.5">
         {state.pack.map(file => (
           <li key={file.id} className="flex items-center justify-between gap-3 text-xs text-zinc-700 dark:text-zinc-200">
@@ -295,14 +309,15 @@ const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (mes
   const { t, tt } = useStrings();
   const running = run.status === 'running';
   const last = run.steps[run.steps.length - 1];
-  const target = run.recipe.target_kl ?? 0;
-  // the trainer stops on the mean KL of its last 20 steps
+  const cap = Number(run.recipe.steps) || 1;
+  // an engine that stops on drift reports it per step; the stop is on the mean of the last 20
+  const target = Number(run.recipe.target_kl ?? 0);
   const window = run.steps.slice(-20).map(step => step.ar_kl).filter((kl): kl is number => typeof kl === 'number');
-  const kl = window.length ? window.reduce((a, b) => a + b, 0) / window.length : 0;
+  const kl = window.length ? window.reduce((a, b) => a + b, 0) / window.length : null;
   const recent = run.steps.slice(-10).map(step => step.step_ms).filter((ms): ms is number => typeof ms === 'number');
   const perStep = recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length / 1000 : 0;
-  const left = last && perStep && target <= 0 ? (run.recipe.steps - last.step) * perStep : 0;
-  const percent = last ? Math.min(100, 100 * Math.max(last.step / run.recipe.steps, target > 0 ? kl / target : 0)) : 0;
+  const left = last && perStep && target <= 0 ? (cap - last.step) * perStep : 0;
+  const percent = last ? Math.min(100, 100 * Math.max(last.step / cap, target > 0 && kl !== null ? kl / target : 0)) : 0;
   const stageIndex = run.stage ? run.stages.indexOf(run.stage) : run.status === 'done' ? run.stages.length : -1;
   const tone = { running: 'text-pink-600 dark:text-pink-300', done: 'text-emerald-600 dark:text-emerald-400', failed: 'text-rose-600 dark:text-rose-300', cancelled: 'text-zinc-500', interrupted: 'text-amber-600 dark:text-amber-300' }[run.status];
   return (
@@ -310,7 +325,7 @@ const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (mes
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{run.name}</p>
-          <p className="mt-0.5 text-[11px] text-zinc-500">{run.dataset_name}{run.trigger ? ` · ${run.trigger}` : ''} · {target > 0 ? `KL ${target} · ` : ''}≤ {run.recipe.steps} {t('trainingSteps')}</p>
+          <p className="mt-0.5 text-[11px] text-zinc-500">{run.dataset_name}{run.trigger ? ` · ${run.trigger}` : ''} · {target > 0 ? `KL ${target} · ` : ''}{target > 0 ? '≤ ' : ''}{cap} {t('trainingSteps')}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <span className={`inline-flex items-center gap-1 text-xs font-semibold ${tone}`}>{running && <Loader2 size={12} className="animate-spin" />}{tt(`trainingStatus_${run.status}`)}</span>
@@ -338,7 +353,7 @@ const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (mes
       {last && (
         <>
           <div className="mt-3 flex items-baseline justify-between text-[11px] tabular-nums text-zinc-600 dark:text-zinc-300">
-            <span>{t('trainingStep')} {last.step} · {t('trainingLoss')} {last.loss.toFixed(3)} · KL {kl.toFixed(2)}{target > 0 ? ` / ${target}` : ''}</span>
+            <span>{t('trainingStep')} {last.step} · {t('trainingLoss')} {last.loss.toFixed(3)}{kl !== null ? ` · KL ${kl.toFixed(2)}${target > 0 ? ` / ${target}` : ''}` : ''}</span>
             {running && left > 0 && <span>{clock(left)} {t('trainingLeft')}</span>}
           </div>
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-white/10">
@@ -596,7 +611,7 @@ export const TrainingPanel: React.FC = () => {
           <button type="button" onClick={() => setAdvanced(value => !value)} className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200" aria-expanded={advanced}>
             <ChevronDown size={13} className={`transition-transform ${advanced ? 'rotate-180' : ''}`} />{t('trainingAdvanced')}
           </button>
-          {advanced && <RecipeForm recipe={recipe ?? state.recipe_defaults} defaults={state.recipe_defaults} onChange={setRecipe} />}
+          {advanced && <RecipeForm recipe={recipe ?? state.recipe_defaults} defaults={state.recipe_defaults} fields={state.recipe_fields} onChange={setRecipe} />}
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button type="button" onClick={() => void start()} disabled={Boolean(blocker) || starting || Boolean(state.active)} className={PRIMARY}>
               {starting ? <Loader2 size={15} className="animate-spin" /> : null}{t('trainingStart')}

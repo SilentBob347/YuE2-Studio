@@ -29,23 +29,25 @@ export interface Dataset {
   items: DatasetItem[];
 }
 
-export interface Recipe {
-  /** A cap: with target_kl the run usually stops well before it. */
-  steps: number;
-  save_every: number;
-  seed: number;
-  /** The run stops once the planner is this far from the base model; 0 runs every step. */
-  target_kl: number;
-  adapter: 'lokr' | 'lora';
-  rank: number;
-  alpha: number;
-  lokr_dim: number;
-  lokr_factor: number;
-  optimizer: 'prodigy' | 'adamw';
-  learning_rate: number;
-  planner_lr_scale: number;
-  lyric_timing: boolean;
-  cursor_weight: number;
+/** A run's settings, as the engine names them; `recipe_fields` says how to show each. */
+export type Recipe = Record<string, number | string | boolean>;
+
+export interface FieldCondition {
+  field: string;
+  values: string[];
+}
+
+/** One setting of the recipe form, described by the engine. */
+export interface RecipeField {
+  key: string;
+  group: string;
+  kind: 'number' | 'integer' | 'choice' | 'toggle';
+  min?: number;
+  max?: number;
+  step?: number;
+  choices?: string[];
+  shown_when?: FieldCondition;
+  off_when?: FieldCondition;
 }
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
@@ -73,6 +75,9 @@ export interface TrainingState {
   pack: PackFile[];
   pack_ready: boolean;
   recipe_defaults: Recipe;
+  recipe_fields: RecipeField[];
+  /** Video memory a run of the default recipe needs, in GB. */
+  min_vram_gb: number;
   download: { downloaded_bytes: number; total_bytes: number; done: boolean; error?: string | null } | null;
   datasets: Dataset[];
   runs: TrainingRun[];
