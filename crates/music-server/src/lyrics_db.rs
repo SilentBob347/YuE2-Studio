@@ -8,6 +8,7 @@
 //! when the title, the artist and the length agree, so a namesake by someone
 //! else is never stored as the song's lyrics.
 
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -271,18 +272,18 @@ fn text(value: &Value) -> String {
 
 /// A title without what files add to it: "(feat. X)", "(EP)", "[Remastered 2011]", "- Live".
 fn bare_title(title: &str) -> String {
-    let brackets = Regex::new(r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]").expect("valid regex");
-    let tail = Regex::new(r"(?i)\s+-\s+(live|remaster(ed)?|radio edit|single version|mono|stereo|bonus track).*$").expect("valid regex");
-    let feat = Regex::new(r"(?i)\s+(feat\.?|ft\.?|featuring)\s+.*$").expect("valid regex");
-    let bare = brackets.replace_all(title, "");
-    let bare = tail.replace_all(&bare, "");
-    feat.replace_all(&bare, "").trim().to_string()
+    static BRACKETS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s*[\(\[\{][^\)\]\}]*[\)\]\}]").expect("valid regex"));
+    static TAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s+-\s+(live|remaster(ed)?|radio edit|single version|mono|stereo|bonus track).*$").expect("valid regex"));
+    static FEAT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s+(feat\.?|ft\.?|featuring)\s+.*$").expect("valid regex"));
+    let bare = BRACKETS.replace_all(title, "");
+    let bare = TAIL.replace_all(&bare, "");
+    FEAT.replace_all(&bare, "").trim().to_string()
 }
 
 /// The first artist of "A feat. B", "A & B", "A, B", "A x B".
 fn first_artist(artist: &str) -> String {
-    let split = Regex::new(r"(?i)\s+(feat\.?|ft\.?|featuring|x|vs\.?|and|и)\s+|\s*[,&;/]\s*").expect("valid regex");
-    split.split(artist).next().unwrap_or(artist).trim().to_string()
+    static SPLIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s+(feat\.?|ft\.?|featuring|x|vs\.?|and|и)\s+|\s*[,&;/]\s*").expect("valid regex"));
+    SPLIT.split(artist).next().unwrap_or(artist).trim().to_string()
 }
 
 /// Artist and title pairs to ask with, most exact first, without repeats.
@@ -361,10 +362,17 @@ fn close(ours: &str, theirs: &str) -> bool {
     cyrillic(ours) != cyrillic(theirs) && contains_either(&skeleton(ours), &skeleton(theirs), 3)
 }
 
+/// Titles are close when one holds most of the other: "Rain" is not "Rain
+/// Dance", while "Замиренье" is "Замиренье (feat. Drummatix)" once bared.
+fn close_title(ours: &str, theirs: &str) -> bool {
+    let (a, b) = (comparable(ours).chars().count(), comparable(theirs).chars().count());
+    close(ours, theirs) && a.min(b) * 10 >= a.max(b) * 7
+}
+
 /// The same recording: the title agrees, the artist agrees when both are
 /// known, and the length is within `LENGTH_SLACK`.
 fn matches(song: &Song, candidate: &Candidate) -> bool {
-    let title = close(&song.title, &candidate.title) || close(&bare_title(&song.title), &bare_title(&candidate.title));
+    let title = close_title(&song.title, &candidate.title) || close_title(&bare_title(&song.title), &bare_title(&candidate.title));
     let artist = song.artist.trim().is_empty() || close(&song.artist, &candidate.artist) || close(&first_artist(&song.artist), &candidate.artist);
     let length = match candidate.seconds {
         Some(seconds) if song.seconds > 0.0 => (seconds - song.seconds).abs() <= LENGTH_SLACK,
@@ -388,13 +396,13 @@ fn says_instrumental(body: &str) -> bool {
 }
 
 fn strip_times(line: &str) -> String {
-    let times = Regex::new(r"\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]|<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>").expect("valid regex");
-    times.replace_all(line, "").to_string()
+    static TIMES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?\]|<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>").expect("valid regex"));
+    TIMES.replace_all(line, "").to_string()
 }
 
 fn unescape_html(text: &str) -> String {
-    let entity = Regex::new(r"&#(\d+);").expect("valid regex");
-    entity
+    static ENTITY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"&#(\d+);").expect("valid regex"));
+    ENTITY
         .replace_all(text, |found: &regex::Captures| found[1].parse::<u32>().ok().and_then(char::from_u32).map(String::from).unwrap_or_default())
         .replace("&amp;", "&")
         .replace("&quot;", "\"")
@@ -407,9 +415,9 @@ fn unescape_html(text: &str) -> String {
 /// and a source's own notices taken out; the timed form keeps the start of
 /// each line as "[m:ss]". None when no words are left.
 fn lyrics(body: &str, source: &'static str, song: &Song) -> Option<Found> {
-    let tag = Regex::new(r"^\[(ar|ti|al|au|by|offset|length|re|ve|la|id|#)\s*:.*\]$").expect("valid regex");
-    let credit = Regex::new(r"(?i)^(作词|作曲|编曲|制作人|作詞|編曲|词|曲|合声|和声|和聲|混音|录音|錄音|母带|母帶|吉他|贝斯|貝斯|鼓|弦乐|弦樂|制作|製作|监制|監製|出品|发行|發行|op|sp|lyrics by|composed by|written by|music by|producer|arranged by|слова|музыка)\s*[:：]").expect("valid regex");
-    let start = Regex::new(r"^\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]").expect("valid regex");
+    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[(ar|ti|al|au|by|offset|length|re|ve|la|id|#)\s*:.*\]$").expect("valid regex"));
+    static CREDIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^(作词|作曲|编曲|制作人|作詞|編曲|词|曲|合声|和声|和聲|混音|录音|錄音|母带|母帶|吉他|贝斯|貝斯|鼓|弦乐|弦樂|制作|製作|监制|監製|出品|发行|發行|op|sp|lyrics by|composed by|written by|music by|producer|arranged by|слова|музыка)\s*[:：]").expect("valid regex"));
+    static START: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\[(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?\]").expect("valid regex"));
     let mut plain: Vec<String> = Vec::new();
     let mut timed: Vec<String> = Vec::new();
     for raw in body.lines() {
@@ -420,10 +428,10 @@ fn lyrics(body: &str, source: &'static str, song: &Song) -> Option<Found> {
             }
             continue;
         }
-        if tag.is_match(line) || line.contains("This Lyrics is NOT for Commercial use") || line.starts_with("******") || line.chars().all(|c| c.is_ascii_digit() || c == '(' || c == ')') {
+        if TAG.is_match(line) || line.contains("This Lyrics is NOT for Commercial use") || line.starts_with("******") || line.chars().all(|c| c.is_ascii_digit() || c == '(' || c == ')') {
             continue;
         }
-        let at = start.captures(line).map(|found| found[1].parse::<u64>().unwrap_or(0) * 60 + found[2].parse::<u64>().unwrap_or(0));
+        let at = START.captures(line).map(|found| found[1].parse::<u64>().unwrap_or(0) * 60 + found[2].parse::<u64>().unwrap_or(0));
         let words = strip_times(line).trim().to_string();
         if words.is_empty() {
             if plain.last().is_some_and(|last| !last.is_empty()) {
@@ -431,7 +439,7 @@ fn lyrics(body: &str, source: &'static str, song: &Song) -> Option<Found> {
             }
             continue;
         }
-        if credit.is_match(&words) {
+        if CREDIT.is_match(&words) {
             continue;
         }
         // "晴天 - 周杰伦 (Jay Chou)": the sources open with the song's own heading
@@ -476,6 +484,7 @@ mod tests {
         assert!(!matches(&ours, &candidate("Нейромонах Феофан", "Ураган", Some(301.0))));
         assert!(matches(&song("Монеточка", "Каждый раз", 208.0), &candidate("Монеточка", "Каждый раз", Some(209.0))));
         assert!(matches(&song("Queen", "Bohemian Rhapsody - Remastered 2011", 355.0), &candidate("Queen", "Bohemian Rhapsody", Some(354.0))));
+        assert!(!matches(&song("Artist", "Rain", 210.0), &candidate("Artist", "Rain Dance", Some(214.0))));
     }
 
     #[test]

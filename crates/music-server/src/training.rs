@@ -1292,8 +1292,11 @@ fn dash_split(text: &str) -> Vec<String> {
     dashes.split(text).map(|part| part.trim().to_string()).filter(|part| !part.is_empty()).collect()
 }
 
+/// "01 Title", "12. Title", "A3 - Title" lose their track number; "99 Luftballons"
+/// keeps its own: a number followed by a bare space is a track number only
+/// when it is zero-padded or three digits (disc and track).
 fn without_track_number(text: &str) -> String {
-    let number = regex::Regex::new(r"^\s*(?:[A-Da-d]?\d{1,3})(?:\s*[.)_\-–]\s*|\s+)").expect("valid regex");
+    let number = regex::Regex::new(r"^\s*(?:[A-Da-d]?\d{1,3}\s*[.)_\-–]\s*|[A-Da-d]?0\d\s+|\d{3}\s+)").expect("valid regex");
     let stripped = number.replace(text, "").trim().to_string();
     if stripped.is_empty() { text.trim().to_string() } else { stripped }
 }
@@ -1449,6 +1452,8 @@ mod tests {
             ("Franz Ferdinand -  Take Me Out.mp3", "Franz Ferdinand", "Take Me Out"),
             ("Король и Шут/Мотоцикл.mp3", "Король и Шут", "Мотоцикл"),
             ("Lifelover - Discography (2006-2011)/2006 - Pulver/03 - Nackskott.flac", "Lifelover", "Nackskott"),
+            ("Nena/99 Luftballons.mp3", "Nena", "99 Luftballons"),
+            ("Youssou N'Dour/7 Seconds.flac", "Youssou N'Dour", "7 Seconds"),
         ];
         for (relative, artist, title) in cases {
             assert_eq!(name(relative), (artist.to_string(), title.to_string()), "{relative}");

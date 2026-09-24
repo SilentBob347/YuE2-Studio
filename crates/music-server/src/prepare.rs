@@ -568,7 +568,10 @@ async fn lyrics_branch(state: &AppState, job: &Job, lyric_items: &[&training::Da
                     let paths: Vec<PathBuf> = heard.iter().map(|(_, path)| path.clone()).collect();
                     let language = language.clone();
                     let mut keep = keep;
-                    tokio::task::spawn_blocking(move || sync.words_many(&config, &paths, language.as_deref(), &mut keep, &task_cancel)).await?;
+                    let recognised = tokio::task::spawn_blocking(move || sync.words_many(&config, &paths, language.as_deref(), &mut keep, &task_cancel)).await?;
+                    if recognised == lyrics_sync::Recognised::OnProcessor {
+                        update(&shared, |status| status.notices.push("recogniser_on_cpu"));
+                    }
                 }
             }
             if stopped() {

@@ -83,6 +83,14 @@ pub const WHISPER_SIZES: &[&str] = &["tiny", "base", "small", "medium", "large-v
 /// common ones, phrases of two words or more, normalised.
 const HALLUCINATIONS: &str = include_str!("whisper_hallucinations.txt");
 
+/// Where a batch was recognised: on the device chosen, or on the processor
+/// after the card refused it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recognised {
+    OnDevice,
+    OnProcessor,
+}
+
 /// Words that only ever appear in a subtitler's credit, never in a song.
 const CREDIT_MARKERS: &[&str] = &["dimatorzok", "субтитр", "amara.org", "untertitel", "sous-titr", "subtítulo", "sottotitol", "legendas por", "subtitles by", "字幕", "자막"];
 
@@ -948,7 +956,7 @@ impl LyricsSync {
         language: Option<&str>,
         heard: &mut dyn FnMut(usize, Result<Vec<(f64, String)>>),
         cancel: &AtomicBool,
-    ) {
+    ) -> Recognised {
         let failed = |heard: &mut dyn FnMut(usize, Result<Vec<(f64, String)>>), error: anyhow::Error| {
             for index in 0..audio.len() {
                 heard(index, Err(anyhow!("{error:#}")));
@@ -958,20 +966,27 @@ impl LyricsSync {
             AsrProvider::Parakeet => {
                 let library = match self.onnxruntime_library() {
                     Some(library) => library,
-                    None => return failed(heard, anyhow!("the ONNX Runtime library is not installed")),
+                    None => {
+                        failed(heard, anyhow!("the ONNX Runtime library is not installed"));
+                        return Recognised::OnDevice;
+                    }
                 };
                 if !self.parakeet_ready() {
-                    return failed(heard, anyhow!("the Parakeet model is not fully downloaded"));
+                    failed(heard, anyhow!("the Parakeet model is not fully downloaded"));
+                    return Recognised::OnDevice;
                 }
                 static ONCE: std::sync::Once = std::sync::Once::new();
                 ONCE.call_once(|| unsafe { std::env::set_var("ORT_DYLIB_PATH", &library) });
                 let mut model = match parakeet_rs::ParakeetTDT::from_pretrained(&self.parakeet_dir(), None) {
                     Ok(model) => model,
-                    Err(error) => return failed(heard, anyhow!("load Parakeet: {error}")),
+                    Err(error) => {
+                        failed(heard, anyhow!("load Parakeet: {error}"));
+                        return Recognised::OnDevice;
+                    }
                 };
                 for (index, path) in audio.iter().enumerate() {
                     if cancel.load(Ordering::Relaxed) {
-                        return;
+                        return Recognised::OnDevice;
                     }
                     let answer = (|| {
                         let samples = crate::audio_pcm::decode_mono_16k(path).with_context(|| format!("decode {} for recognition", path.display()))?;
@@ -993,13 +1008,19 @@ impl LyricsSync {
                     })();
                     heard(index, answer);
                 }
+                Recognised::OnDevice
             }
-            AsrProvider::Whisper => {
-                if let Err(error) = self.whisper_many(config, audio, language, heard, cancel) {
+            AsrProvider::Whisper => match self.whisper_many(config, audio, language, heard, cancel) {
+                Ok(recognised) => recognised,
+                Err(error) => {
                     failed(heard, error);
+                    Recognised::OnDevice
                 }
+            },
+            _ => {
+                failed(heard, anyhow!("this recogniser does not run on this computer"));
+                Recognised::OnDevice
             }
-            _ => failed(heard, anyhow!("this recogniser does not run on this computer")),
         }
     }
 
@@ -1012,7 +1033,7 @@ impl LyricsSync {
         language: Option<&str>,
         heard: &mut dyn FnMut(usize, Result<Vec<(f64, String)>>),
         cancel: &AtomicBool,
-    ) -> Result<()> {
+    ) -> Result<Recognised> {
         let binary = self.whisper_binary().ok_or_else(|| anyhow!("the Whisper runtime is not installed"))?;
         let size = config
             .whisper_model
@@ -1025,12 +1046,12 @@ impl LyricsSync {
         let work = self.downloader.root().join("work").join(format!("batch-{}", uuid::Uuid::now_v7()));
         let out_dir = work.join("out");
         fs::create_dir_all(&out_dir).with_context(|| format!("create {}", out_dir.display()))?;
-        let mut wavs = Vec::with_capacity(audio.len());
+        let mut wavs: Vec<(usize, PathBuf)> = Vec::with_capacity(audio.len());
         let mut answered = vec![false; audio.len()];
         for (index, path) in audio.iter().enumerate() {
             let wav = work.join(format!("{index}.wav"));
             match crate::audio_pcm::write_wav16k_mono(path, &wav) {
-                Ok(()) => wavs.push(wav),
+                Ok(()) => wavs.push((index, wav)),
                 Err(error) => {
                     answered[index] = true;
                     heard(index, Err(error.context(format!("decode {} for recognition", path.display()))));
@@ -1054,11 +1075,18 @@ impl LyricsSync {
             }
         };
         let on_card = !matches!(config.runtime, OnnxFlavour::Cpu);
-        let mut outcome = self.run_whisper_many(&binary, size, &wavs, &out_dir, language, on_card, &mut || take(&mut answered), cancel);
+        let all: Vec<PathBuf> = wavs.iter().map(|(_, wav)| wav.clone()).collect();
+        let mut outcome = self.run_whisper_many(&binary, size, &all, &out_dir, language, on_card, &mut || take(&mut answered), cancel);
+        let mut recognised = Recognised::OnDevice;
         if outcome.as_ref().is_err_and(|error| error.to_string() != "cancelled") && on_card {
+            // the card refused: the processor takes only what is still unheard,
+            // and the page is told it ran there
+            take(&mut answered);
             let refused = outcome.unwrap_err();
+            let left: Vec<PathBuf> = wavs.iter().filter(|(index, _)| !answered[*index]).map(|(_, wav)| wav.clone()).collect();
+            recognised = Recognised::OnProcessor;
             outcome = self
-                .run_whisper_many(&binary, size, &wavs, &out_dir, language, false, &mut || take(&mut answered), cancel)
+                .run_whisper_many(&binary, size, &left, &out_dir, language, false, &mut || take(&mut answered), cancel)
                 .with_context(|| format!("the card was tried first and refused: {refused}"));
         }
         take(&mut answered);
@@ -1069,7 +1097,7 @@ impl LyricsSync {
             }
         }
         fs::remove_dir_all(&work).ok();
-        Ok(())
+        Ok(recognised)
     }
 
     /// Runs faster-whisper over one track and returns the words it heard.
