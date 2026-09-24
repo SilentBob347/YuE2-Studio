@@ -1804,25 +1804,57 @@ async fn create_training_dataset(State(state): State<AppState>, Json(input): Jso
 
 /// Takes a dataset folder uploaded from another studio: its dataset.json and
 /// the audio beside it.
+/// A folder of uploaded files, removed however the request ends.
+struct UploadFolder(std::path::PathBuf);
+
+impl UploadFolder {
+    fn new() -> Result<Self, (StatusCode, Json<ApiError>)> {
+        let folder = std::env::temp_dir().join(format!("training-upload-{}", uuid::Uuid::now_v7().simple()));
+        std::fs::create_dir_all(&folder).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+        Ok(Self(folder))
+    }
+}
+
+impl Drop for UploadFolder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Writes one uploaded file to disk as it arrives, so a dataset of several
+/// gigabytes never sits in memory.
+async fn save_upload(mut field: axum::extract::multipart::Field<'_>, path: &std::path::Path) -> Result<(), (StatusCode, Json<ApiError>)> {
+    use tokio::io::AsyncWriteExt;
+    let name = field.file_name().unwrap_or_default().to_owned();
+    let mut file = tokio::fs::File::create(path).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    while let Some(chunk) = field.chunk().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))? {
+        file.write_all(&chunk).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    }
+    file.flush().await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    Ok(())
+}
+
 async fn import_training_dataset(State(state): State<AppState>, mut multipart: Multipart) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
+    let folder = UploadFolder::new()?;
     let mut manifest = None;
     let mut files = Vec::new();
     while let Some(field) = multipart.next_field().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read the upload: {e}")))? {
         let Some(name) = field.file_name().map(str::to_owned) else { continue };
-        let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))?.to_vec();
-        if name.rsplit(['/', '\\']).next() == Some("dataset.json") {
-            manifest = Some(bytes);
-        } else if name.to_ascii_lowercase().ends_with(".wav") {
-            files.push((name, bytes));
+        let base = name.rsplit(['/', '\\']).next().unwrap_or_default().to_owned();
+        if base == "dataset.json" {
+            let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))?;
+            manifest = Some(bytes.to_vec());
+        } else if base.to_ascii_lowercase().ends_with(".wav") {
+            let path = folder.0.join(format!("{}.wav", files.len()));
+            save_upload(field, &path).await?;
+            files.push((base, path));
         }
     }
     let manifest = manifest.ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "the folder has no dataset.json".into()))?;
     let training = state.training.clone();
-    tokio::task::spawn_blocking(move || training.import_dataset(&manifest, &files))
-        .await
-        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-        .map(Json)
-        .map_err(training_error)
+    let outcome = tokio::task::spawn_blocking(move || training.import_dataset(&manifest, &files)).await;
+    drop(folder);
+    outcome.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?.map(Json).map_err(training_error)
 }
 
 /// Opens a dataset's folder in the file manager, to copy it to another studio.
@@ -1882,25 +1914,23 @@ async fn add_training_songs(State(state): State<AppState>, Path(id): Path<String
 /// Adds audio files from the user's disk; a same-named `.txt` or `.lrc` part
 /// is taken as that song's lyrics.
 async fn upload_training_files(State(state): State<AppState>, Path(id): Path<String>, mut multipart: Multipart) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
-    let folder = std::env::temp_dir().join(format!("training-upload-{}", uuid::Uuid::now_v7().simple()));
-    std::fs::create_dir_all(&folder).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let folder = UploadFolder::new()?;
     let mut audio = Vec::new();
     let mut texts = std::collections::HashMap::new();
     while let Some(field) = multipart.next_field().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read the upload: {e}")))? {
         let Some(name) = field.file_name().map(|name| std::path::Path::new(name).file_name().and_then(|n| n.to_str()).unwrap_or("song").to_owned()) else { continue };
-        let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))?;
         let lower = name.to_ascii_lowercase();
         let stem = std::path::Path::new(&name).file_stem().and_then(|stem| stem.to_str()).unwrap_or(&name).to_owned();
         if lower.ends_with(".txt") || lower.ends_with(".lrc") {
+            let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))?;
             texts.insert(stem, String::from_utf8_lossy(&bytes).into_owned());
         } else if [".wav", ".mp3", ".flac", ".ogg", ".m4a"].iter().any(|extension| lower.ends_with(extension)) {
-            let path = folder.join(&name);
-            std::fs::write(&path, &bytes).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            let path = folder.0.join(&name);
+            save_upload(field, &path).await?;
             audio.push((path, stem, name));
         }
     }
     if audio.is_empty() {
-        let _ = std::fs::remove_dir_all(&folder);
         return Err(api_error(StatusCode::BAD_REQUEST, "no audio in the upload: WAV, MP3, FLAC, OGG or M4A".into()));
     }
     let training = state.training.clone();
@@ -1913,7 +1943,7 @@ async fn upload_training_files(State(state): State<AppState>, Path(id): Path<Str
         Ok::<_, anyhow::Error>(dataset)
     })
     .await;
-    let _ = std::fs::remove_dir_all(&folder);
+    drop(folder);
     outcome.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?.map(Json).map_err(training_error)
 }
 
@@ -1945,13 +1975,50 @@ async fn start_training(State(state): State<AppState>, Json(input): Json<StartTr
         return Err(api_error(StatusCode::CONFLICT, "a song is being made; train once it is done".into()));
     }
     let tokenizer = selected_engine_models(&state).await.map_err(|error| api_error(StatusCode::CONFLICT, error))?.backbone;
-    free_the_card_for_the_engine(&state).await;
     state
         .training
-        .start(Some(engine_bundle_root()), tokenizer, vocal_separator(&state).await, &input.dataset_id, &input.name, input.recipe)
+        .start(Some(engine_bundle_root()), tokenizer, vocal_separator(&state).await, &input.dataset_id, &input.name, input.recipe, card_hooks(&state).await)
         .await
         .map(Json)
         .map_err(|error| api_error(StatusCode::CONFLICT, format!("{error:#}")))
+}
+
+/// Frees the card for a run and gives it back after: the assistant is stopped,
+/// and an engine kept loaded between songs is stopped and started again.
+async fn card_hooks(state: &AppState) -> training::CardHooks {
+    let keep_loaded = state.engine_options.read().await.keep_loaded;
+    let (take_state, back_state) = (state.clone(), state.clone());
+    training::CardHooks {
+        take: Box::new(move || {
+            Box::pin(async move {
+                free_the_card_for_the_engine(&take_state).await;
+                if keep_loaded {
+                    if let Some(engine) = take_state.engine.lock().await.as_mut() {
+                        if let Err(error) = tokio::task::block_in_place(|| engine.stop(std::time::Duration::from_secs(10))) {
+                            eprintln!("[ERROR] stopping the engine for training: {error}");
+                        }
+                    }
+                }
+            })
+        }),
+        give_back: Box::new(move || {
+            Box::pin(async move {
+                if keep_loaded {
+                    if let Err(error) = restart_engine(&back_state).await {
+                        eprintln!("[ERROR] starting the engine after training: {error}");
+                    }
+                }
+            })
+        }),
+    }
+}
+
+/// Refuses work that needs the graphics card while a LoRA trains on it.
+async fn card_free_of_training(state: &AppState, what: &str) -> Result<(), (StatusCode, Json<ApiError>)> {
+    if state.training.active_run().await.is_some() {
+        return Err(api_error(StatusCode::CONFLICT, format!("a LoRA is training on the card; {what} once it finishes")));
+    }
+    Ok(())
 }
 
 async fn cancel_training(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
@@ -2172,6 +2239,7 @@ async fn start_separation(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    card_free_of_training(&state, "separate tracks").await?;
     if state.separation_run.read().await.as_ref().is_some_and(|run| !run.done) {
         return Err(api_error(StatusCode::CONFLICT, "a track is already being separated".into()));
     }
@@ -3953,6 +4021,9 @@ async fn create_song_karaoke(
     Json(request): Json<KaraokeRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     let config = state.lyrics_sync_config.read().await.clone();
+    if matches!(config.provider, lyrics_sync::AsrProvider::Whisper | lyrics_sync::AsrProvider::Parakeet) {
+        card_free_of_training(&state, "make karaoke").await?;
+    }
     if !config.available() {
         return Err(api_error(StatusCode::CONFLICT, "karaoke.off".into()));
     }
@@ -4109,6 +4180,9 @@ async fn assistant_write_stream(
     Json(request): Json<assistant::AssistRequest>,
 ) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
     let config = state.assistant.read().await.clone();
+    if matches!(config.provider, AssistantProvider::Managed) {
+        card_free_of_training(&state, "ask the assistant").await?;
+    }
     if !config.available() {
         return Err(api_error(
             StatusCode::CONFLICT,
@@ -4302,6 +4376,9 @@ async fn assistant_write(
     Json(request): Json<assistant::AssistRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     let config = state.assistant.read().await.clone();
+    if matches!(config.provider, AssistantProvider::Managed) {
+        card_free_of_training(&state, "ask the assistant").await?;
+    }
     if !config.available() {
         return Err(api_error(
             StatusCode::CONFLICT,

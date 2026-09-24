@@ -124,12 +124,23 @@ impl From<TrainingStep> for TrainingStepRecord {
     }
 }
 
+/// What the studio does with the graphics card around a run: `take` frees it
+/// once the run is accepted, before the first stage, and `give_back` runs when
+/// the run has ended however it ended.
+pub struct CardHooks {
+    pub take: Box<dyn FnOnce() -> futures_util::future::BoxFuture<'static, ()> + Send>,
+    pub give_back: Box<dyn FnOnce() -> futures_util::future::BoxFuture<'static, ()> + Send>,
+}
+
 pub struct Training {
     root: PathBuf,
     engine: String,
     downloader: Downloader,
     /// The run in progress, with its trainer process to stop.
     active: RwLock<Option<Active>>,
+    /// Held over each read-change-write of a `run.json` or `dataset.json`, so
+    /// two edits never write over each other.
+    edits: std::sync::Mutex<()>,
 }
 
 struct Active {
@@ -199,6 +210,11 @@ fn new_id() -> String {
     uuid::Uuid::now_v7().simple().to_string()
 }
 
+/// A bare `name.wav`: no folder, no drive (`C:x.wav` is a path on Windows).
+fn is_plain_wav_name(name: &str) -> bool {
+    name.ends_with(".wav") && !name.contains([':', '/', '\\']) && Path::new(name).file_name().and_then(|n| n.to_str()) == Some(name) && name != ".wav"
+}
+
 fn safe_id(id: &str) -> Result<&str> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         bail!("not an id: {id}");
@@ -207,7 +223,7 @@ fn safe_id(id: &str) -> Result<&str> {
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
-    let temporary = path.with_extension("json.part");
+    let temporary = path.with_extension(format!("{}.part", new_id()));
     std::fs::write(&temporary, serde_json::to_vec_pretty(value)?)?;
     std::fs::rename(&temporary, path)?;
     Ok(())
@@ -220,7 +236,7 @@ fn read_json<T: for<'a> Deserialize<'a>>(path: &Path) -> Option<T> {
 impl Training {
     pub fn new(data_root: &Path, engine: &str) -> Self {
         let root = data_root.join("training");
-        Self { downloader: Downloader::new(root.clone()), root, engine: engine.to_string(), active: RwLock::new(None) }
+        Self { downloader: Downloader::new(root.clone()), root, engine: engine.to_string(), active: RwLock::new(None), edits: std::sync::Mutex::new(()) }
     }
 
     pub fn downloader(&self) -> &Downloader {
@@ -340,6 +356,7 @@ impl Training {
     }
 
     pub fn update_dataset(&self, id: &str, name: Option<String>, trigger: Option<String>) -> Result<Dataset> {
+        let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut dataset = self.dataset(id)?;
         if let Some(name) = name.map(|name| name.trim().to_string()).filter(|name| !name.is_empty()) {
             dataset.name = name;
@@ -354,7 +371,7 @@ impl Training {
     /// Adds a song, stored as 48 kHz 24-bit WAV whatever it came as: the
     /// model's own rate, and more depth than any source has.
     pub fn add_item(&self, id: &str, source_audio: &Path, title: &str, style: &str, lyrics: &str, source: &str) -> Result<Dataset> {
-        let mut dataset = self.dataset(id)?;
+        self.dataset(id)?;
         let audio = crate::audio_pcm::decode_stereo(source_audio)?;
         let audio = if audio.rate == 48_000 { audio } else { audio.resampled(48_000)? };
         let seconds = audio.frames() as f64 / 48_000.0;
@@ -364,6 +381,8 @@ impl Training {
         let item_id = new_id();
         let file = format!("{item_id}.wav");
         crate::audio_pcm::write_wav24(&self.dataset_dir(id)?.join("audio").join(&file), &audio)?;
+        let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut dataset = self.dataset(id)?;
         dataset.items.push(DatasetItem {
             id: item_id,
             title: title.trim().into(),
@@ -379,6 +398,7 @@ impl Training {
     }
 
     pub fn update_item(&self, id: &str, item_id: &str, patch: ItemPatch) -> Result<Dataset> {
+        let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut dataset = self.dataset(id)?;
         let item = dataset.items.iter_mut().find(|item| item.id == item_id).with_context(|| format!("no song {item_id} in the dataset"))?;
         if let Some(title) = patch.title {
@@ -405,6 +425,7 @@ impl Training {
     }
 
     pub fn remove_item(&self, id: &str, item_id: &str) -> Result<Dataset> {
+        let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut dataset = self.dataset(id)?;
         let position = dataset.items.iter().position(|item| item.id == item_id).with_context(|| format!("no song {item_id} in the dataset"))?;
         let item = dataset.items.remove(position);
@@ -417,7 +438,10 @@ impl Training {
     /// Takes a dataset another studio of the family wrote: its `dataset.json`
     /// and the WAV files it names. The copy gets an id of its own, so the same
     /// folder can come in twice without the two meeting.
-    pub fn import_dataset(&self, manifest: &[u8], files: &[(String, Vec<u8>)]) -> Result<Dataset> {
+    /// Takes a dataset another studio wrote: its `dataset.json` and the audio
+    /// files uploaded beside it, by their file names. Every song is checked
+    /// before anything is written, and a failed import leaves nothing behind.
+    pub fn import_dataset(&self, manifest: &[u8], files: &[(String, PathBuf)]) -> Result<Dataset> {
         let mut dataset: Dataset = serde_json::from_slice(manifest).context("dataset.json is not a dataset")?;
         if dataset.format != dataset_format() {
             bail!("dataset.json is {}, this studio reads {}", dataset.format, dataset_format());
@@ -425,23 +449,32 @@ impl Training {
         if dataset.items.is_empty() {
             bail!("the dataset has no songs");
         }
-        let by_name = |name: &str| files.iter().find(|(path, _)| path.rsplit(['/', '\\']).next() == Some(name));
+        for item in &dataset.items {
+            if !is_plain_wav_name(&item.file) {
+                bail!("{} is not a dataset audio file", item.file);
+            }
+        }
+        let by_name = |name: &str| files.iter().find(|(file, _)| file == name).map(|(_, path)| path);
         let missing: Vec<&str> = dataset.items.iter().map(|item| item.file.as_str()).filter(|file| by_name(file).is_none()).collect();
         if !missing.is_empty() {
             bail!("the folder lacks {} of the dataset's songs: {}", missing.len(), missing.join(", "));
         }
         dataset.id = new_id();
         dataset.created_at = now();
-        let audio = self.dataset_dir(&dataset.id)?.join("audio");
-        std::fs::create_dir_all(&audio)?;
-        for item in &dataset.items {
-            if item.file.contains(['/', '\\']) || !item.file.ends_with(".wav") {
-                bail!("{} is not a dataset audio file", item.file);
+        let dir = self.dataset_dir(&dataset.id)?;
+        let written = (|| -> Result<()> {
+            let audio = dir.join("audio");
+            std::fs::create_dir_all(&audio)?;
+            for item in &dataset.items {
+                let source = by_name(&item.file).context("song vanished")?;
+                std::fs::copy(source, audio.join(&item.file)).with_context(|| format!("copy {}", item.file))?;
             }
-            let (_, bytes) = by_name(&item.file).context("song vanished")?;
-            std::fs::write(audio.join(&item.file), bytes)?;
+            self.save_dataset(&dataset)
+        })();
+        if let Err(error) = written {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(error);
         }
-        self.save_dataset(&dataset)?;
         Ok(dataset)
     }
 
@@ -530,6 +563,7 @@ impl Training {
         dataset_id: &str,
         name: &str,
         recipe: Recipe,
+        card: CardHooks,
     ) -> Result<Run> {
         let trainer = self.trainer();
         if !self.pack_ready() {
@@ -590,26 +624,31 @@ impl Training {
 
         let training = self.clone();
         tokio::spawn(async move {
+            (card.take)().await;
             let outcome = match training.separate_vocals(&run_id, separator, missing, cancel.clone()).await {
                 Ok(true) => training.work(&trainer, libraries.as_deref(), &run_dir, &run_id, stages, cancel).await,
                 other => other,
             };
-            if let Ok(mut run) = training.run(&run_id) {
-                run.finished_at = Some(now());
-                match outcome {
-                    Ok(true) => {
-                        run.status = RunStatus::Done;
-                        run.stage = None;
+            {
+                let _edit = training.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Ok(mut run) = training.run(&run_id) {
+                    run.finished_at = Some(now());
+                    match outcome {
+                        Ok(true) => {
+                            run.status = RunStatus::Done;
+                            run.stage = None;
+                        }
+                        Ok(false) => run.status = RunStatus::Cancelled,
+                        Err(error) => {
+                            run.status = RunStatus::Failed;
+                            run.error = Some(format!("{error:#}"));
+                        }
                     }
-                    Ok(false) => run.status = RunStatus::Cancelled,
-                    Err(error) => {
-                        run.status = RunStatus::Failed;
-                        run.error = Some(format!("{error:#}"));
-                    }
+                    let _ = training.save_run(&run);
                 }
-                let _ = training.save_run(&run);
             }
             *training.active.write().await = None;
+            (card.give_back)().await;
         });
         Ok(run)
     }
@@ -620,9 +659,12 @@ impl Training {
         if missing.is_empty() {
             return Ok(true);
         }
-        let mut run = self.run(run_id)?;
-        run.stage = Some(VOCALS_STAGE.into());
-        self.save_run(&run)?;
+        {
+            let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut run = self.run(run_id)?;
+            run.stage = Some(VOCALS_STAGE.into());
+            self.save_run(&run)?;
+        }
         let Some(separator) = separator else { return Ok(true) };
         for (mix, out) in missing {
             let separator = separator.clone();
@@ -648,9 +690,12 @@ impl Training {
         let mut log = tokio::fs::OpenOptions::new().create(true).append(true).open(run_dir.join("run.log")).await?;
         for stage in stages {
             {
-                let mut run = self.run(run_id)?;
-                run.stage = Some(stage.id.to_string());
-                self.save_run(&run)?;
+                {
+                    let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let mut run = self.run(run_id)?;
+                    run.stage = Some(stage.id.to_string());
+                    self.save_run(&run)?;
+                }
             }
             log.write_all(format!("==== {}\n", stage.id).as_bytes()).await?;
             let mut command = tokio::process::Command::new(trainer);
@@ -695,9 +740,13 @@ impl Training {
                             log.write_all(line.as_bytes()).await?;
                             log.write_all(b"\n").await?;
                             if let Some(step) = yue_train::parse_training_step(&line) {
-                                let mut run = self.run(run_id)?;
-                                run.steps.push(step.into());
-                                self.save_run(&run)?;
+                                let recorded = {
+                                    let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                                    self.run(run_id).and_then(|mut run| { run.steps.push(step.into()); self.save_run(&run) })
+                                };
+                                if let Err(error) = recorded {
+                                    log.write_all(format!("[studio] the step was not recorded: {error:#}\n").as_bytes()).await?;
+                                }
                             } else if line.to_ascii_lowercase().contains("error") {
                                 last_error = line;
                             }
@@ -729,6 +778,7 @@ impl Training {
     }
 
     pub fn mark_installed(&self, run_id: &str, step: u32) -> Result<()> {
+        let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut run = self.run(run_id)?;
         if !run.installed.contains(&step) {
             run.installed.push(step);
@@ -798,5 +848,18 @@ mod tests {
         let lrc = "[ar:Someone]\n[00:01.00]First <00:01.50>line\n\n[Chorus]\n[00:05.20]Second line";
         assert_eq!(plain_lyrics(lrc), "First line\n\n[Chorus]\nSecond line");
         assert_eq!(plain_lyrics("[Verse 1]\nplain"), "[Verse 1]\nplain");
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    #[test]
+    fn a_dataset_names_its_songs_as_bare_wav_files() {
+        assert!(is_plain_wav_name("01-song.wav"));
+        for bad in ["C:evil.wav", "../x.wav", r"a\b.wav", "a/b.wav", ".wav", "song.mp3", ""] {
+            assert!(!is_plain_wav_name(bad), "{bad}");
+        }
     }
 }

@@ -49,6 +49,9 @@ pub struct VstHost {
 /// How long a scan may take before a plugin is taken to have hung it.
 const SCAN_LIMIT: Duration = Duration::from_secs(180);
 
+/// How long a chain may take over one track before a plugin is taken to have hung.
+const PROCESS_LIMIT: Duration = Duration::from_secs(30 * 60);
+
 impl VstHost {
     /// The host shipped beside the studio, or the one `MUSIC_VST_HOST_BIN`
     /// names in a developer build.
@@ -117,14 +120,23 @@ impl VstHost {
 
     /// Runs a track through the enabled plugins of a chain, in order.
     pub fn process(&self, audio: &Stereo, chain: &[VstSlot], work: &Path) -> Result<Stereo> {
+        // only what the scan found in the system folders is loaded: a path from
+        // a request could name any DLL
+        let known = self.plugins().unwrap_or_default();
         let plugins: Vec<serde_json::Value> = chain
             .iter()
             .filter(|slot| slot.enabled)
             .map(|slot| -> Result<serde_json::Value> {
+                if !known.iter().any(|plugin| plugin.path == slot.path) {
+                    bail!("{} is not one of the plugins the scan found", slot.path);
+                }
                 let state = match &slot.state_id {
                     Some(id) => {
                         let file = self.state_file(id)?;
-                        file.is_file().then(|| file.display().to_string())
+                        if !file.is_file() {
+                            bail!("the settings of {} are not saved yet: close its window first", slot.name);
+                        }
+                        Some(file.display().to_string())
                     }
                     None => None,
                 };
@@ -161,7 +173,8 @@ impl VstHost {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
             hide_window(&mut command);
-            let result = command.output().with_context(|| format!("start {}", self.exe.display()))?;
+            let child = command.spawn().with_context(|| format!("start {}", self.exe.display()))?;
+            let result = wait_with_limit(child, PROCESS_LIMIT).context("the VST chain did not finish; a plugin may be hanging it")?;
             if !result.status.success() || !output.is_file() {
                 bail!("the VST chain stopped ({}): {}", result.status, last_line(&result.stderr));
             }
@@ -216,3 +229,37 @@ fn hide_window(command: &mut Command) {
 
 #[cfg(not(windows))]
 fn hide_window(_: &mut Command) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn host(label: &str, plugins: &[&str]) -> VstHost {
+        let root = std::env::temp_dir().join(format!("vst-test-{label}-{}", uuid::Uuid::now_v7().simple()));
+        std::fs::create_dir_all(&root).unwrap();
+        let found: Vec<VstPlugin> = plugins.iter().map(|path| VstPlugin { name: "p".into(), vendor: String::new(), path: (*path).into(), uid: String::new() }).collect();
+        std::fs::write(root.join("plugins.json"), serde_json::to_vec(&found).unwrap()).unwrap();
+        VstHost { exe: root.join("missing-host.exe"), root }
+    }
+
+    fn slot(path: &str, state_id: Option<&str>) -> VstSlot {
+        VstSlot { path: path.into(), name: "p".into(), state_id: state_id.map(Into::into), enabled: true }
+    }
+
+    #[test]
+    fn a_chain_loads_only_plugins_the_scan_found() {
+        let host = host("unknown", &[r"C:\Program Files\Common Files\VST3\Known.vst3"]);
+        let audio = Stereo { left: vec![0.0; 8], right: vec![0.0; 8], rate: 44_100 };
+        let error = host.process(&audio, &[slot(r"\\elsewhere\share\x.vst3", None)], &host.root.join("work")).unwrap_err();
+        assert!(error.to_string().contains("not one of the plugins"), "{error}");
+    }
+
+    #[test]
+    fn a_plugin_whose_window_has_not_saved_is_refused_rather_than_run_on_defaults() {
+        let path = r"C:\Program Files\Common Files\VST3\Known.vst3";
+        let host = host("unsaved", &[path]);
+        let audio = Stereo { left: vec![0.0; 8], right: vec![0.0; 8], rate: 44_100 };
+        let error = host.process(&audio, &[slot(path, Some("0190abcd"))], &host.root.join("work")).unwrap_err();
+        assert!(error.to_string().contains("not saved yet"), "{error}");
+    }
+}
