@@ -60,37 +60,7 @@ fn dataset_format() -> String {
     "music-dataset-v1".into()
 }
 
-/// What a run is asked for; the rest of the recipe is the engine's.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Recipe {
-    /// The most steps the run may take.
-    #[serde(default = "default_steps")]
-    pub steps: u32,
-    #[serde(default = "default_save_every")]
-    pub save_every: u32,
-    #[serde(default = "default_seed")]
-    pub seed: u32,
-    /// How far the adapter may pull the planner from the base model before
-    /// the run stops; 0 runs every step.
-    #[serde(default = "default_target_kl")]
-    pub target_kl: f64,
-}
-
-fn default_steps() -> u32 {
-    yue_train::recipe::STEPS
-}
-
-fn default_save_every() -> u32 {
-    yue_train::recipe::SAVE_EVERY
-}
-
-fn default_seed() -> u32 {
-    yue_train::recipe::SEED
-}
-
-fn default_target_kl() -> f64 {
-    yue_train::recipe::TARGET_KL
-}
+pub use yue_train::Recipe;
 
 /// Separates the vocals of a song for lyric timing; the studio's separator.
 pub trait VocalSeparator: Send + Sync {
@@ -532,10 +502,10 @@ impl Training {
         if dataset.items.is_empty() {
             bail!("the dataset has no songs yet");
         }
-        if recipe.steps == 0 {
-            bail!("training needs at least one step");
+        if let Err(problem) = recipe.check() {
+            bail!("{problem}");
         }
-        let missing = self.missing_vocals(&dataset)?;
+        let missing = if recipe.lyric_timing { self.missing_vocals(&dataset)? } else { Vec::new() };
         if !missing.is_empty() && separator.is_none() {
             bail!("the vocal separator is not installed; lyric timing needs the vocals of every song with lyrics");
         }
@@ -553,10 +523,7 @@ impl Training {
             run: run_dir.clone(),
             vocals: self.vocals_dir(&dataset.id)?,
             trigger: dataset.trigger.clone(),
-            steps: recipe.steps,
-            save_every: recipe.save_every,
-            seed: recipe.seed,
-            target_kl: recipe.target_kl,
+            recipe: recipe.clone(),
         };
         let stages = yue_train::training_stages(&inputs);
         let run = Run {
@@ -569,7 +536,7 @@ impl Training {
             recipe,
             status: RunStatus::Running,
             stage: None,
-            stages: std::iter::once(VOCALS_STAGE).chain(stages.iter().map(|stage| stage.id)).map(str::to_string).collect(),
+            stages: inputs.recipe.lyric_timing.then_some(VOCALS_STAGE).into_iter().chain(stages.iter().map(|stage| stage.id)).map(str::to_string).collect(),
             steps: Vec::new(),
             error: None,
             created_at: now(),
@@ -610,6 +577,9 @@ impl Training {
     /// Separates the vocals still missing, one song at a time; the result is
     /// kept with the dataset, so the next run and lyric recognition reuse it.
     async fn separate_vocals(&self, run_id: &str, separator: Option<Arc<dyn VocalSeparator>>, missing: Vec<(PathBuf, PathBuf)>, cancel: Arc<tokio::sync::Notify>) -> Result<bool> {
+        if missing.is_empty() {
+            return Ok(true);
+        }
         let mut run = self.run(run_id)?;
         run.stage = Some(VOCALS_STAGE.into());
         self.save_run(&run)?;

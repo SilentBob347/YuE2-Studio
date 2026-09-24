@@ -14,7 +14,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The Hugging Face repository and commit the training weights come from.
 pub const WEIGHTS_REPOSITORY: &str = "scragnog/YuE2-GGUF";
@@ -89,33 +89,81 @@ pub struct TrainingInputs {
     /// lyric timing is aligned against.
     pub vocals: PathBuf,
     pub trigger: String,
-    /// A cap: the run stops earlier once the planner has moved `target_kl`
-    /// away from the base model.
+    pub recipe: Recipe,
+}
+
+/// What a run is asked for. The defaults are HOT-Step's joint recipe as its
+/// training page sends it (Yue2AitkTrainCard DEFAULT_FORM at the pinned
+/// commit); the trainer's own flag defaults are an older baseline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Recipe {
+    /// A cap: with `target_kl` the run usually stops well before it.
     pub steps: u32,
     pub save_every: u32,
     pub seed: u32,
-    /// 0 trains all the steps.
+    /// Stop once the planner's KL to the base model, averaged over 20 steps,
+    /// reaches this; 0 trains every step.
     pub target_kl: f64,
+    /// `lokr` or `lora`.
+    pub adapter: String,
+    pub rank: u32,
+    pub alpha: f64,
+    pub lokr_dim: u32,
+    pub lokr_factor: u32,
+    /// `prodigy` finds its own step size; `adamw` uses `learning_rate`.
+    pub optimizer: String,
+    pub learning_rate: f64,
+    /// The planner's share of the rate: likeness lives in the renderer, and a
+    /// planner at the full rate memorises the songs.
+    pub planner_lr_scale: f64,
+    /// Supervises where each lyric line is sung, aligned on the vocals.
+    pub lyric_timing: bool,
+    pub cursor_weight: f64,
 }
 
-/// HOT-Step's joint recipe as its training page sends it (Yue2AitkTrainCard
-/// DEFAULT_FORM at the pinned commit); the trainer's own flag defaults are the
-/// older baseline and are not what the author tuned by ear.
-pub mod recipe {
-    pub const STEPS: u32 = 750;
-    pub const SAVE_EVERY: u32 = 50;
-    pub const SEED: u32 = 42;
-    pub const TARGET_KL: f64 = 1.4;
-    pub const OPTIMIZER: &str = "prodigy";
-    pub const PRODIGY_D0: &str = "1e-6";
-    pub const RANK: &str = "64";
-    pub const ALPHA: &str = "256";
-    pub const LOKR_DIM: &str = "64";
-    pub const LOKR_FACTOR: &str = "4";
-    /// The planner learns at 0.3 of the renderer's rate: likeness lives in the
-    /// renderer, and a planner at full rate memorises the songs.
-    pub const PLANNER_LR_SCALE: &str = "0.3";
-    pub const CURSOR_WEIGHT: &str = "0.08";
+impl Default for Recipe {
+    fn default() -> Self {
+        Self {
+            steps: 750,
+            save_every: 50,
+            seed: 42,
+            target_kl: 1.4,
+            adapter: "lokr".into(),
+            rank: 64,
+            alpha: 256.0,
+            lokr_dim: 64,
+            lokr_factor: 4,
+            optimizer: "prodigy".into(),
+            learning_rate: 2e-4,
+            planner_lr_scale: 0.3,
+            lyric_timing: true,
+            cursor_weight: 0.08,
+        }
+    }
+}
+
+impl Recipe {
+    /// Refuses what the trainer would refuse, before any stage starts.
+    pub fn check(&self) -> Result<(), String> {
+        if self.steps == 0 || self.save_every == 0 {
+            return Err("steps and the checkpoint interval must be at least 1".into());
+        }
+        if !matches!(self.adapter.as_str(), "lokr" | "lora") {
+            return Err(format!("unknown adapter type {}", self.adapter));
+        }
+        if !matches!(self.optimizer.as_str(), "prodigy" | "adamw") {
+            return Err(format!("unknown optimizer {}", self.optimizer));
+        }
+        let finite = [self.target_kl, self.alpha, self.learning_rate, self.planner_lr_scale, self.cursor_weight].iter().all(|value| value.is_finite());
+        if !finite || self.target_kl < 0.0 || self.alpha <= 0.0 || self.learning_rate <= 0.0 || self.planner_lr_scale <= 0.0 || !(0.0..=10.0).contains(&self.cursor_weight) {
+            return Err("a recipe number is out of range".into());
+        }
+        if self.rank == 0 || self.lokr_dim == 0 || self.lokr_factor == 0 {
+            return Err("rank, LoKr dimension and factor must be at least 1".into());
+        }
+        Ok(())
+    }
 }
 
 /// One trainer invocation.
@@ -140,6 +188,8 @@ pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
     let prepared = inputs.run.join("prepared");
     let arg = |text: &str| OsString::from(text);
     let model = |name: &str, file: &str| OsString::from(format!("{name}={}", models.join(file).display()));
+    let recipe = &inputs.recipe;
+    let text = |value: &dyn ToString| OsString::from(value.to_string());
     let mut train = vec![
         arg("yue2-joint-train"),
         arg("--checkpoint"),
@@ -149,34 +199,36 @@ pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
         arg("--output"),
         path(&inputs.run.join("output")),
         arg("--steps"),
-        arg(&inputs.steps.to_string()),
+        text(&recipe.steps),
         arg("--save-every"),
-        arg(&inputs.save_every.max(1).to_string()),
+        text(&recipe.save_every.max(1)),
         arg("--seed"),
-        arg(&inputs.seed.to_string()),
+        text(&recipe.seed),
         arg("--device"),
         arg("CUDA0"),
         arg("--rank"),
-        arg(recipe::RANK),
+        text(&recipe.rank),
         arg("--alpha"),
-        arg(recipe::ALPHA),
+        text(&recipe.alpha),
         arg("--adapter-type"),
-        arg("lokr"),
-        arg("--lokr-dim"),
-        arg(recipe::LOKR_DIM),
-        arg("--lokr-factor"),
-        arg(recipe::LOKR_FACTOR),
+        arg(&recipe.adapter),
         arg("--optimizer"),
-        arg(recipe::OPTIMIZER),
-        arg("--prodigy-d0"),
-        arg(recipe::PRODIGY_D0),
+        arg(&recipe.optimizer),
         arg("--planner-lr-scale"),
-        arg(recipe::PLANNER_LR_SCALE),
+        text(&recipe.planner_lr_scale),
         arg("--cursor-weight"),
-        arg(recipe::CURSOR_WEIGHT),
+        if recipe.lyric_timing { text(&recipe.cursor_weight) } else { arg("0") },
     ];
-    if inputs.target_kl > 0.0 {
-        train.extend([arg("--target-kl"), arg(&inputs.target_kl.to_string())]);
+    if recipe.adapter == "lokr" {
+        train.extend([arg("--lokr-dim"), text(&recipe.lokr_dim), arg("--lokr-factor"), text(&recipe.lokr_factor)]);
+    }
+    if recipe.optimizer == "prodigy" {
+        train.extend([arg("--prodigy-d0"), arg("1e-6")]);
+    } else {
+        train.extend([arg("--lr"), text(&recipe.learning_rate)]);
+    }
+    if recipe.target_kl > 0.0 {
+        train.extend([arg("--target-kl"), text(&recipe.target_kl)]);
     }
     let mut prepare = vec![
         arg("yue2-prepare-aitk"),
@@ -195,12 +247,12 @@ pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
         arg("--model"),
         model("sheetsage", TRAINING_FILES[3].file),
         arg("--lyric-timing"),
-        arg("1"),
+        arg(if recipe.lyric_timing { "1" } else { "0" }),
     ];
     if !inputs.trigger.trim().is_empty() {
         prepare.extend([arg("--trigger"), arg(inputs.trigger.trim())]);
     }
-    vec![
+    let mut stages = vec![
         TrainingStage {
             id: "latents",
             args: vec![
@@ -233,7 +285,11 @@ pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
         TrainingStage { id: "scores", args: vec![arg("yue2-sheet"), arg("--manifest"), path(&manifest), arg("--models"), path(models)] },
         TrainingStage { id: "prepare", args: prepare },
         TrainingStage { id: "train", args: train },
-    ]
+    ];
+    if !recipe.lyric_timing {
+        stages.retain(|stage| stage.id != "align");
+    }
+    stages
 }
 
 /// The two sidecars a song needs beside its audio.
@@ -320,10 +376,7 @@ mod tests {
             run: "r".into(),
             vocals: "v".into(),
             trigger: "sks".into(),
-            steps: 750,
-            save_every: 50,
-            seed: 42,
-            target_kl: 1.4,
+            recipe: Recipe::default(),
         };
         let stages = training_stages(&inputs);
         assert_eq!(stages.iter().map(|stage| stage.id).collect::<Vec<_>>(), ["latents", "codes", "align", "scores", "prepare", "train"]);
@@ -338,6 +391,14 @@ mod tests {
         assert!(prepare.windows(2).any(|pair| pair == ["--trigger", "sks"]));
         assert!(prepare.windows(2).any(|pair| pair == ["--lyric-timing", "1"]));
         assert!(strings(2).windows(2).any(|pair| pair == ["--stems", "v"]));
+
+        let plain = TrainingInputs { recipe: Recipe { lyric_timing: false, optimizer: "adamw".into(), adapter: "lora".into(), ..Recipe::default() }, ..inputs };
+        let stages = training_stages(&plain);
+        assert!(!stages.iter().any(|stage| stage.id == "align"));
+        let train: Vec<String> = stages.last().unwrap().args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect();
+        assert!(train.windows(2).any(|window| window == ["--cursor-weight", "0"]));
+        assert!(train.windows(2).any(|window| window == ["--lr", "0.0002"]));
+        assert!(!train.iter().any(|arg| arg == "--lokr-dim"));
     }
 
     #[test]

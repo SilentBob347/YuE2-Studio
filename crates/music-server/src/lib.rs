@@ -1712,6 +1712,7 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
     Json(serde_json::json!({
         "pack": pack,
         "pack_ready": training.pack_ready() && separator_ready,
+        "recipe_defaults": training::Recipe::default(),
         "download": match training_download {
             Some(active) if !active.done => Some(active),
             other => separator_download.or(other),

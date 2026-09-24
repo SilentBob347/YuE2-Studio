@@ -30,11 +30,22 @@ export interface Dataset {
 }
 
 export interface Recipe {
+  /** A cap: with target_kl the run usually stops well before it. */
   steps: number;
   save_every: number;
-  seed?: number;
+  seed: number;
   /** The run stops once the planner is this far from the base model; 0 runs every step. */
-  target_kl?: number;
+  target_kl: number;
+  adapter: 'lokr' | 'lora';
+  rank: number;
+  alpha: number;
+  lokr_dim: number;
+  lokr_factor: number;
+  optimizer: 'prodigy' | 'adamw';
+  learning_rate: number;
+  planner_lr_scale: number;
+  lyric_timing: boolean;
+  cursor_weight: number;
 }
 
 export type RunStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted';
@@ -61,6 +72,7 @@ export interface TrainingRun {
 export interface TrainingState {
   pack: PackFile[];
   pack_ready: boolean;
+  recipe_defaults: Recipe;
   download: { downloaded_bytes: number; total_bytes: number; done: boolean; error?: string | null } | null;
   datasets: Dataset[];
   runs: TrainingRun[];
