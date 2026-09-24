@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pause, Play } from 'lucide-react';
+import { AudioWaveform } from './AudioWaveform';
 
 /**
  * A stem, playable.
@@ -7,8 +8,8 @@ import { Pause, Play } from 'lucide-react';
  * The browser's own `<audio controls>` was used here first and it was the wrong
  * tool: it draws a different widget in every engine, its scrub bar is a few
  * pixels tall, and seeking a WAV served without range support does nothing at
- * all. This is the studio's transport - click anywhere on the bar to move, drag
- * to scrub - over one hidden audio element.
+ * all. This is the studio's transport - the recording's waveform, click or drag
+ * on it to move - over one hidden audio element.
  */
 
 const clock = (seconds: number): string => {
@@ -65,8 +66,6 @@ export const StemPlayer: React.FC<{ src: string; label: string }> = ({ src, labe
     setPosition(element.currentTime);
   }, []);
 
-  const progress = length > 0 ? (position / length) * 100 : 0;
-
   return (
     <div className="flex items-center gap-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-white/10">
       <span className="w-24 shrink-0 truncate text-xs font-semibold uppercase tracking-wide text-zinc-500">{label}</span>
@@ -87,10 +86,6 @@ export const StemPlayer: React.FC<{ src: string; label: string }> = ({ src, labe
         aria-valuemax={Math.round(length)}
         aria-valuenow={Math.round(position)}
         tabIndex={0}
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          seekTo(event.clientX);
-        }}
         onPointerMove={(event) => {
           if (event.buttons === 1) seekTo(event.clientX);
         }}
@@ -100,11 +95,20 @@ export const StemPlayer: React.FC<{ src: string; label: string }> = ({ src, labe
           if (event.key === 'ArrowRight') element.currentTime = Math.min(element.duration, element.currentTime + 5);
           if (event.key === 'ArrowLeft') element.currentTime = Math.max(0, element.currentTime - 5);
         }}
-        className="group h-6 min-w-0 flex-1 cursor-pointer py-2.5"
+        className="min-w-0 flex-1"
       >
-        <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-white/10">
-          <div className="h-full rounded-full bg-gradient-to-r from-orange-500 to-pink-500" style={{ width: `${progress}%` }} />
-        </div>
+        <AudioWaveform
+          url={src}
+          currentTime={position}
+          duration={length}
+          height={32}
+          onSeek={(share) => {
+            const element = audio.current;
+            if (!element || !Number.isFinite(element.duration)) return;
+            element.currentTime = share * element.duration;
+            setPosition(element.currentTime);
+          }}
+        />
       </div>
       <span className="w-11 shrink-0 text-[11px] tabular-nums text-zinc-500">{clock(length)}</span>
       <audio ref={audio} src={src} preload="metadata" className="hidden" />

@@ -8,9 +8,14 @@ mod cover_prompt;
 mod providers;
 mod assistant;
 mod assistant_runtime;
+mod audio_facts;
+mod beat_dbn;
+mod listen;
+mod prepare;
 mod audio_pcm;
 mod downloads;
 mod engine_runtime;
+mod lyrics_db;
 mod lyrics_sync;
 mod credentials;
 mod model_manager;
@@ -92,6 +97,10 @@ struct AppState {
     processing_run: Arc<RwLock<Option<processing::ProcessRun>>>,
     /// Adapter training: its optional weights, datasets and runs.
     training: Arc<training::Training>,
+    /// The dataset preparation in progress or the last one.
+    prepare: prepare::Shared,
+    prepare_cancel: Arc<std::sync::atomic::AtomicBool>,
+    prepare_train: prepare::TrainSlot,
 }
 
 #[derive(Clone)]
@@ -610,6 +619,9 @@ pub async fn serve() -> anyhow::Result<()> {
             PRIMARY_MUSIC_ENGINE_ID,
         )),
         processing_run: Arc::new(RwLock::new(None)),
+        prepare: Arc::new(std::sync::Mutex::new(None)),
+        prepare_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        prepare_train: Arc::new(std::sync::Mutex::new(None)),
         training: Arc::new(training::Training::new(
             &studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")),
             PRIMARY_MUSIC_ENGINE_ID,
@@ -637,6 +649,7 @@ pub async fn serve() -> anyhow::Result<()> {
     };
     processing::clear_workspace(state.library.media_dir());
     state.training.recover();
+    prepare::resume(&state);
 
     let app = Router::new()
         .route("/health", get(health))
@@ -707,7 +720,11 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/training/datasets/{id}/songs", post(add_training_songs))
         .route("/v1/training/datasets/{id}/files", post(upload_training_files).layer(DefaultBodyLimit::max(TRAINING_UPLOAD_LIMIT)))
         .route("/v1/training/datasets/{id}/items/{item}", axum::routing::patch(update_training_item).delete(delete_training_item))
-        .route("/v1/training/datasets/{id}/items/{item}/autofill", post(autofill_training_item))
+        .route("/v1/training/datasets/{id}/items/{item}/audio", get(training_item_audio))
+        .route("/v1/training/datasets/{id}/prepare", post(prepare::start))
+        .route("/v1/training/prepare/cancel", post(prepare::cancel))
+        .route("/v1/training/prepare/train-after", post(prepare::set_train_after))
+        .route("/v1/training/listen/install", post(install_listen_pack))
         .route("/v1/training/runs", post(start_training))
         .route("/v1/training/runs/{id}/cancel", post(cancel_training))
         .route("/v1/training/runs/{id}", axum::routing::delete(delete_training_run))
@@ -778,7 +795,11 @@ pub async fn serve() -> anyhow::Result<()> {
             loop {
                 let ready = state.model_manager.status(effective_install_target(&state).await).await.ready;
                 let running = state.music_server.health().await;
-                if ready && !running {
+                // the card has one owner: a preparation or a training run
+                // holding it is left alone, and the engine comes back after
+                let preparing = state.prepare.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().is_some_and(|job| !job.finished);
+                let card_taken = preparing || state.training.active_run().await.is_some();
+                if ready && !running && !card_taken {
                     if was_running {
                         // It was answering and now it is not: the one line that
                         // explains a log which suddenly starts again from
@@ -837,6 +858,12 @@ async fn library_media(State(state): State<AppState>, Path(song_id): Path<String
     {
         tag_stored_song(&state, &song_id).await;
     }
+    serve_audio_file(&path, &headers).await
+}
+
+/// A dataset song's recording, to listen to while its style is checked.
+async fn training_item_audio(State(state): State<AppState>, Path((id, item)): Path<(String, String)>, headers: HeaderMap) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
+    let path = state.training.item_audio(&id, &item).map_err(training_error)?;
     serve_audio_file(&path, &headers).await
 }
 
@@ -1698,25 +1725,40 @@ struct StudioSeparator {
     runtime: PathBuf,
     overlap: f64,
     on_gpu: bool,
+    /// Loaded on the first song and kept for the rest: one separator is made
+    /// per run of songs and dropped with it, taking the card's memory along.
+    loaded: std::sync::Mutex<Option<separation::Loaded>>,
 }
 
 impl training::VocalSeparator for StudioSeparator {
     fn separate(&self, mix: &std::path::Path, out: &std::path::Path) -> anyhow::Result<()> {
         point_ort_at(&self.runtime);
         let audio = audio_pcm::decode_stereo_44k(mix)?;
-        let separated = separation::separate(&self.model, &audio, separation::STEMS.len(), self.overlap, self.on_gpu, |_| {})?;
+        let mut loaded = self.loaded.lock().map_err(|_| anyhow::anyhow!("the separator failed on an earlier song"))?;
+        if loaded.is_none() {
+            *loaded = Some(separation::load(&self.model, self.on_gpu)?);
+        }
+        let model = loaded.as_mut().expect("loaded above");
+        let separated = separation::separate_with(model, &audio, separation::STEMS.len(), self.overlap, |_| {})?;
         let vocals = separated.stems.into_iter().find(|stem| stem.name == "vocals").context("the separator returned no vocals")?;
         separation::write_wav_stereo(out, &vocals.samples)
     }
 }
 
+/// The ONNX Runtime build for the card when its libraries are there. The
+/// process binds one build on first use, so work that wants the card points
+/// at this one before anything else runs.
+fn preferred_onnx_runtime(state: &AppState) -> Option<PathBuf> {
+    state
+        .lyrics_sync
+        .onnxruntime_library_of(if state.lyrics_sync.has_cuda_libraries() { lyrics_sync::OnnxFlavour::Cuda } else { lyrics_sync::OnnxFlavour::Cpu })
+        .or_else(|| state.lyrics_sync.onnxruntime_library())
+}
+
 /// The separator when its model and runtime are installed; the runtime is
 /// chosen the way a song's separation chooses it.
 async fn vocal_separator(state: &AppState) -> Option<Arc<dyn training::VocalSeparator>> {
-    let runtime = state
-        .lyrics_sync
-        .onnxruntime_library_of(if state.lyrics_sync.has_cuda_libraries() { lyrics_sync::OnnxFlavour::Cuda } else { lyrics_sync::OnnxFlavour::Cpu })
-        .or_else(|| state.lyrics_sync.onnxruntime_library())?;
+    let runtime = preferred_onnx_runtime(state)?;
     if !state.separator.is_installed() {
         return None;
     }
@@ -1726,6 +1768,7 @@ async fn vocal_separator(state: &AppState) -> Option<Arc<dyn training::VocalSepa
         runtime,
         overlap: config.sane_overlap(),
         on_gpu: !matches!(config.runtime, lyrics_sync::OnnxFlavour::Cpu) && state.lyrics_sync.has_cuda_libraries(),
+        loaded: std::sync::Mutex::new(None),
     }))
 }
 
@@ -1796,6 +1839,7 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
         "installed": separator_ready,
     }));
     let training_download = training.downloader().active_for(training::SCOPE).await;
+    let listen_download = training.downloader().active_for(training::LISTEN_SCOPE).await.filter(|active| !active.done);
     Json(serde_json::json!({
         "pack": pack,
         "pack_ready": training.pack_ready() && separator_ready,
@@ -1807,6 +1851,12 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
             Some(active) if !active.done => Some(active),
             other => separator_download.or(other),
         },
+        "listen": {
+            "pack": training.listen_status(),
+            "ready": training.listen_ready() && state.lyrics_sync.onnxruntime_library().is_some(),
+            "download": listen_download,
+        },
+        "prepare": state.prepare.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone(),
         "datasets": training.datasets(),
         "runs": runs,
         "active": active,
@@ -1821,6 +1871,25 @@ async fn install_training_pack(State(state): State<AppState>) -> Json<Value> {
             return;
         }
         install_separator(&background).await;
+    });
+    Json(serde_json::json!({ "started": true }))
+}
+
+/// The optional listening pack, and the ONNX Runtime its tempo model runs
+/// on when nothing else has brought it yet.
+async fn install_listen_pack(State(state): State<AppState>) -> Json<Value> {
+    let background = state.clone();
+    tokio::spawn(async move {
+        if let Err(error) = background.training.install_listen().await {
+            eprintln!("[ERROR] listening pack: {error:#}");
+            return;
+        }
+        if background.lyrics_sync.onnxruntime_library().is_none() {
+            let runtime: Vec<&'static lyrics_sync::Asset> = lyrics_sync::asset("onnxruntime").into_iter().collect();
+            if let Err(error) = background.lyrics_sync.downloader().install_all("listen", &runtime).await {
+                eprintln!("[ERROR] ONNX Runtime for the listening pack: {error:#}");
+            }
+        }
     });
     Json(serde_json::json!({ "started": true }))
 }
@@ -1946,7 +2015,7 @@ async fn add_training_songs(State(state): State<AppState>, Path(id): Path<String
     tokio::task::spawn_blocking(move || {
         let mut dataset = training.dataset(&id)?;
         for (audio, title, style, lyrics, song_id) in sources {
-            dataset = training.add_item(&id, &audio, &title, &style, &lyrics, &format!("song:{song_id}"))?;
+            dataset = training.add_item(&id, &audio, &title, "", &style, &lyrics, lyrics.trim().is_empty(), &format!("song:{song_id}"))?;
         }
         Ok::<_, anyhow::Error>(dataset)
     })
@@ -1962,17 +2031,24 @@ async fn upload_training_files(State(state): State<AppState>, Path(id): Path<Str
     let folder = UploadFolder::new()?;
     let mut audio = Vec::new();
     let mut texts = std::collections::HashMap::new();
+    let mut cues: Vec<(String, Option<String>, Vec<training::CueTrack>)> = Vec::new();
     while let Some(field) = multipart.next_field().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read the upload: {e}")))? {
-        let Some(name) = field.file_name().map(|name| std::path::Path::new(name).file_name().and_then(|n| n.to_str()).unwrap_or("song").to_owned()) else { continue };
-        let lower = name.to_ascii_lowercase();
+        // the page sends the path inside what was dropped; its folders name the artist
+        let Some(relative) = field.file_name().map(|name| name.replace('\\', "/")) else { continue };
+        let name = relative.rsplit('/').next().filter(|name| !name.is_empty()).unwrap_or("song").to_owned();
+        let lower = name.to_lowercase();
         let stem = std::path::Path::new(&name).file_stem().and_then(|stem| stem.to_str()).unwrap_or(&name).to_owned();
         if lower.ends_with(".txt") || lower.ends_with(".lrc") {
             let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))?;
             texts.insert(stem, String::from_utf8_lossy(&bytes).into_owned());
+        } else if lower.ends_with(".cue") {
+            let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {name}: {e}")))?;
+            let (file, tracks) = training::cue_sheet(&bytes);
+            cues.push((stem, file, tracks));
         } else if [".wav", ".mp3", ".flac", ".ogg", ".m4a"].iter().any(|extension| lower.ends_with(extension)) {
-            let path = folder.0.join(&name);
+            let path = folder.0.join(format!("{}-{name}", audio.len()));
             save_upload(field, &path).await?;
-            audio.push((path, stem, name));
+            audio.push((path, stem, name, relative));
         }
     }
     if audio.is_empty() {
@@ -1981,9 +2057,17 @@ async fn upload_training_files(State(state): State<AppState>, Path(id): Path<Str
     let training = state.training.clone();
     let outcome = tokio::task::spawn_blocking(move || {
         let mut dataset = training.dataset(&id)?;
-        for (path, stem, name) in audio {
+        for (path, stem, name, relative) in audio {
+            // an album in one file comes with the cue sheet that cuts it
+            let sheet = cues.iter().find(|(cue_stem, file, tracks)| tracks.len() > 1 && (file.as_deref() == Some(name.as_str()) || *cue_stem == stem));
+            if let Some((_, _, tracks)) = sheet {
+                let album_artist = audio_pcm::tags(&path).artist;
+                dataset = training.add_album(&id, &path, tracks, &album_artist, &format!("file:{name}"))?;
+                continue;
+            }
             let lyrics = texts.get(&stem).map(|text| training::plain_lyrics(text)).unwrap_or_default();
-            dataset = training.add_item(&id, &path, &stem, "", &lyrics, &format!("file:{name}"))?;
+            let (artist, title) = training::identify(&path, &relative);
+            dataset = training.add_item(&id, &path, &title, &artist, "", &lyrics, false, &format!("file:{name}"))?;
         }
         Ok::<_, anyhow::Error>(dataset)
     })
@@ -1997,7 +2081,7 @@ async fn update_training_item(
     Path((id, item)): Path<(String, String)>,
     Json(patch): Json<training::ItemPatch>,
 ) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
-    state.training.update_item(&id, &item, patch).map(Json).map_err(training_error)
+    state.training.edit_item(&id, &item, patch).map(Json).map_err(training_error)
 }
 
 async fn delete_training_item(State(state): State<AppState>, Path((id, item)): Path<(String, String)>) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
@@ -2018,17 +2102,28 @@ struct StartTraining {
 /// Starts a run. It wants the whole card: refused while a song renders, and
 /// the writing assistant is let go first.
 async fn start_training(State(state): State<AppState>, Json(input): Json<StartTraining>) -> Result<Json<training::Run>, (StatusCode, Json<ApiError>)> {
-    let rendering = state.jobs.read().await.values().any(|job| matches!(job.status, MusicJobStatus::Queued | MusicJobStatus::Running));
-    if rendering {
-        return Err(api_error(StatusCode::CONFLICT, "a song is being made; train once it is done".into()));
+    let preparing = state.prepare.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().is_some_and(|job| !job.finished);
+    if preparing {
+        return Err(api_error(StatusCode::CONFLICT, "songs are being prepared; train once that is done".into()));
     }
-    let tokenizer = selected_engine_models(&state).await.map_err(|error| api_error(StatusCode::CONFLICT, error))?.backbone;
-    state
-        .training
-        .start(Some(engine_bundle_root()), tokenizer, vocal_separator(&state).await, &input.dataset_id, &input.name, input.recipe, card_hooks(&state).await)
+    start_training_run(&state, &input.dataset_id, &input.name, input.recipe)
         .await
         .map(Json)
-        .map_err(|error| api_error(StatusCode::CONFLICT, format!("{error:#}")))
+        .map_err(|error| api_error(StatusCode::CONFLICT, error))
+}
+
+/// A run of `dataset`, refused while a song renders.
+async fn start_training_run(state: &AppState, dataset: &str, name: &str, recipe: training::Recipe) -> Result<training::Run, String> {
+    let rendering = state.jobs.read().await.values().any(|job| matches!(job.status, MusicJobStatus::Queued | MusicJobStatus::Running));
+    if rendering {
+        return Err("a song is being made; train once it is done".into());
+    }
+    let tokenizer = selected_engine_models(state).await?.backbone;
+    state
+        .training
+        .start(Some(engine_bundle_root()), tokenizer, vocal_separator(state).await, dataset, name, recipe, card_hooks(state).await)
+        .await
+        .map_err(|error| format!("{error:#}"))
 }
 
 /// Frees the card for a run and gives it back after: the assistant is stopped,
@@ -2106,136 +2201,6 @@ async fn install_training_checkpoint(
         .map_err(training_error)?;
     state.training.mark_installed(&id, step).map_err(training_error)?;
     Ok(Json(meta))
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct AutofillRequest {
-    /// The language sung, when the user knows it; the recogniser guesses otherwise.
-    #[serde(default)]
-    language: Option<String>,
-}
-
-/// Writes a dataset song's lyrics from its recording: the vocals separated
-/// when the separator is installed, recognised with the karaoke recogniser,
-/// cut into lines at the pauses, and laid out in tagged sections by the
-/// writing assistant. The user checks the result; nothing trains until then.
-async fn autofill_training_item(
-    State(state): State<AppState>,
-    Path((id, item)): Path<(String, String)>,
-    Json(input): Json<AutofillRequest>,
-) -> Result<Json<training::Dataset>, (StatusCode, Json<ApiError>)> {
-    if state.training.active_run().await.is_some() {
-        return Err(api_error(StatusCode::CONFLICT, "a training run has the card; recognise lyrics once it finishes".into()));
-    }
-    let config = state.lyrics_sync_config.read().await.clone();
-    if !config.available() || matches!(config.provider, lyrics_sync::AsrProvider::None) {
-        return Err(api_error(StatusCode::CONFLICT, "no speech recogniser is set up: choose one under Settings - Karaoke".into()));
-    }
-    if !ensure_local_recogniser(&state, &config, &item).await {
-        return Err(api_error(StatusCode::CONFLICT, "the speech recogniser is still downloading; try again when it is ready".into()));
-    }
-    let audio = state.training.item_audio(&id, &item).map_err(training_error)?;
-
-    // The vocals alone recognise far better than the mix; without the
-    // separator the whole song is used. They are kept with the dataset, where
-    // lyric timing reads them too.
-    let vocals = state.training.item_vocals(&id, &item).map_err(training_error)?;
-    let heard = if vocals.is_file() {
-        vocals
-    } else {
-        match vocal_separator(&state).await {
-            Some(separator) => {
-                let source = audio.clone();
-                tokio::task::spawn_blocking(move || -> anyhow::Result<PathBuf> {
-                    let folder = vocals.parent().context("vocals folder")?;
-                    std::fs::create_dir_all(folder)?;
-                    let partial = folder.join(format!("vocals.{}.part.wav", uuid::Uuid::now_v7().simple()));
-                    separator.separate(&source, &partial)?;
-                    std::fs::rename(&partial, &vocals)?;
-                    Ok(vocals)
-                })
-                .await
-                .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-                .map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("separating the vocals failed: {error:#}")))?
-            }
-            None => audio.clone(),
-        }
-    };
-
-    let words = match config.provider {
-        lyrics_sync::AsrProvider::Parakeet => {
-            let sync = state.lyrics_sync.clone();
-            let path = heard.clone();
-            tokio::task::spawn_blocking(move || sync.parakeet_words(&path)).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-        }
-        lyrics_sync::AsrProvider::Whisper => {
-            let sync = state.lyrics_sync.clone();
-            let config = config.clone();
-            let path = heard.clone();
-            let language = input.language.clone();
-            tokio::task::spawn_blocking(move || sync.whisper_words(&config, &path, language.as_deref(), ""))
-                .await
-                .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-        }
-        lyrics_sync::AsrProvider::OpenRouter => karaoke_words_from_openrouter(&state, &config, &heard.to_string_lossy(), input.language.as_deref()).await,
-        lyrics_sync::AsrProvider::None => unreachable!("checked above"),
-    };
-    let words = words.map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("recognition failed: {error:#}")))?;
-    // Punctuation the recogniser hangs at the start of a line belongs to the
-    // line before, and an unknown-token marker is not a word.
-    let mut lines: Vec<(f64, String)> = Vec::new();
-    for (time, text) in lyrics_sync::group_words(&words) {
-        let text = text.replace("<unk>", "");
-        let body = text.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | '!' | '?' | ';' | ':'));
-        let lead = text.trim_start()[..text.trim_start().len() - body.len()].trim();
-        if let (false, Some(last)) = (lead.is_empty(), lines.last_mut()) {
-            last.1.push_str(lead);
-        }
-        if !body.trim().is_empty() {
-            lines.push((time, body.trim().to_string()));
-        }
-    }
-    if lines.is_empty() {
-        return Err(api_error(StatusCode::BAD_GATEWAY, "no words were recognised in this song; mark it instrumental or write the lyrics".into()));
-    }
-    let transcript: String = lines
-        .iter()
-        .map(|(time, text)| format!("[{}:{:02}] {}", (*time as u64) / 60, (*time as u64) % 60, text.trim()))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let request = assistant::AssistRequest {
-        target: assistant::AssistTarget::Transcript,
-        description: transcript,
-        instruction: String::new(),
-        lyrics: String::new(),
-        style: String::new(),
-        abc: String::new(),
-        duration_seconds: 0.0,
-    };
-    // A small model can answer a Cyrillic transcript in Latin letters; that is
-    // not the song, so it is asked once more and then refused, never stored.
-    let heard_cyrillic = assistant::cyrillic_share(&request.description) > 0.5;
-    let mut lyrics = String::new();
-    let mut latin = false;
-    for _ in 0..2 {
-        let Json(draft) = assistant_write(State(state.clone()), Json(request.clone())).await?;
-        lyrics = draft.get("lyrics").and_then(Value::as_str).unwrap_or_default().trim().to_string();
-        latin = heard_cyrillic && !lyrics.is_empty() && assistant::cyrillic_share(&lyrics) <= 0.5;
-        if !lyrics.is_empty() && !latin {
-            break;
-        }
-        lyrics.clear();
-    }
-    if lyrics.is_empty() {
-        let why = if latin { "rewrote the lyrics in Latin letters twice" } else { "returned no lyrics twice" };
-        return Err(api_error(StatusCode::BAD_GATEWAY, format!("the assistant {why}; choose a larger assistant model or write the lyrics")));
-    }
-    state
-        .training
-        .update_item(&id, &item, training::ItemPatch { lyrics: Some(lyrics), instrumental: Some(false), ..Default::default() })
-        .map(Json)
-        .map_err(training_error)
 }
 
 async fn read_stems(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
@@ -4511,6 +4476,38 @@ async fn assistant_write(
     State(state): State<AppState>,
     Json(request): Json<assistant::AssistRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let draft = assistant_draft(&state, &request).await;
+    release_assistant_unless_kept(&state).await;
+    draft.map(Json)
+}
+
+/// A draft from the assistant, which stays loaded after it: a run of songs
+/// asks it many times and releases it once at the end.
+async fn assistant_draft(state: &AppState, request: &assistant::AssistRequest) -> Result<Value, (StatusCode, Json<ApiError>)> {
+    let (system, required) = assistant::instructions(request);
+    let user = assistant::user_message(request);
+    let content = assistant_ask(state, &system, &user, Some(assistant::draft_schema(&required)), request.target).await?;
+    let draft = assistant::parse_draft(&content, required).map_err(|error| {
+        // The answer, kept: this is the difference between "invalid JSON" and
+        // seeing that the model wrote an apology instead of a song.
+        request_log::unusable("assistant", "", &error.to_string(), &content);
+        api_error(StatusCode::BAD_GATEWAY, error.to_string())
+    })?;
+    Ok(serde_json::to_value(draft).unwrap_or(Value::Null))
+}
+
+/// One chat completion from the configured writing assistant: the system and
+/// user messages, the answer's text. `schema` enforces the answer's shape where
+/// the provider can; `target` sizes the answer. The assistant stays loaded:
+/// the caller releases it when its questions are done.
+async fn assistant_ask(
+    state: &AppState,
+    system: &str,
+    user: &str,
+    schema: Option<Value>,
+    target: assistant::AssistTarget,
+) -> Result<String, (StatusCode, Json<ApiError>)> {
+    let state = state.clone();
     let config = state.assistant.read().await.clone();
     if matches!(config.provider, AssistantProvider::Managed) {
         card_free_of_training(&state, "ask the assistant").await?;
@@ -4521,8 +4518,6 @@ async fn assistant_write(
             "No writing assistant is configured. The manual form does not need one.".into(),
         ));
     }
-    let (system, required) = assistant::instructions(&request);
-    let user = assistant::user_message(&request);
 
     let response: Value = match config.provider {
         AssistantProvider::Local | AssistantProvider::Managed => {
@@ -4550,13 +4545,12 @@ async fn assistant_write(
                 .post(format!("{}/chat/completions", base.trim_end_matches('/')))
                 .json(&assistant::fit_to_task(assistant::chat_body_constrained(
                     &model,
-                    &system,
-                    &user,
+                    system,
+                    user,
                     None,
                     None,
-                    matches!(config.provider, AssistantProvider::Managed | AssistantProvider::Local)
-                        .then(|| assistant::draft_schema(&required)),
-                ), request.target))
+                    schema.filter(|_| matches!(config.provider, AssistantProvider::Managed | AssistantProvider::Local)),
+                ), target))
                 .timeout(std::time::Duration::from_secs(180))
                 .send()
                 .await
@@ -4598,12 +4592,12 @@ async fn assistant_write(
                     assistant::fit_to_task(
                         assistant::chat_body_full(
                             &model,
-                            &system,
-                            &user,
+                            system,
+                            user,
                             effort.as_deref(),
                             entry.map(|entry| serde_json::to_value(&entry.defaults).unwrap_or(Value::Null)).as_ref(),
                         ),
-                        request.target,
+                        target,
                     )
                 },
             })
@@ -4616,18 +4610,11 @@ async fn assistant_write(
         AssistantProvider::None => return Err(api_error(StatusCode::CONFLICT, "No writing assistant is configured.".into())),
     };
 
-    release_assistant_unless_kept(&state).await;
     let content = assistant::content_of(&response).map_err(|error| {
         request_log::unusable("assistant", "", &error.to_string(), &response.to_string());
         api_error(StatusCode::BAD_GATEWAY, error.to_string())
     })?;
-    let draft = assistant::parse_draft(&content, required).map_err(|error| {
-        // The answer, kept: this is the difference between "invalid JSON" and
-        // seeing that the model wrote an apology instead of a song.
-        request_log::unusable("assistant", "", &error.to_string(), &content);
-        api_error(StatusCode::BAD_GATEWAY, error.to_string())
-    })?;
-    Ok(Json(serde_json::to_value(draft).unwrap_or(Value::Null)))
+    Ok(content)
 }
 
 /// Frees the assistant's five gigabytes as soon as it has answered.

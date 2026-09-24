@@ -38,6 +38,7 @@ pub const VC_RUNTIME_LIBRARIES: [&str; 4] =
     ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "vcomp140.dll"];
 
 
+#[cfg(test)]
 pub const ASSETS: &[Asset] = &[CUBLAS13, CUBLAS12];
 
 const CUBLAS13: Asset = Asset {

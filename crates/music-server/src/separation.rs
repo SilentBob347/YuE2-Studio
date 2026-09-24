@@ -130,25 +130,16 @@ pub struct Separated {
     pub used_gpu: bool,
 }
 
-/// Runs the model over a whole track.
-///
-/// `progress` is called with a fraction between 0 and 1 after each segment, so
-/// a long song can say how far along it is instead of appearing to hang.
-pub fn separate(
-    model: &Path,
-    audio: &[f32],
-    stem_count: usize,
-    overlap: f64,
-    on_gpu: bool,
-    mut progress: impl FnMut(f64),
-) -> Result<Separated> {
-    if audio.is_empty() {
-        bail!("nothing to separate: the track decoded to no audio");
-    }
-    if stem_count > STEMS.len() {
-        bail!("this model was declared with {stem_count} stems, more than the {} known", STEMS.len());
-    }
+/// The model on its runtime, loaded once and run over as many tracks as there
+/// are: a dataset of twenty songs loads it once, not twenty times.
+pub struct Loaded {
+    session: Session,
+    /// True when the graphics card actually does the work.
+    pub used_gpu: bool,
+}
 
+/// Loads the model, on the card when asked.
+pub fn load(model: &Path, on_gpu: bool) -> Result<Loaded> {
     // Ask for the card, and say so if it is not there rather than quietly
     // spending ten times as long on the processor.
     let mut builder = Session::builder().context("prepare an ONNX session")?;
@@ -167,7 +158,7 @@ pub fn separate(
             Err(error) => eprintln!("the card provider did not register, falling back to the processor: {error}"),
         }
     }
-    let mut session = builder
+    let session = builder
         .commit_from_file(model)
         .with_context(|| {
             if used_gpu {
@@ -176,6 +167,40 @@ pub fn separate(
                 format!("load the separation model {}", model.display())
             }
         })?;
+    Ok(Loaded { session, used_gpu })
+}
+
+/// Loads the model and runs it over one track.
+pub fn separate(
+    model: &Path,
+    audio: &[f32],
+    stem_count: usize,
+    overlap: f64,
+    on_gpu: bool,
+    progress: impl FnMut(f64),
+) -> Result<Separated> {
+    let mut loaded = load(model, on_gpu)?;
+    separate_with(&mut loaded, audio, stem_count, overlap, progress)
+}
+
+/// Runs a loaded model over a whole track.
+///
+/// `progress` is called with a fraction between 0 and 1 after each segment, so
+/// a long song can say how far along it is instead of appearing to hang.
+pub fn separate_with(
+    loaded: &mut Loaded,
+    audio: &[f32],
+    stem_count: usize,
+    overlap: f64,
+    mut progress: impl FnMut(f64),
+) -> Result<Separated> {
+    if audio.is_empty() {
+        bail!("nothing to separate: the track decoded to no audio");
+    }
+    if stem_count > STEMS.len() {
+        bail!("this model was declared with {stem_count} stems, more than the {} known", STEMS.len());
+    }
+    let (session, used_gpu) = (&mut loaded.session, loaded.used_gpu);
 
     let frames = audio.len() / CHANNELS;
     let overlap = overlap.clamp(0.0, 0.5);

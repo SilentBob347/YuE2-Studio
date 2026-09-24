@@ -635,14 +635,13 @@ impl AssistantRuntime {
             }
             {
                 let mut state = self.state.lock().await;
-                let exited = state
-                    .server
-                    .as_mut()
-                    .map(|server| server.child.try_wait().ok().flatten().is_some())
-                    .unwrap_or(true);
-                if exited {
+                let Some(server) = state.server.as_mut() else {
+                    bail!("the writing assistant was stopped while it was loading");
+                };
+                if server.child.try_wait().ok().flatten().is_some() {
                     state.server = None;
-                    bail!("llama-server exited before it became ready");
+                    drop(state);
+                    bail!("llama-server exited before it became ready:\n{}", self.log_tail());
                 }
             }
             tokio::time::sleep(Duration::from_millis(400)).await;

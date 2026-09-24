@@ -123,6 +123,59 @@ pub fn write_wav_f32(path: &Path, audio: &audio_post::Stereo) -> Result<()> {
 }
 
 /// Every channel kept apart, at the file's own sample rate.
+/// What a file's own tags say about it; empty where they say nothing.
+#[derive(Debug, Clone, Default)]
+pub struct FileTags {
+    pub title: String,
+    pub artist: String,
+}
+
+pub fn tags(path: &Path) -> FileTags {
+    use symphonia::core::meta::StandardTagKey;
+    let Ok(file) = File::open(path) else { return FileTags::default() };
+    let mut hint = Hint::new();
+    if let Some(extension) = path.extension().and_then(|value| value.to_str()) {
+        hint.with_extension(extension);
+    }
+    let Ok(mut probed) = symphonia::default::get_probe().format(&hint, MediaSourceStream::new(Box::new(file), Default::default()), &FormatOptions::default(), &MetadataOptions::default()) else {
+        return FileTags::default();
+    };
+    let mut found = FileTags::default();
+    let mut read = |revision: &symphonia::core::meta::MetadataRevision| {
+        for tag in revision.tags() {
+            let value = tag.value.to_string().trim().to_string();
+            match tag.std_key {
+                Some(StandardTagKey::TrackTitle) if found.title.is_empty() => found.title = value,
+                Some(StandardTagKey::Artist) if found.artist.is_empty() => found.artist = value,
+                Some(StandardTagKey::AlbumArtist) if found.artist.is_empty() => found.artist = value,
+                _ => {}
+            }
+        }
+    };
+    if let Some(revision) = probed.format.metadata().current() {
+        read(revision);
+    }
+    if let Some(revision) = probed.metadata.get().as_ref().and_then(|metadata| metadata.current().cloned()) {
+        read(&revision);
+    }
+    found
+}
+
+/// A file's length from its header, without decoding it.
+#[cfg(test)]
+pub fn duration_seconds(path: &Path) -> Option<f64> {
+    let file = File::open(path).ok()?;
+    let mut hint = Hint::new();
+    if let Some(extension) = path.extension().and_then(|value| value.to_str()) {
+        hint.with_extension(extension);
+    }
+    let probed = symphonia::default::get_probe().format(&hint, MediaSourceStream::new(Box::new(file), Default::default()), &FormatOptions::default(), &MetadataOptions::default()).ok()?;
+    let track = probed.format.default_track()?;
+    let frames = track.codec_params.n_frames? as f64;
+    let rate = track.codec_params.sample_rate? as f64;
+    Some(frames / rate)
+}
+
 fn decode_channels(path: &Path) -> Result<(Vec<Vec<f32>>, u32)> {
     let file = File::open(path).with_context(|| format!("open {}", path.display()))?;
     let extension = path.extension().and_then(|value| value.to_str());

@@ -33,15 +33,28 @@ const ru: Guide = {
   resize: 'Потяните, чтобы изменить размер',
   sections: [
     {
-      title: 'Порядок работы',
+      title: "Порядок работы",
       steps: [
-        'Скачайте пакет обучения (около 8.6 ГБ, один раз). Нужна NVIDIA RTX 30-й серии или новее и около 11 ГБ видеопамяти.',
-        'Создайте набор: название и слово-триггер — редкое слово, которого нет в обычных описаниях (например, имя латиницей без пробелов).',
-        'Добавьте песни одного исполнителя или одного стиля — из библиотеки или с диска (WAV, MP3, FLAC, OGG, M4A). Песни короче 10 секунд не принимаются.',
-        'У каждой песни заполните «Стиль» и «Текст» (ниже — что писать). Инструментал отметьте галочкой.',
-        'Проверьте, что у всех песен нет жёлтого треугольника — он значит, что стиль или текст пустые.',
-        'Запустите обучение. Пока оно идёт, генерация, ассистент, караоке и разделение на дорожки недоступны.',
-        'Когда запуск закончится, послушайте чекпоинты и нажмите «В LoRA» под лучшим — он появится на странице LoRA.',
+        "Перетащите папку с песнями одного исполнителя или стиля в зону на странице «Обучение» или выберите папку и файлы кнопками. Студия сама создаст набор с именем папки. Подходят WAV, MP3, FLAC, OGG, M4A; альбом одним файлом с .cue режется на песни, текст из .txt или .lrc рядом берётся как есть.",
+        "Шаг «1 · Песни»: подготовка начинается сама. Студия отделяет вокал, распознаёт тексты, слушает каждую песню и пишет её стиль с измеренным темпом. У каждой песни свой статус, общий ход — сверху.",
+        "Проверьте результат: нажмите на песню — она раскроется с плеером, стилем и текстом. Поправьте, что нужно; «Описать заново» и «Распознать заново» переделывают только эту песню.",
+        "Шаг «2 · Обучение»: название LoRA, слово-триггер (редкое слово, например имя латиницей без пробелов), проверка готовности и кнопка «Обучить». Файлы обучения (около 8.6 ГБ, один раз) скачиваются здесь же. Нужна NVIDIA RTX 30-й серии или новее и около 11 ГБ видеопамяти.",
+        "Можно не ждать: пока идёт подготовка, поставьте галочку «Начать обучение самому, когда все песни будут готовы».",
+        "Шаг «3 · Результат»: послушайте чекпоинты и нажмите «В LoRA» под лучшим — он появится на странице LoRA. Пока идёт обучение, генерация, ассистент, караоке и разделение на дорожки недоступны.",
+      ],
+    },
+    {
+      title: "Автоописание песен",
+      text: [
+        "Необязательный пакет (около 10.5 ГБ), скачивается один раз карточкой «Автоописание песен» на шаге «Песни». Без него студия всё равно распознает тексты, а стиль придётся написать самому.",
+        "Каждая модель загружается один раз на весь набор и выгружается, когда её этап закончен: вокал, затем тексты, затем прослушивание, затем ассистент. Поэтому набор из пятидесяти песен готовится не в пятьдесят раз дольше одной.",
+      ],
+      list: [
+        "MOSS-Music-8B — модель, которая слушает песню и описывает, что в ней звучит: жанр, вокал, инструменты, настроение, продакшн. Тот же способ использует автор тренера HOT-Step: описание по звуку заметно точнее, чем по названию.",
+        "Beat This! — нейросеть, которая находит удары в записи; по ним студия считает темп. На песнях Монеточки совпала с Tunebat и SongBPM до 1 BPM.",
+        "Ассистент студии собирает из этого одну строку стиля в формате YuE2 и ставит в конец измеренный темп. MOSS сам ошибается в темпе, поэтому его число всегда заменяется измеренным. Тональность в стиль YuE2 не пишется: её выбирает сама модель, когда пишет партитуру.",
+        "MOSS занимает около 10 ГБ видеопамяти, одна песня описывается примерно за полминуты. Всё работает на вашем компьютере, ничего никуда не отправляется.",
+        "Результат всегда проверяйте: модель может ошибиться с жанром или инструментами — поправьте строку руками.",
       ],
     },
     {
@@ -70,13 +83,13 @@ const ru: Guide = {
       ],
     },
     {
-      title: 'Текст песни',
+      title: "Текст песни",
       list: [
-        'Точно те слова, что поются, — без аккордов, ссылок и примечаний. Текст с сайтов обязательно сверьте с записью.',
-        'Размечайте части: [Verse 1], [Chorus], [Verse 2], [Bridge], [Outro] — каждая часть с новой строки.',
-        'Файл .txt или .lrc с тем же именем, что и аудио, подхватывается при добавлении; таймкоды из .lrc убираются.',
-        'Кнопка с микрофоном распознаёт текст: отделяет вокал, распознаёт речь (движок выбирается в «Настройки → Караоке») и раскладывает строки по частям. Результат всегда проверяйте.',
-        'Осторожно: песня без текста сразу считается инструменталом, и «Распознать все тексты» её пропустит. Снимите галочку «Инструментал» или нажмите микрофон у этой песни.',
+        "Точно те слова, что поются, — без аккордов, ссылок и примечаний. Текст с сайтов обязательно сверьте с записью.",
+        "Размечайте части: [Verse 1], [Chorus], [Verse 2], [Bridge], [Outro] — каждая часть с новой строки.",
+        "Файл .txt или .lrc с тем же именем, что и аудио, подхватывается при добавлении; таймкоды из .lrc убираются.",
+        "Если текста нет, студия сама ищет его в открытых базах текстов — LRCLIB, QQ Music, Kugou — по исполнителю, названию и длительности (исполнитель и название берутся из тегов файла или из имени и папок). Только если ни одна база песню не знает, отделяется вокал и текст распознаёт Whisper — это заметно менее точно. Над текстом видно, откуда он взят. Результат всегда проверяйте.",
+        "Если распознаватель не услышал слов, песня помечается инструменталом. Если это ошибка, снимите галочку «Инструментал» и нажмите «Распознать заново».",
       ],
     },
     {
@@ -91,13 +104,12 @@ const ru: Guide = {
       ],
     },
     {
-      title: 'Что нужно сделать самому',
+      title: "Что нужно сделать самому",
       list: [
-        'Подобрать песни и проверить их качество.',
-        'Написать стиль каждой песни — у YuE2 Studio нет кнопки «Описать», и ассистент песни не слушает.',
-        'Проверить и поправить тексты: распознавание ошибается, сайты с текстами тоже.',
-        'Узнать темп (BPM) — студия его не измеряет.',
-        'Выбрать чекпоинт на слух.',
+        "Подобрать песни и проверить их качество.",
+        "Проверить стили и тексты, которые написала студия: модель и распознавание ошибаются. Без пакета автоописания стиль пишется вручную.",
+        "Без пакета автоописания — узнать темп (BPM); с ним студия измеряет его сама.",
+        "Выбрать чекпоинт на слух.",
       ],
     },
     {
@@ -154,15 +166,28 @@ const en: Guide = {
   resize: 'Drag to resize',
   sections: [
     {
-      title: 'Workflow',
+      title: "Workflow",
       steps: [
-        'Download the training pack (about 8.6 GB, once). It needs an NVIDIA RTX 30-series card or newer with about 11 GB of VRAM.',
-        'Create a dataset: a name and a trigger word — a rare word that never appears in ordinary descriptions (for example a name in Latin letters, no spaces).',
-        'Add songs of one artist or one style, from the library or from disk (WAV, MP3, FLAC, OGG, M4A). Songs shorter than 10 seconds are refused.',
-        'Fill in Style and Lyrics for every song (what to write is below). Tick Instrumental for instrumentals.',
-        'Make sure no song shows the yellow triangle — it means the style or the lyrics are empty.',
-        'Start training. While it runs, generation, the assistant, karaoke and stem separation are unavailable.',
-        'When the run ends, listen to the checkpoints and press "To LoRA" under the best one — it appears on the LoRA page.',
+        "Drop a folder of songs by one artist or in one style onto the Training page, or pick a folder or files with the buttons. The studio makes a dataset named after the folder. WAV, MP3, FLAC, OGG and M4A work; an album in one file with a .cue is cut into its songs, lyrics in a .txt or .lrc beside a song are taken as they are.",
+        "Step 1 · Songs: preparation starts by itself. The studio separates the vocals, recognises the lyrics, listens to every song and writes its style with the measured tempo. Every song shows its own status, the overall progress is on top.",
+        "Check the result: click a song and it opens with a player, its style and its lyrics. Fix what needs fixing; Describe again and Recognise again redo just that song.",
+        "Step 2 · Training: the LoRA name, a trigger word (a rare word, such as a name in Latin letters without spaces), the readiness check and the Train button. The training files (about 8.6 GB, once) download right there. It needs an NVIDIA RTX 30-series card or newer and about 11 GB of video memory.",
+        "No need to wait: while preparation runs, tick \"Start training by itself when every song is ready\".",
+        "Step 3 · Result: listen to the checkpoints and press To LoRA under the best one; it appears on the LoRA page. While training runs, generation, the assistant, karaoke and stem separation are unavailable.",
+      ],
+    },
+    {
+      title: "Auto-describing songs",
+      text: [
+        "An optional pack (about 10.5 GB), downloaded once from the Auto-describe songs card on the Songs step. Without it the studio still recognises the lyrics, and you write the style yourself.",
+        "Each model loads once for the whole dataset and is let go when its stage is done: vocals, then lyrics, then listening, then the assistant. So a dataset of fifty songs does not take fifty times as long as one.",
+      ],
+      list: [
+        "MOSS-Music-8B is a model that listens to a song and describes what is in it: genre, vocals, instruments, mood, production. The author of the HOT-Step trainer does it the same way: a description by ear is far more accurate than one by title.",
+        "Beat This! is a network that finds the beats in a recording; the studio works out the tempo from them. On Monetochka's songs it matched Tunebat and SongBPM within 1 BPM.",
+        "The studio's assistant turns all this into one YuE2 style line and puts the measured tempo at its end. MOSS gets the tempo wrong on its own, so its number is always replaced with the measured one. The key is not written into a YuE2 style: the model picks it itself when it writes the score.",
+        "MOSS takes about 10 GB of video memory; a song is described in about half a minute. Everything runs on your computer, nothing is sent anywhere.",
+        "Always check the result: the model can get the genre or instruments wrong; fix the line by hand.",
       ],
     },
     {
@@ -191,13 +216,13 @@ const en: Guide = {
       ],
     },
     {
-      title: 'Lyrics',
+      title: "Lyrics",
       list: [
-        'Exactly the words that are sung — no chords, links or notes. Lyrics from websites must be checked against the recording.',
-        'Mark the parts: [Verse 1], [Chorus], [Verse 2], [Bridge], [Outro], each on its own line.',
-        'A .txt or .lrc file with the same name as the audio is picked up when adding; .lrc timestamps are removed.',
-        'The microphone button recognises the lyrics: it separates the vocals, transcribes them (the engine is chosen in Settings → Karaoke) and lays the lines out by part. Always check the result.',
-        'Careful: a song without lyrics counts as instrumental at once, and "Recognise all lyrics" skips it. Untick Instrumental or press the microphone on that song.',
+        "Exactly the words that are sung, without chords, links or notes. Always check lyrics from websites against the recording.",
+        "Mark the parts: [Verse 1], [Chorus], [Verse 2], [Bridge], [Outro], each part on a new line.",
+        "A .txt or .lrc with the same name as the audio is taken when the song is added; the time stamps of an .lrc are removed.",
+        "Where there are no lyrics, the studio looks them up in open lyrics databases - LRCLIB, QQ Music, Kugou - by artist, title and length (artist and title come from the file's tags, or its name and folders). Only when no database knows the song are the vocals separated and the words recognised by Whisper, which is far less accurate. Above the lyrics it says where they came from. Always check the result.",
+        "If the recogniser hears no words, the song is marked instrumental. If that is wrong, untick Instrumental and press Recognise again.",
       ],
     },
     {
@@ -212,13 +237,12 @@ const en: Guide = {
       ],
     },
     {
-      title: 'What you have to do yourself',
+      title: "What you have to do yourself",
       list: [
-        'Choose the songs and check their quality.',
-        'Write each song\'s style — YuE2 Studio has no Describe button, and the assistant does not listen to songs.',
-        'Check and fix the lyrics: recognition makes mistakes, lyrics sites do too.',
-        'Find out the tempo (BPM) — the studio does not measure it.',
-        'Pick the checkpoint by ear.',
+        "Choose the songs and check their quality.",
+        "Check the styles and lyrics the studio wrote: the model and the recognition make mistakes. Without the auto-describe pack the style is written by hand.",
+        "Without the auto-describe pack, find the tempo (BPM); with it the studio measures it itself.",
+        "Choose a checkpoint by ear.",
       ],
     },
     {
@@ -275,15 +299,28 @@ const zh: Guide = {
   resize: '拖动以调整大小',
   sections: [
     {
-      title: '操作流程',
+      title: "操作流程",
       steps: [
-        '下载训练包（约 8.6 GB，只需一次）。需要 NVIDIA RTX 30 系列或更新的显卡，约 11 GB 显存。',
-        '创建数据集：名称和触发词——一个普通描述里不会出现的罕见词（例如拉丁字母、无空格的名字）。',
-        '添加同一艺人或同一风格的歌曲，可来自曲库或磁盘（WAV、MP3、FLAC、OGG、M4A）。短于 10 秒的歌曲会被拒绝。',
-        '为每首歌填写“风格”和“歌词”（写法见下文）。纯音乐请勾选“纯音乐”。',
-        '确认没有歌曲显示黄色三角——它表示风格或歌词为空。',
-        '开始训练。训练期间无法生成歌曲、使用助手、卡拉OK和分轨。',
-        '训练结束后试听各检查点，在最好的一个下点击“加入 LoRA”——它会出现在 LoRA 页面。',
+        "把同一艺人或同一风格的歌曲文件夹拖到“训练”页面，或用按钮选择文件夹和文件。工作室会以文件夹名自动建立数据集。支持 WAV、MP3、FLAC、OGG、M4A；带 .cue 的整轨专辑会切成单曲，旁边 .txt 或 .lrc 中的歌词直接采用。",
+        "第 1 步“歌曲”：准备会自动开始。工作室分离人声、识别歌词、聆听每首歌，并用测得的速度写出风格。每首歌都有自己的状态，整体进度在上方。",
+        "检查结果：点击一首歌，它会展开播放器、风格和歌词。按需修改；“重新描述”和“重新识别”只重做这一首。",
+        "第 2 步“训练”：LoRA 名称、触发词（少见的词，例如不带空格的拉丁字母名字）、就绪检查和“训练”按钮。训练文件（约 8.6 GB，只需一次）就在这里下载。需要 NVIDIA RTX 30 系列或更新的显卡和约 11 GB 显存。",
+        "不必等待：准备进行时勾选“所有歌曲就绪后自动开始训练”。",
+        "第 3 步“结果”：试听检查点，在最好的那个下面点“加入 LoRA”，它会出现在 LoRA 页面。训练期间无法生成、使用助手、卡拉OK和分轨。",
+      ],
+    },
+    {
+      title: "自动描述歌曲",
+      text: [
+        "可选的包（约 10.5 GB），在“歌曲”步骤的“自动描述歌曲”卡片中下载一次。没有它，工作室仍会识别歌词，但风格需要你自己写。",
+        "每个模型对整个数据集只加载一次，并在其阶段结束后释放：人声、歌词、聆听、助手依次进行。因此五十首歌的数据集并不需要单首的五十倍时间。",
+      ],
+      list: [
+        "MOSS-Music-8B 会聆听歌曲并描述其中的内容：流派、人声、乐器、情绪、制作。HOT-Step 训练器作者也这样做：按声音描述比按标题准确得多。",
+        "Beat This! 是在录音中寻找节拍的网络，工作室据此计算速度。在 Monetochka 的歌曲上，它与 Tunebat 和 SongBPM 相差不到 1 BPM。",
+        "工作室的助手把这些整理成一行 YuE2 风格，并在末尾写上测得的速度。MOSS 自己给出的速度常常出错，所以总是替换为测得的数值。调性不写进 YuE2 风格：模型在写乐谱时自己决定。",
+        "MOSS 约占 10 GB 显存，一首歌约半分钟。一切都在你的电脑上运行，不会发送到任何地方。",
+        "请务必检查结果：模型可能弄错流派或乐器，请手动修改。",
       ],
     },
     {
@@ -312,13 +349,13 @@ const zh: Guide = {
       ],
     },
     {
-      title: '歌词',
+      title: "歌词",
       list: [
-        '只写实际唱出的词——不要和弦、链接或注释。来自网站的歌词必须对照录音核对。',
-        '标注段落：[Verse 1]、[Chorus]、[Verse 2]、[Bridge]、[Outro]，每段单独一行。',
-        '与音频同名的 .txt 或 .lrc 文件会在添加时自动读取；.lrc 的时间戳会被去掉。',
-        '麦克风按钮会识别歌词：分离人声、转写（引擎在“设置 → 卡拉OK”中选择），并按段落排列。请务必检查结果。',
-        '注意：没有歌词的歌曲会立即被视为纯音乐，“识别全部歌词”会跳过它。请取消“纯音乐”勾选，或对这首歌点击麦克风。',
+        "准确写出唱的词，不要和弦、链接或注释。网站上的歌词务必对照录音核对。",
+        "标注段落：[Verse 1]、[Chorus]、[Verse 2]、[Bridge]、[Outro]，每段另起一行。",
+        "与音频同名的 .txt 或 .lrc 会在添加时读取；.lrc 中的时间标记会被去掉。",
+        "没有歌词时，工作室会按艺人、标题和时长在公开歌词库（LRCLIB、QQ 音乐、酷狗）中查找（艺人和标题取自文件标签，或文件名和文件夹）。只有所有歌词库都不认识这首歌时，才会分离人声并用 Whisper 识别，准确度明显更低。歌词上方会显示来源。请务必检查结果。",
+        "如果识别器没听到歌词，这首歌会被标为纯音乐。如果不对，取消“纯音乐”并点“重新识别”。",
       ],
     },
     {
@@ -333,13 +370,12 @@ const zh: Guide = {
       ],
     },
     {
-      title: '需要你自己做的事',
+      title: "需要你自己做的事",
       list: [
-        '挑选歌曲并检查质量。',
-        '为每首歌写风格——YuE2 Studio 没有“描述”按钮，助手也不会听歌。',
-        '检查并修改歌词：识别会出错，歌词网站也会。',
-        '查出速度（BPM）——工作室不会测量。',
-        '凭耳朵选择检查点。',
+        "挑选歌曲并检查音质。",
+        "检查工作室写出的风格和歌词：模型和识别都会出错。没有自动描述包时需要手写风格。",
+        "没有自动描述包时要自己查速度（BPM）；有了它工作室会自己测量。",
+        "凭耳朵选择检查点。",
       ],
     },
     {
@@ -396,15 +432,28 @@ const ja: Guide = {
   resize: 'ドラッグでサイズ変更',
   sections: [
     {
-      title: '作業の流れ',
+      title: "作業の流れ",
       steps: [
-        '学習パックをダウンロード（約 8.6 GB、一度だけ）。NVIDIA RTX 30 シリーズ以降と約 11 GB の VRAM が必要です。',
-        'データセットを作成：名前とトリガーワード（普通の説明には出てこない珍しい単語。例：スペースなしのローマ字の名前）。',
-        '同じアーティストまたは同じスタイルの曲を、ライブラリかディスクから追加（WAV、MP3、FLAC、OGG、M4A）。10 秒未満の曲は受け付けません。',
-        '各曲の「スタイル」と「歌詞」を記入（書き方は下記）。インストは「インスト」にチェック。',
-        '黄色い三角が出ている曲がないか確認。スタイルか歌詞が空という意味です。',
-        '学習を開始。学習中は生成、アシスタント、カラオケ、ステム分離が使えません。',
-        '終わったらチェックポイントを聴き比べ、一番良いものの下で「LoRA に追加」を押すと LoRA ページに表示されます。',
+        "同じアーティストやスタイルの曲のフォルダーを「学習」ページにドロップするか、ボタンでフォルダーやファイルを選びます。スタジオがフォルダー名でデータセットを作ります。WAV、MP3、FLAC、OGG、M4A に対応。.cue 付きの一枚ファイルのアルバムは曲ごとに分割され、横の .txt や .lrc の歌詞はそのまま使われます。",
+        "ステップ 1「曲」：準備は自動で始まります。ボーカルを分離し、歌詞を認識し、各曲を聴いて、測定したテンポ付きでスタイルを書きます。曲ごとに状態が表示され、全体の進行は上に出ます。",
+        "結果を確認：曲をクリックすると、プレーヤー、スタイル、歌詞が開きます。必要に応じて修正し、「もう一度説明」「もう一度認識」はその曲だけをやり直します。",
+        "ステップ 2「学習」：LoRA の名前、トリガーワード（珍しい単語、たとえば空白なしのローマ字名）、準備状況の確認と「学習」ボタン。学習ファイル（約 8.6 GB、一度だけ）もここでダウンロードします。NVIDIA RTX 30 シリーズ以降と約 11 GB のビデオメモリが必要です。",
+        "待つ必要はありません：準備中に「全曲の準備ができたら自動で学習を開始」にチェックを入れてください。",
+        "ステップ 3「結果」：チェックポイントを聴き比べ、一番良いものの下の「LoRA へ」を押すと LoRA ページに表示されます。学習中は生成、アシスタント、カラオケ、ステム分離は使えません。",
+      ],
+    },
+    {
+      title: "曲の自動説明",
+      text: [
+        "任意のパック（約 10.5 GB）で、「曲」ステップの「曲の自動説明」カードから一度だけダウンロードします。なくても歌詞は認識されますが、スタイルは自分で書く必要があります。",
+        "各モデルはデータセット全体で一度だけ読み込まれ、その段階が終わると解放されます：ボーカル、歌詞、聴き取り、アシスタントの順です。だから 50 曲のデータセットでも 1 曲の 50 倍はかかりません。",
+      ],
+      list: [
+        "MOSS-Music-8B は曲を聴いて、ジャンル、ボーカル、楽器、雰囲気、プロダクションを説明するモデルです。HOT-Step トレーナーの作者も同じ方法を使っています。音で説明するほうがタイトルからよりずっと正確です。",
+        "Beat This! は録音の拍を見つけるネットワークで、スタジオはそこからテンポを計算します。Monetochka の曲では Tunebat や SongBPM と 1 BPM 以内で一致しました。",
+        "スタジオのアシスタントがこれを YuE2 形式のスタイル一行にまとめ、末尾に測定したテンポを入れます。MOSS 自身のテンポは誤りやすいので、常に測定値に置き換えます。キーは YuE2 のスタイルには書きません。モデルが楽譜を書くときに自分で決めます。",
+        "MOSS は約 10 GB のビデオメモリを使い、1 曲あたり約 30 秒です。すべてあなたのコンピューターで動き、どこにも送信されません。",
+        "結果は必ず確認してください。モデルがジャンルや楽器を間違えることがあります。手で直してください。",
       ],
     },
     {
@@ -433,13 +482,13 @@ const ja: Guide = {
       ],
     },
     {
-      title: '歌詞',
+      title: "歌詞",
       list: [
-        '実際に歌われている言葉だけ。コード、リンク、注釈は入れません。サイトの歌詞は必ず録音と照らし合わせます。',
-        'パートを付ける：[Verse 1]、[Chorus]、[Verse 2]、[Bridge]、[Outro]、それぞれ別の行に。',
-        '音声と同じ名前の .txt / .lrc は追加時に読み込まれ、.lrc のタイムスタンプは取り除かれます。',
-        'マイクボタンで歌詞を認識：ボーカルを分離して文字起こし（エンジンは「設定 → カラオケ」で選択）、パートごとに並べます。結果は必ず確認してください。',
-        '注意：歌詞のない曲はすぐインスト扱いになり、「すべての歌詞を認識」で飛ばされます。「インスト」のチェックを外すか、その曲のマイクを押してください。',
+        "実際に歌われている言葉だけを、コード、リンク、注釈なしで。サイトの歌詞は必ず録音と照合してください。",
+        "パートを示します：[Verse 1]、[Chorus]、[Verse 2]、[Bridge]、[Outro]。各パートは改行して始めます。",
+        "音声と同じ名前の .txt や .lrc は追加時に読み込まれ、.lrc のタイムスタンプは取り除かれます。",
+        "歌詞がないときは、スタジオがアーティスト、タイトル、長さで公開歌詞データベース（LRCLIB、QQ Music、Kugou）を検索します（アーティストとタイトルはファイルのタグ、または名前とフォルダーから）。どのデータベースにもない曲だけ、ボーカルを分離して Whisper で認識します。精度はかなり下がります。歌詞の上に出どころが表示されます。結果は必ず確認してください。",
+        "認識器が歌詞を聞き取れなかった曲はインストゥルメンタルになります。誤りなら「インストゥルメンタル」を外して「もう一度認識」を押してください。",
       ],
     },
     {
@@ -454,13 +503,12 @@ const ja: Guide = {
       ],
     },
     {
-      title: '自分でやること',
+      title: "自分でやること",
       list: [
-        '曲を選び、品質を確認する。',
-        '各曲のスタイルを書く。YuE2 Studio には「説明」ボタンがなく、アシスタントは曲を聴きません。',
-        '歌詞を確認・修正する。認識も歌詞サイトも間違えます。',
-        'テンポ（BPM）を調べる。スタジオは測りません。',
-        'チェックポイントを耳で選ぶ。',
+        "曲を選び、音質を確認する。",
+        "スタジオが書いたスタイルと歌詞を確認する。モデルも認識も間違えます。自動説明パックがなければスタイルは手で書きます。",
+        "自動説明パックがなければテンポ（BPM）を調べる。あればスタジオが測ります。",
+        "チェックポイントを耳で選ぶ。",
       ],
     },
     {
@@ -517,15 +565,28 @@ const ko: Guide = {
   resize: '끌어서 크기 조절',
   sections: [
     {
-      title: '작업 순서',
+      title: "작업 순서",
       steps: [
-        '학습 팩을 내려받습니다(약 8.6 GB, 한 번만). NVIDIA RTX 30 시리즈 이상과 약 11 GB VRAM이 필요합니다.',
-        '데이터셋을 만듭니다: 이름과 트리거 단어(일반 설명에 나오지 않는 드문 단어, 예: 띄어쓰기 없는 로마자 이름).',
-        '같은 아티스트나 같은 스타일의 곡을 라이브러리나 디스크에서 추가합니다(WAV, MP3, FLAC, OGG, M4A). 10초보다 짧은 곡은 받지 않습니다.',
-        '각 곡의 「스타일」과 「가사」를 채웁니다(작성법은 아래). 연주곡은 「연주곡」에 체크합니다.',
-        '노란 삼각형이 있는 곡이 없는지 확인합니다. 스타일이나 가사가 비어 있다는 뜻입니다.',
-        '학습을 시작합니다. 학습 중에는 생성, 어시스턴트, 가라오케, 스템 분리를 쓸 수 없습니다.',
-        '끝나면 체크포인트를 들어 보고 가장 좋은 것 아래의 「LoRA에 추가」를 누르면 LoRA 페이지에 나타납니다.',
+        "한 아티스트나 한 스타일의 노래 폴더를 \"학습\" 페이지에 끌어다 놓거나 버튼으로 폴더와 파일을 고르세요. 스튜디오가 폴더 이름으로 데이터셋을 만듭니다. WAV, MP3, FLAC, OGG, M4A를 지원하고, .cue가 있는 한 파일짜리 앨범은 곡별로 나뉘며, 옆의 .txt나 .lrc 가사는 그대로 사용합니다.",
+        "1단계 \"곡\": 준비가 저절로 시작됩니다. 보컬을 분리하고, 가사를 인식하고, 각 곡을 듣고, 측정한 템포로 스타일을 씁니다. 곡마다 상태가 보이고, 전체 진행은 위에 있습니다.",
+        "결과를 확인하세요: 곡을 누르면 플레이어, 스타일, 가사가 펼쳐집니다. 필요한 것을 고치세요. \"다시 설명\"과 \"다시 인식\"은 그 곡만 다시 합니다.",
+        "2단계 \"학습\": LoRA 이름, 트리거 단어(드문 단어, 예: 띄어쓰기 없는 로마자 이름), 준비 확인과 \"학습\" 버튼. 학습 파일(약 8.6GB, 한 번)도 여기서 내려받습니다. NVIDIA RTX 30 시리즈 이상과 약 11GB의 비디오 메모리가 필요합니다.",
+        "기다릴 필요 없습니다: 준비 중에 \"모든 곡이 준비되면 자동으로 학습 시작\"을 체크하세요.",
+        "3단계 \"결과\": 체크포인트를 들어 보고 가장 좋은 것 아래의 \"LoRA로\"를 누르면 LoRA 페이지에 나타납니다. 학습 중에는 생성, 어시스턴트, 가라오케, 스템 분리를 쓸 수 없습니다.",
+      ],
+    },
+    {
+      title: "곡 자동 설명",
+      text: [
+        "선택 패키지(약 10.5GB)로, \"곡\" 단계의 \"곡 자동 설명\" 카드에서 한 번 내려받습니다. 없어도 가사는 인식되지만 스타일은 직접 써야 합니다.",
+        "각 모델은 데이터셋 전체에 한 번만 로드되고, 그 단계가 끝나면 해제됩니다: 보컬, 가사, 듣기, 어시스턴트 순서입니다. 그래서 50곡짜리 데이터셋도 한 곡의 50배가 걸리지 않습니다.",
+      ],
+      list: [
+        "MOSS-Music-8B는 곡을 듣고 장르, 보컬, 악기, 분위기, 프로덕션을 설명하는 모델입니다. HOT-Step 트레이너 작성자도 같은 방법을 씁니다. 소리로 쓴 설명이 제목으로 쓴 것보다 훨씬 정확합니다.",
+        "Beat This!는 녹음에서 박을 찾는 네트워크이고, 스튜디오는 그것으로 템포를 계산합니다. Monetochka의 곡에서 Tunebat, SongBPM과 1 BPM 이내로 일치했습니다.",
+        "스튜디오의 어시스턴트가 이것을 YuE2 형식의 스타일 한 줄로 정리하고 끝에 측정한 템포를 넣습니다. MOSS 자체의 템포는 자주 틀리므로 항상 측정값으로 바꿉니다. 키는 YuE2 스타일에 쓰지 않습니다. 모델이 악보를 쓸 때 스스로 정합니다.",
+        "MOSS는 약 10GB의 비디오 메모리를 쓰고, 한 곡에 약 30초가 걸립니다. 모든 것이 여러분의 컴퓨터에서 돌아가며 어디에도 보내지 않습니다.",
+        "결과는 항상 확인하세요. 모델이 장르나 악기를 틀릴 수 있으니 직접 고치세요.",
       ],
     },
     {
@@ -554,13 +615,13 @@ const ko: Guide = {
       ],
     },
     {
-      title: '가사',
+      title: "가사",
       list: [
-        '실제로 부르는 말만. 코드, 링크, 메모는 넣지 않습니다. 사이트에서 가져온 가사는 반드시 녹음과 대조합니다.',
-        '파트를 표시합니다: [Verse 1], [Chorus], [Verse 2], [Bridge], [Outro] — 각각 새 줄에.',
-        '오디오와 같은 이름의 .txt / .lrc 파일은 추가할 때 읽히며, .lrc 타임스탬프는 제거됩니다.',
-        '마이크 버튼은 가사를 인식합니다: 보컬을 분리하고 받아 적은 뒤(엔진은 「설정 → 가라오케」에서 선택) 파트별로 정리합니다. 결과는 꼭 확인하세요.',
-        '주의: 가사가 없는 곡은 바로 연주곡으로 간주되어 「모든 가사 인식」에서 건너뜁니다. 「연주곡」 체크를 풀거나 그 곡의 마이크를 누르세요.',
+        "실제로 부르는 가사만, 코드나 링크, 메모 없이. 사이트의 가사는 반드시 녹음과 대조하세요.",
+        "파트를 표시하세요: [Verse 1], [Chorus], [Verse 2], [Bridge], [Outro]. 각 파트는 새 줄에서 시작합니다.",
+        "오디오와 이름이 같은 .txt나 .lrc는 추가할 때 읽히고, .lrc의 타임스탬프는 지워집니다.",
+        "가사가 없으면 스튜디오가 아티스트, 제목, 길이로 공개 가사 데이터베이스(LRCLIB, QQ Music, Kugou)에서 찾습니다(아티스트와 제목은 파일 태그나 이름과 폴더에서 가져옵니다). 어느 데이터베이스에도 없는 곡만 보컬을 분리해 Whisper로 인식하며, 정확도는 훨씬 낮습니다. 가사 위에 출처가 표시됩니다. 결과는 항상 확인하세요.",
+        "인식기가 가사를 듣지 못한 곡은 연주곡으로 표시됩니다. 틀렸다면 \"연주곡\"을 끄고 \"다시 인식\"을 누르세요.",
       ],
     },
     {
@@ -575,13 +636,12 @@ const ko: Guide = {
       ],
     },
     {
-      title: '직접 해야 하는 일',
+      title: "직접 해야 하는 일",
       list: [
-        '곡을 고르고 품질을 확인합니다.',
-        '각 곡의 스타일을 씁니다. YuE2 Studio에는 「설명」 버튼이 없고, 어시스턴트는 곡을 듣지 않습니다.',
-        '가사를 확인하고 고칩니다. 인식도 가사 사이트도 틀립니다.',
-        '템포(BPM)를 알아냅니다. 스튜디오는 재지 않습니다.',
-        '체크포인트를 귀로 고릅니다.',
+        "곡을 고르고 음질을 확인하기.",
+        "스튜디오가 쓴 스타일과 가사를 확인하기. 모델도 인식도 틀립니다. 자동 설명 패키지가 없으면 스타일은 직접 씁니다.",
+        "자동 설명 패키지가 없으면 템포(BPM)를 찾기. 있으면 스튜디오가 직접 잽니다.",
+        "체크포인트를 귀로 고르기.",
       ],
     },
     {

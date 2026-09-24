@@ -17,6 +17,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -74,6 +75,50 @@ pub const WHISPER_RUNTIME_DIR: &str = "whisper";
 /// The model sizes the recogniser knows, as `--model` names them.
 pub const WHISPER_SIZES: &[&str] = &["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"];
 
+/// Phrases Whisper writes over music and silence instead of saying it heard
+/// no words: the verbatim hallucinations of the "Bag of Hallucinations"
+/// study (Barański et al., ICASSP 2025, MIT) and the per-language lists of
+/// NVIDIA NeMo's Granary pipeline (Apache-2.0), as merged by
+/// Scicom-AI/Whisper-Hallucination, kept for the studio's languages and a few
+/// common ones, phrases of two words or more, normalised.
+const HALLUCINATIONS: &str = include_str!("whisper_hallucinations.txt");
+
+/// Words that only ever appear in a subtitler's credit, never in a song.
+const CREDIT_MARKERS: &[&str] = &["dimatorzok", "субтитр", "amara.org", "untertitel", "sous-titr", "subtítulo", "sottotitol", "legendas por", "subtitles by", "字幕", "자막"];
+
+fn normalised(text: &str) -> String {
+    let lowered = text.to_lowercase().replace('ё', "е");
+    lowered
+        .split(|c: char| c.is_whitespace() || ".,!?…\"'«»“”„-–—:;()[]♪。、！？「」".contains(c))
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Whether a recognised segment is Whisper filling a gap rather than words
+/// that were sung: a known hallucination said whole, a subtitler's credit, a
+/// sound written as a caption ("ВЕСЕЛАЯ МУЗЫКА", "[Music]"), or no letters at
+/// all. A segment is judged whole, so a sung line that merely contains such a
+/// phrase stays.
+pub fn is_hallucination(text: &str) -> bool {
+    static KNOWN: std::sync::OnceLock<std::collections::HashSet<&'static str>> = std::sync::OnceLock::new();
+    let trimmed = text.trim();
+    if !trimmed.chars().any(char::is_alphabetic) {
+        return true;
+    }
+    let bracketed = (trimmed.starts_with('[') && trimmed.ends_with(']')) || (trimmed.starts_with('(') && trimmed.ends_with(')')) || trimmed.starts_with('♪');
+    let letters: Vec<char> = trimmed.chars().filter(|c| c.is_alphabetic()).collect();
+    let shouted = letters.len() >= 3 && letters.iter().all(|c| !c.is_lowercase()) && letters.iter().any(|c| c.is_uppercase());
+    if bracketed || shouted {
+        return true;
+    }
+    let plain = normalised(trimmed);
+    if CREDIT_MARKERS.iter().any(|marker| plain.contains(marker)) {
+        return true;
+    }
+    KNOWN.get_or_init(|| HALLUCINATIONS.lines().filter(|line| !line.is_empty()).collect()).contains(plain.as_str())
+}
+
 /// The words and their times out of faster-whisper's JSON.
 ///
 /// A segment that came back without word timestamps becomes one long "word":
@@ -84,6 +129,9 @@ fn whisper_words_from_json(text: &str) -> Vec<(f64, String)> {
     let Some(segments) = value.get("segments").and_then(|value| value.as_array()) else { return Vec::new() };
     let mut words = Vec::new();
     for segment in segments {
+        if is_hallucination(segment.get("text").and_then(|value| value.as_str()).unwrap_or_default()) {
+            continue;
+        }
         match segment.get("words").and_then(|value| value.as_array()) {
             Some(list) if !list.is_empty() => {
                 for entry in list {
@@ -889,6 +937,141 @@ impl LyricsSync {
         Ok(words)
     }
 
+    /// The words of several tracks from one load of the recogniser: Parakeet
+    /// loaded once and run over each, Whisper started once with every file.
+    /// `heard` gets each track's answer, with its index, the moment it is
+    /// there, so a long dataset shows its lyrics song by song.
+    pub fn words_many(
+        &self,
+        config: &LyricsSyncConfig,
+        audio: &[PathBuf],
+        language: Option<&str>,
+        heard: &mut dyn FnMut(usize, Result<Vec<(f64, String)>>),
+        cancel: &AtomicBool,
+    ) {
+        let failed = |heard: &mut dyn FnMut(usize, Result<Vec<(f64, String)>>), error: anyhow::Error| {
+            for index in 0..audio.len() {
+                heard(index, Err(anyhow!("{error:#}")));
+            }
+        };
+        match config.provider {
+            AsrProvider::Parakeet => {
+                let library = match self.onnxruntime_library() {
+                    Some(library) => library,
+                    None => return failed(heard, anyhow!("the ONNX Runtime library is not installed")),
+                };
+                if !self.parakeet_ready() {
+                    return failed(heard, anyhow!("the Parakeet model is not fully downloaded"));
+                }
+                static ONCE: std::sync::Once = std::sync::Once::new();
+                ONCE.call_once(|| unsafe { std::env::set_var("ORT_DYLIB_PATH", &library) });
+                let mut model = match parakeet_rs::ParakeetTDT::from_pretrained(&self.parakeet_dir(), None) {
+                    Ok(model) => model,
+                    Err(error) => return failed(heard, anyhow!("load Parakeet: {error}")),
+                };
+                for (index, path) in audio.iter().enumerate() {
+                    if cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let answer = (|| {
+                        let samples = crate::audio_pcm::decode_mono_16k(path).with_context(|| format!("decode {} for recognition", path.display()))?;
+                        let result = model
+                            .transcribe_samples(samples, 16_000, 1, Some(parakeet_rs::TimestampMode::Words))
+                            .map_err(|error| anyhow!("Parakeet transcription failed: {error}"))?;
+                        let words: Vec<(f64, String)> = result
+                            .tokens
+                            .into_iter()
+                            .filter_map(|token| {
+                                let text = token.text.trim().to_string();
+                                (!text.is_empty()).then_some((token.start as f64, text))
+                            })
+                            .collect();
+                        if words.is_empty() {
+                            bail!(NO_WORDS);
+                        }
+                        Ok(words)
+                    })();
+                    heard(index, answer);
+                }
+            }
+            AsrProvider::Whisper => {
+                if let Err(error) = self.whisper_many(config, audio, language, heard, cancel) {
+                    failed(heard, error);
+                }
+            }
+            _ => failed(heard, anyhow!("this recogniser does not run on this computer")),
+        }
+    }
+
+    /// One Whisper run over several tracks; the JSON it writes for each is
+    /// named after the file it was given, and handed on as soon as it is whole.
+    fn whisper_many(
+        &self,
+        config: &LyricsSyncConfig,
+        audio: &[PathBuf],
+        language: Option<&str>,
+        heard: &mut dyn FnMut(usize, Result<Vec<(f64, String)>>),
+        cancel: &AtomicBool,
+    ) -> Result<()> {
+        let binary = self.whisper_binary().ok_or_else(|| anyhow!("the Whisper runtime is not installed"))?;
+        let size = config
+            .whisper_model
+            .as_deref()
+            .and_then(Self::whisper_size)
+            .ok_or_else(|| anyhow!("no Whisper model is downloaded and selected"))?;
+        if self.whisper_model_path(config).is_none() {
+            bail!("the Whisper model {size} is not completely downloaded");
+        }
+        let work = self.downloader.root().join("work").join(format!("batch-{}", uuid::Uuid::now_v7()));
+        let out_dir = work.join("out");
+        fs::create_dir_all(&out_dir).with_context(|| format!("create {}", out_dir.display()))?;
+        let mut wavs = Vec::with_capacity(audio.len());
+        let mut answered = vec![false; audio.len()];
+        for (index, path) in audio.iter().enumerate() {
+            let wav = work.join(format!("{index}.wav"));
+            match crate::audio_pcm::write_wav16k_mono(path, &wav) {
+                Ok(()) => wavs.push(wav),
+                Err(error) => {
+                    answered[index] = true;
+                    heard(index, Err(error.context(format!("decode {} for recognition", path.display()))));
+                }
+            }
+        }
+        // A track's JSON is taken once it parses: Whisper writes it whole when
+        // that track is done, and a half-written one is simply read next time
+        let mut take = |answered: &mut Vec<bool>| {
+            for index in 0..audio.len() {
+                if answered[index] {
+                    continue;
+                }
+                let Ok(text) = fs::read_to_string(out_dir.join(format!("{index}.json"))) else { continue };
+                if serde_json::from_str::<serde_json::Value>(&text).is_err() {
+                    continue;
+                }
+                answered[index] = true;
+                let words = whisper_words_from_json(&text);
+                heard(index, if words.is_empty() { Err(anyhow!(NO_WORDS)) } else { Ok(words) });
+            }
+        };
+        let on_card = !matches!(config.runtime, OnnxFlavour::Cpu);
+        let mut outcome = self.run_whisper_many(&binary, size, &wavs, &out_dir, language, on_card, &mut || take(&mut answered), cancel);
+        if outcome.as_ref().is_err_and(|error| error.to_string() != "cancelled") && on_card {
+            let refused = outcome.unwrap_err();
+            outcome = self
+                .run_whisper_many(&binary, size, &wavs, &out_dir, language, false, &mut || take(&mut answered), cancel)
+                .with_context(|| format!("the card was tried first and refused: {refused}"));
+        }
+        take(&mut answered);
+        let run_error = outcome.err().map(|error| format!("{error:#}"));
+        for (index, done) in answered.iter().enumerate() {
+            if !done {
+                heard(index, Err(anyhow!("{}", run_error.clone().unwrap_or_else(|| "whisper wrote no JSON for this track".into()))));
+            }
+        }
+        fs::remove_dir_all(&work).ok();
+        Ok(())
+    }
+
     /// Runs faster-whisper over one track and returns the words it heard.
     ///
     /// Purfview's standalone build, asked for JSON with word timestamps - the
@@ -955,9 +1138,26 @@ impl LyricsSync {
     /// One run of the recogniser, with its complaints kept: a failure here is
     /// the only place that ever says why nothing was recognised.
     fn run_whisper(&self, binary: &Path, size: &str, wav: &Path, out_dir: &Path, language: Option<&str>, on_card: bool) -> Result<()> {
+        self.run_whisper_many(binary, size, &[wav.to_path_buf()], out_dir, language, on_card, &mut || {}, &AtomicBool::new(false))
+    }
+
+    /// Whisper over every file in one process; `poll` is called while it
+    /// works, to pick up what it has written, and `cancel` stops it between polls.
+    #[allow(clippy::too_many_arguments)]
+    fn run_whisper_many(
+        &self,
+        binary: &Path,
+        size: &str,
+        wavs: &[PathBuf],
+        out_dir: &Path,
+        language: Option<&str>,
+        on_card: bool,
+        poll: &mut dyn FnMut(),
+        cancel: &AtomicBool,
+    ) -> Result<()> {
         let mut command = Command::new(binary);
         command
-            .arg(wav)
+            .args(wavs)
             .arg("--model")
             .arg(size)
             .arg("--model_dir")
@@ -974,7 +1174,10 @@ impl LyricsSync {
             .arg(if on_card { "float16" } else { "int8" })
             .arg("--device")
             .arg(if on_card { "cuda" } else { "cpu" })
-            .arg("--beep_off");
+            .arg("--beep_off")
+            // A hallucination fed back as the next window's prompt is how one
+            // subtitler's credit becomes eight; lyrics lose nothing by it
+            .args(["--condition_on_previous_text", "False"]);
         // A language it was told beats one it has to guess, and "auto" is not a
         // language code - passing it as one is how a run comes back empty.
         if let Some(code) = language.map(str::trim).filter(|code| !code.is_empty() && *code != "auto") {
@@ -985,9 +1188,12 @@ impl LyricsSync {
             // them on the network is one that fails without one.
             .env("HF_HUB_OFFLINE", "1")
             .env("TRANSFORMERS_OFFLINE", "1")
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdin(Stdio::null());
+        // Its output goes to a file: a pipe nobody reads while it works through
+        // a whole dataset fills up and stalls it.
+        let log_path = out_dir.with_extension("log");
+        let log = fs::File::create(&log_path).with_context(|| format!("create {}", log_path.display()))?;
+        command.stdout(log.try_clone()?).stderr(log);
         // CTranslate2 and the CUDA libraries sit beside the binary, and that is
         // where they are found from.
         if let Some(directory) = binary.parent() {
@@ -995,15 +1201,27 @@ impl LyricsSync {
         }
         hide_console(&mut command);
 
-        let finished = command.output().with_context(|| format!("run {}", binary.display()))?;
-        if finished.status.success() {
+        let mut child = command.spawn().with_context(|| format!("run {}", binary.display()))?;
+        let status = loop {
+            if let Some(status) = child.try_wait()? {
+                break status;
+            }
+            if cancel.load(Ordering::Relaxed) {
+                child.kill().ok();
+                child.wait().ok();
+                bail!("cancelled");
+            }
+            poll();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        };
+        let output = fs::read_to_string(&log_path).unwrap_or_default();
+        fs::remove_file(&log_path).ok();
+        if status.success() {
             return Ok(());
         }
-        let stderr = String::from_utf8_lossy(&finished.stderr);
-        let stdout = String::from_utf8_lossy(&finished.stdout);
-        let mut tail: Vec<&str> = stderr.lines().chain(stdout.lines()).filter(|line| !line.trim().is_empty()).rev().take(8).collect();
+        let mut tail: Vec<&str> = output.lines().filter(|line| !line.trim().is_empty()).rev().take(8).collect();
         tail.reverse();
-        bail!("whisper exited with {}: {}", finished.status, tail.join(" | "))
+        bail!("whisper exited with {}: {}", status, tail.join(" | "))
     }
 }
 
@@ -1414,6 +1632,23 @@ fn hide_console(_command: &mut Command) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whisper_fillers_are_dropped_and_sung_lines_kept() {
+        assert!(is_hallucination(" Субтитры создавал DimaTorzok"));
+        assert!(is_hallucination("Продолжение следует..."));
+        assert!(is_hallucination("Thanks for watching!"));
+        assert!(is_hallucination("ご視聴ありがとうございました"));
+        assert!(is_hallucination("ВЕСЕЛАЯ МУЗЫКА"));
+        assert!(is_hallucination("[Music]"));
+        assert!(is_hallucination(" 1."));
+        assert!(!is_hallucination("Если б мне платили каждый раз,"));
+        assert!(!is_hallucination("Спасибо, что ты рядом со мной"));
+        assert!(!is_hallucination("Поехали!"));
+        let json = r#"{"segments":[{"start":1.0,"text":" Субтитры создавал DimaTorzok","words":[{"start":1.0,"word":" Субтитры"}]},{"start":5.0,"text":" Тьма во мне","words":[{"start":5.0,"word":" Тьма"},{"start":5.4,"word":" во"},{"start":5.6,"word":" мне"}]}]}"#;
+        let words = whisper_words_from_json(json);
+        assert_eq!(words.iter().map(|(_, word)| word.as_str()).collect::<Vec<_>>(), ["Тьма", "во", "мне"]);
+    }
 
     // The releases every runtime download is pinned to.
     const WHISPER_BUILD: &str = "Whisper-Faster_r192.3";

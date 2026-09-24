@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { AudioWaveform } from './AudioWaveform';
 import { AlertTriangle, Check, FolderOpen, Loader2, Pause, Play, Plus, RefreshCw, Search, SlidersHorizontal, Trash2, Wand2, X } from 'lucide-react';
 import { Song } from '../types';
 import { useI18n } from '../context/I18nContext';
@@ -571,7 +572,9 @@ const Compare: React.FC<{ original: string; processed: string }> = ({ original, 
       </div>
       <div className="mt-3 flex items-center gap-2 text-[11px] tabular-nums text-zinc-500">
         <span>{clock(time)}</span>
-        <input type="range" min={0} max={duration || 0} step={0.1} value={time} onChange={event => seek(Number(event.target.value))} aria-label="position" className="h-1 flex-1 cursor-pointer accent-pink-500" />
+        <div className="min-w-0 flex-1">
+          <AudioWaveform url={side === 'before' ? original : processed} currentTime={time} duration={duration} height={36} onSeek={share => seek(share * duration)} />
+        </div>
         <span>{clock(duration)}</span>
       </div>
       <p className="mt-2 text-[11px] text-zinc-500">{t('processCompareHint')}</p>

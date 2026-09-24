@@ -7,7 +7,12 @@ interface I18nContextType {
   t: (key: TranslationKey) => string;
 }
 
-const I18nContext = createContext<I18nContextType | undefined>(undefined);
+// One context object for the life of the page: when a strings file changes in
+// development, this module is evaluated again, and a second context would leave
+// every consumer outside the provider that is already mounted.
+const I18nContext: React.Context<I18nContextType | undefined> =
+  import.meta.hot?.data.i18nContext ?? createContext<I18nContextType | undefined>(undefined);
+if (import.meta.hot) import.meta.hot.data.i18nContext = I18nContext;
 
 export const I18nProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [language, setLanguage] = useState<Language>(() => {

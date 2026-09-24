@@ -103,6 +103,11 @@ pub struct TrainingInputs {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Recipe {
+    /// `kl`: stop once the planner has moved `target_kl` from the base model,
+    /// `steps` a cap; `epochs`: train `epochs` passes over the songs.
+    pub stop: String,
+    /// One epoch is one pass over the dataset: a step trains one song.
+    pub epochs: u32,
     /// A cap: with `target_kl` the run usually stops well before it.
     pub steps: u32,
     pub save_every: u32,
@@ -130,6 +135,8 @@ pub struct Recipe {
 impl Default for Recipe {
     fn default() -> Self {
         Self {
+            stop: "kl".into(),
+            epochs: 20,
             steps: 750,
             save_every: 50,
             seed: 42,
@@ -208,8 +215,10 @@ const fn toggle(key: &'static str, group: &'static str) -> RecipeField {
 pub fn recipe_fields() -> Vec<RecipeField> {
     let lokr = FieldCondition { field: "adapter", values: &["lokr"] };
     vec![
-        number("target_kl", "stop", 0.0, 5.0, 0.1),
-        integer("steps", "stop", 1.0, 5000.0, 50.0),
+        choice("stop", "stop", &["kl", "epochs"]),
+        RecipeField { shown_when: Some(FieldCondition { field: "stop", values: &["kl"] }), ..number("target_kl", "stop", 0.1, 5.0, 0.1) },
+        RecipeField { shown_when: Some(FieldCondition { field: "stop", values: &["kl"] }), ..integer("steps", "stop", 1.0, 5000.0, 50.0) },
+        RecipeField { shown_when: Some(FieldCondition { field: "stop", values: &["epochs"] }), ..integer("epochs", "stop", 1.0, 500.0, 1.0) },
         integer("save_every", "stop", 1.0, 1000.0, 10.0),
         integer("seed", "stop", 0.0, 4_294_967_295.0, 1.0),
         choice("adapter", "adapter", &["lokr", "lora"]),
@@ -226,10 +235,24 @@ pub fn recipe_fields() -> Vec<RecipeField> {
 }
 
 impl Recipe {
+    /// The recipe the trainer runs for a dataset of `songs`: by epochs, the
+    /// steps are the epochs times the songs and nothing stops it earlier.
+    pub fn for_songs(&self, songs: usize) -> Recipe {
+        let mut recipe = self.clone();
+        if recipe.stop == "epochs" {
+            recipe.steps = recipe.epochs.saturating_mul(songs.max(1) as u32);
+            recipe.target_kl = 0.0;
+        }
+        recipe
+    }
+
     /// Refuses what the trainer would refuse, before any stage starts.
     pub fn check(&self) -> Result<(), String> {
-        if self.steps == 0 || self.save_every == 0 {
-            return Err("steps and the checkpoint interval must be at least 1".into());
+        if self.steps == 0 || self.save_every == 0 || self.epochs == 0 {
+            return Err("steps, epochs and the checkpoint interval must be at least 1".into());
+        }
+        if !matches!(self.stop.as_str(), "kl" | "epochs") {
+            return Err(format!("unknown stopping rule {}", self.stop));
         }
         if !matches!(self.adapter.as_str(), "lokr" | "lora") {
             return Err(format!("unknown adapter type {}", self.adapter));
@@ -437,6 +460,15 @@ pub fn checkpoints(run: &Path) -> Vec<TrainingCheckpoint> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn epochs_become_steps_and_turn_the_likeness_stop_off() {
+        let by_epochs = Recipe { stop: "epochs".into(), epochs: 20, ..Recipe::default() }.for_songs(61);
+        assert_eq!(by_epochs.steps, 1220);
+        assert_eq!(by_epochs.target_kl, 0.0);
+        let by_likeness = Recipe::default().for_songs(61);
+        assert_eq!((by_likeness.steps, by_likeness.target_kl), (750, 1.4));
+    }
 
     #[test]
     fn a_joint_line_becomes_a_step_and_other_lines_do_not() {

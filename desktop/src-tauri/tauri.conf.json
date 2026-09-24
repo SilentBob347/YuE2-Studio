@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "dragDropEnabled": false,
         "create": false,
         "title": "YuE2 Studio",
         "width": 1440,
