@@ -4694,6 +4694,29 @@ fn api_error(status: StatusCode, error: String) -> (StatusCode, Json<ApiError>) 
 mod tests {
     use super::*;
 
+    /// Every file the editor page loads has to be embedded; a missing
+    /// WaveSurfer bundle left the editor blank in 1.0.0 to 1.0.3.
+    #[test]
+    fn the_editor_page_loads_only_embedded_files() {
+        let page = EDITOR
+            .get_file("index.html")
+            .and_then(|file| file.contents_utf8())
+            .expect("the editor page is embedded");
+        let mut checked = 0;
+        for attribute in ["src=\"", "href=\""] {
+            for (at, _) in page.match_indices(attribute) {
+                let rest = &page[at + attribute.len()..];
+                let target = &rest[..rest.find('"').expect("a closed attribute")];
+                if target.contains(':') || target.starts_with('#') || target.is_empty() {
+                    continue;
+                }
+                assert!(EDITOR.get_file(target).is_some(), "the editor page loads {target}, which is not embedded");
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "only {checked} local references were found in the editor page");
+    }
+
     /// Nothing stays in VRAM unless the user asked for it. This is the setting
     /// the assistant's unload is tied to, and it is off to begin with.
     #[test]
