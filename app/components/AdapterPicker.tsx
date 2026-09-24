@@ -132,7 +132,7 @@ export const AdapterPicker: React.FC<AdapterPickerProps> = ({ value, onChange, o
               {t('adaptersAdd')}
             </button>
             {choosing && (
-              <div className="absolute left-0 right-0 z-20 mt-1 max-h-72 overflow-y-auto rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-white/10 dark:bg-zinc-900">
+              <div className="mt-1 max-h-72 overflow-y-auto rounded-lg border border-zinc-200 bg-white dark:border-white/10 dark:bg-zinc-900">
                 {available.map(adapter => (
                   <button
                     key={adapter.id}

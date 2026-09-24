@@ -584,7 +584,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     const after = lyrics.slice(at);
     const prefix = before && !before.endsWith('\n\n') ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
     setLyrics(`${before}${prefix}${tag}\n${after}`);
-    window.requestAnimationFrame(() => box?.focus());
+    // the caret follows the tag, so tags pressed in turn stay in that order
+    const caret = before.length + prefix.length + tag.length + 1;
+    window.requestAnimationFrame(() => {
+      box?.focus();
+      box?.setSelectionRange(caret, caret);
+    });
   };
 
   /** Reads a recording into a score with SheetSage2, for a cover. */
