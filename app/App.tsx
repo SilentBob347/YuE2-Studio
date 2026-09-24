@@ -1052,7 +1052,7 @@ function AppContent() {
   const VIEWS: View[] = ['create', 'library', 'tools', 'adapters', 'playlist', 'search', 'news'];
   const songById = (id: unknown) => {
     const song = songs.find(entry => entry.id === id);
-    if (!song) throw new Error(`No song ${String(id)} in the library; list_songs gives the ids.`);
+    if (!song) throw new Error(`No song ${String(id)} in the library; library_songs_list gives the ids.`);
     return song;
   };
   useBridgeCommand('navigate', ({ view }) => {
