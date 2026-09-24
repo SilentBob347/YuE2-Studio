@@ -141,25 +141,57 @@ struct Active {
     cancel: Arc<tokio::sync::Notify>,
 }
 
+/// The trainer build this studio uses, shared by every engine of the family.
+#[derive(Deserialize)]
+struct TrainerSource {
+    commit: String,
+    shipped_as: String,
+    release_tag: String,
+    asset: String,
+}
+
+fn trainer_source() -> &'static TrainerSource {
+    static SOURCE: OnceLock<TrainerSource> = OnceLock::new();
+    SOURCE.get_or_init(|| serde_json::from_str(include_str!("../../../engines/music-train-source.json")).expect("engines/music-train-source.json is valid"))
+}
+
+/// The folder the trainer archive unpacks into.
+const TRAINER_FOLDER: &str = "music-train";
+
+/// Everything training needs: the trainer, released beside the studio, and
+/// the engine's weights for it.
 fn pack() -> &'static [Asset] {
     static PACK: OnceLock<Vec<Asset>> = OnceLock::new();
     PACK.get_or_init(|| {
-        yue_train::TRAINING_FILES
-            .iter()
-            .map(|file| Asset {
-                id: file.id,
-                label: file.label,
-                kind: AssetKind::Model,
-                url: Box::leak(yue_train::training_file_url(file).into_boxed_str()),
-                relative_path: file.file,
-                bytes: file.bytes,
-                unzip_into: None,
-                marker: "",
-                pick: &[],
-                vram_gb: None,
-                note: "",
-            })
-            .collect()
+        let leak = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
+        let source = trainer_source();
+        let mut assets = vec![Asset {
+            id: "music-train",
+            label: leak(format!("Trainer (HOT-Step {})", &source.commit[..8])),
+            kind: AssetKind::Runtime,
+            url: leak(format!("https://github.com/timoncool/YuE2-Studio/releases/download/{}/{}", source.release_tag, source.asset)),
+            relative_path: leak(source.asset.clone()),
+            bytes: 60_000_000,
+            unzip_into: Some(TRAINER_FOLDER),
+            marker: leak(source.shipped_as.clone()),
+            pick: &[],
+            vram_gb: None,
+            note: "",
+        }];
+        assets.extend(yue_train::TRAINING_FILES.iter().map(|file| Asset {
+            id: file.id,
+            label: file.label,
+            kind: AssetKind::Model,
+            url: leak(yue_train::training_file_url(file)),
+            relative_path: leak(format!("models/{}", file.file)),
+            bytes: file.bytes,
+            unzip_into: None,
+            marker: "",
+            pick: &[],
+            vram_gb: None,
+            note: "",
+        }));
+        assets
     })
 }
 
@@ -192,11 +224,19 @@ fn read_json<T: for<'a> Deserialize<'a>>(path: &Path) -> Option<T> {
 impl Training {
     pub fn new(data_root: &Path, engine: &str) -> Self {
         let root = data_root.join("training");
-        Self { downloader: Downloader::new(root.join("models")), root, engine: engine.to_string(), active: RwLock::new(None) }
+        Self { downloader: Downloader::new(root.clone()), root, engine: engine.to_string(), active: RwLock::new(None) }
     }
 
     pub fn downloader(&self) -> &Downloader {
         &self.downloader
+    }
+
+    /// The trainer: where `YUE_TRAIN_BIN` points in a developer build, else
+    /// the one the pack unpacked.
+    pub fn trainer(&self) -> PathBuf {
+        std::env::var_os("YUE_TRAIN_BIN")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.downloader.runtime_dir(TRAINER_FOLDER).join(&trainer_source().shipped_as))
     }
 
     pub fn models_dir(&self) -> PathBuf {
@@ -219,21 +259,33 @@ impl Training {
         Ok(self.runs_dir().join(safe_id(id)?))
     }
 
+    /// Whether a part of the pack is usable; the trainer counts as present
+    /// wherever `trainer` finds it.
+    fn installed(&self, asset: &Asset) -> bool {
+        if asset.unzip_into == Some(TRAINER_FOLDER) {
+            return self.trainer().is_file();
+        }
+        self.downloader.is_installed(asset)
+    }
+
     /// The pack's files with whether each is on disk.
     pub fn pack_status(&self) -> Vec<serde_json::Value> {
         pack()
             .iter()
-            .map(|asset| serde_json::json!({ "id": asset.id, "label": asset.label, "bytes": asset.bytes, "installed": self.downloader.is_installed(asset) }))
+            .map(|asset| serde_json::json!({ "id": asset.id, "label": asset.label, "bytes": asset.bytes, "installed": self.installed(asset) }))
             .collect()
     }
 
     pub fn pack_ready(&self) -> bool {
-        pack().iter().all(|asset| self.downloader.is_installed(asset))
+        pack().iter().all(|asset| self.installed(asset))
     }
 
     pub async fn install_pack(&self) -> Result<()> {
-        let assets: Vec<&'static Asset> = pack().iter().collect();
-        self.downloader.install_all(SCOPE, &assets).await
+        let missing: Vec<&'static Asset> = pack().iter().filter(|asset| !self.installed(asset)).collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        self.downloader.install_all(SCOPE, &missing).await
     }
 
     // ── datasets ────────────────────────────────────────────────────────────
@@ -405,7 +457,10 @@ impl Training {
     }
 
     /// Starts training a dataset; one run at a time, since each wants the card.
-    pub async fn start(self: &Arc<Self>, trainer: PathBuf, tokenizer: PathBuf, dataset_id: &str, name: &str, recipe: Recipe) -> Result<Run> {
+    /// `libraries` is where the CUDA runtime the trainer imports lives: the
+    /// engine's, fetched on its first start, so it is not downloaded twice.
+    pub async fn start(self: &Arc<Self>, libraries: Option<PathBuf>, tokenizer: PathBuf, dataset_id: &str, name: &str, recipe: Recipe) -> Result<Run> {
+        let trainer = self.trainer();
         if !self.pack_ready() {
             bail!("the training files are not downloaded yet");
         }
@@ -463,7 +518,7 @@ impl Training {
 
         let training = self.clone();
         tokio::spawn(async move {
-            let outcome = training.work(&trainer, &run_dir, &run_id, stages, cancel).await;
+            let outcome = training.work(&trainer, libraries.as_deref(), &run_dir, &run_id, stages, cancel).await;
             if let Ok(mut run) = training.run(&run_id) {
                 run.finished_at = Some(now());
                 match outcome {
@@ -485,7 +540,7 @@ impl Training {
     }
 
     /// Runs the stages in order; `Ok(false)` when cancelled.
-    async fn work(&self, trainer: &Path, run_dir: &Path, run_id: &str, stages: Vec<yue_train::TrainingStage>, cancel: Arc<tokio::sync::Notify>) -> Result<bool> {
+    async fn work(&self, trainer: &Path, libraries: Option<&Path>, run_dir: &Path, run_id: &str, stages: Vec<yue_train::TrainingStage>, cancel: Arc<tokio::sync::Notify>) -> Result<bool> {
         use tokio::io::AsyncWriteExt;
         let mut log = tokio::fs::OpenOptions::new().create(true).append(true).open(run_dir.join("run.log")).await?;
         for stage in stages {
@@ -503,6 +558,14 @@ impl Training {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
+            if let Some(libraries) = libraries {
+                let mut path = std::ffi::OsString::from(libraries.as_os_str());
+                if let Some(existing) = std::env::var_os("PATH") {
+                    path.push(";");
+                    path.push(existing);
+                }
+                command.env("PATH", path);
+            }
             #[cfg(windows)]
             command.creation_flags(0x0800_0000);
             let mut child = command.spawn().with_context(|| format!("start {}", trainer.display()))?;

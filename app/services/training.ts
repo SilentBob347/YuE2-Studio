@@ -62,7 +62,6 @@ export interface TrainingState {
   pack: PackFile[];
   pack_ready: boolean;
   download: { downloaded_bytes: number; total_bytes: number; done: boolean; error?: string | null } | null;
-  trainer_installed: boolean;
   datasets: Dataset[];
   runs: TrainingRun[];
   active: string | null;

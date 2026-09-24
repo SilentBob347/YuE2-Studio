@@ -1607,14 +1607,6 @@ async fn remove_song_version(
     Ok(Json(song))
 }
 
-/// Where the trainer lives: beside the engine in a packaged studio, or where
-/// `YUE_TRAIN_BIN` points in a developer build.
-fn trainer_executable() -> PathBuf {
-    env::var_os("YUE_TRAIN_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| engine_bundle_root().parent().map(|root| root.join("music-train")).unwrap_or_else(|| PathBuf::from("music-train")).join("music-train.exe"))
-}
-
 fn training_error(error: anyhow::Error) -> (StatusCode, Json<ApiError>) {
     api_error(StatusCode::BAD_REQUEST, format!("{error:#}"))
 }
@@ -1637,12 +1629,10 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
             value
         })
         .collect();
-    let trainer = trainer_executable();
     Json(serde_json::json!({
         "pack": training.pack_status(),
         "pack_ready": training.pack_ready(),
         "download": training.downloader().active_for(training::SCOPE).await,
-        "trainer_installed": trainer.is_file(),
         "datasets": training.datasets(),
         "runs": runs,
         "active": active,
@@ -1786,7 +1776,7 @@ async fn start_training(State(state): State<AppState>, Json(input): Json<StartTr
     free_the_card_for_the_engine(&state).await;
     state
         .training
-        .start(trainer_executable(), tokenizer, &input.dataset_id, &input.name, input.recipe)
+        .start(Some(engine_bundle_root()), tokenizer, &input.dataset_id, &input.name, input.recipe)
         .await
         .map(Json)
         .map_err(|error| api_error(StatusCode::CONFLICT, format!("{error:#}")))

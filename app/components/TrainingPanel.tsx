@@ -73,9 +73,6 @@ const PackCard: React.FC<{ state: TrainingState; onError: (message: string) => v
           </li>
         ))}
       </ul>
-      {!state.trainer_installed && (
-        <p className="mt-3 flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-300"><AlertTriangle size={13} className="mt-0.5 shrink-0" />{t('trainingTrainerMissing')}</p>
-      )}
       {download ? (
         <div className="mt-3">
           <div className="flex items-center justify-between text-xs text-zinc-500">
@@ -440,7 +437,7 @@ export const TrainingPanel: React.FC = () => {
   };
 
   if (!state) return <p className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 size={14} className="animate-spin" /></p>;
-  const ready = state.pack_ready && state.trainer_installed;
+  const ready = state.pack_ready;
   const blocker = !ready ? t('trainingNeedPack') : !dataset?.items.length ? t('trainingNeedSongs') : null;
 
   return (
