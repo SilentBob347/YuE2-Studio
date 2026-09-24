@@ -174,13 +174,16 @@ export function startBridge(): void {
   started = true;
   const connect = () => {
     const events = new EventSource(apiUrl('/mcp/window'));
+    // the service names this window first; a command for another window is not ours
+    let ours: number | null = null;
     events.onmessage = async (message) => {
-      let command: { id: string; command: string; args: Record<string, unknown> };
-      try {
-        command = JSON.parse(message.data);
-      } catch {
+      const data = JSON.parse(message.data) as { window: number; id?: string; command?: string; args?: Record<string, unknown> };
+      if (data.id === undefined) {
+        ours = data.window;
         return;
       }
+      if (data.window !== ours) return;
+      const command = data as { id: string; command: string; args: Record<string, unknown> };
       const handler = handlers.get(command.command) ?? builtIn[command.command];
       let body: { id: string; result?: unknown; error?: string };
       if (!handler) {
@@ -192,7 +195,7 @@ export function startBridge(): void {
           body = { id: command.id, error: problem instanceof Error ? problem.message : String(problem) };
         }
       }
-      await fetch(apiUrl('/mcp/window/result'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch(() => undefined);
+      await fetch(apiUrl('/mcp/window/result'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).catch((problem) => console.error('[ERROR] the MCP answer did not reach the studio:', problem));
     };
     // the service restarting closes the stream; the page subscribes again
     events.onerror = () => {

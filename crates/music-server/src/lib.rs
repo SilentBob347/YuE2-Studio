@@ -724,7 +724,8 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/training/datasets/{id}/items/{item}/audio", get(training_item_audio))
         .route("/v1/training/datasets/{id}/prepare", post(prepare::start))
         .route("/v1/lyrics/find", post(find_lyrics))
-        .route("/v1/videos", post(store_video))
+        // a clip of a long song is more than the router's 256 MB
+        .route("/v1/videos", post(store_video).layer(DefaultBodyLimit::max(TRAINING_UPLOAD_LIMIT)))
         .route("/v1/writing/guide", get(writing_guide))
         .route("/v1/writing/examples", get(writing_examples))
         .route("/v1/library/songs/{id}/files", get(library_song_files))
@@ -4714,7 +4715,7 @@ async fn store_video(Query(query): Query<VideoName>, body: axum::body::Bytes) ->
         path = folder.join(format!("{stem}-{number}.{extension}"));
         number += 1;
     }
-    std::fs::write(&path, &body).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("write {}: {error}", path.display())))?;
+    tokio::fs::write(&path, &body).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("write {}: {error}", path.display())))?;
     Ok(Json(serde_json::json!({ "path": path })))
 }
 

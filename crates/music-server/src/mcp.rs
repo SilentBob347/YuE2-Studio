@@ -10,12 +10,12 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::http::{header, Method, Request, StatusCode};
+use axum::http::{header, HeaderMap, Method, Request, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
@@ -173,7 +173,7 @@ async fn status_summary() -> Value {
     let running_activity: Vec<Value> = activity["activity"].as_array().into_iter().flatten().filter(|entry| entry["state"] == "running").cloned().collect();
     let active_run = training["runs"].as_array().into_iter().flatten().find(|run| Some(run["id"].as_str().unwrap_or_default()) == training["active"].as_str()).map(compact_run);
     json!({
-        "window_open": bridge().windows.load(Ordering::Relaxed) > 0,
+        "window_open": !open_windows().is_empty(),
         "song_jobs": jobs,
         "covers_and_karaoke": running_activity,
         "preparation": compact_preparation(&training["prepare"]),
@@ -224,7 +224,10 @@ async fn wait_for(args: &Value) -> Value {
 /// MCP tool annotations, from what each tool does.
 fn annotations(name: &str) -> Value {
     const READS: &[&str] = &["_get", "_status", "_list", "_catalog", "_files", "_logs", "_log", "_runtime", "_local_models", "_hf_files", "_search_hf", "_capabilities", "_system", "_state", "_read_page", "_screenshot"];
-    let read_only = READS.iter().any(|part| name.ends_with(part) || name.contains(&format!("{part}_"))) || name.starts_with("writing_") || name == "lyrics_find" || name == "cover_prompt_render" || name == "studio_wait" || name == "engine_presets_get";
+    // a verb that changes something outweighs a noun that reads
+    const CHANGES: &[&str] = &["install", "import", "remove", "delete", "refresh", "create", "update", "start", "cancel", "select", "download", "apply", "restart"];
+    let changes = CHANGES.iter().any(|verb| name.split('_').any(|word| word == *verb));
+    let read_only = !changes && (READS.iter().any(|part| name.ends_with(part) || name.contains(&format!("{part}_"))) || name.starts_with("writing_") || name == "lyrics_find" || name == "cover_prompt_render" || name == "studio_wait" || name == "engine_presets_get");
     let destructive = name.ends_with("_delete") || name.ends_with("_remove") || name == "processing_discard" || name.ends_with("_cancel") || name.contains("_cancel_");
     let title = name.replace('_', " ");
     json!({ "title": title, "readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": read_only || name.ends_with("_set") || name.contains("_select"), "openWorldHint": name.starts_with("openrouter_") || name.contains("_hf") || name == "lyrics_find" })
@@ -235,29 +238,57 @@ fn annotations(name: &str) -> Value {
 struct Bridge {
     commands: tokio::sync::broadcast::Sender<String>,
     pending: Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<Value, String>>>>,
-    windows: AtomicUsize,
+    /// The open windows, oldest first; a command goes to the newest only, so
+    /// a second window never runs it again.
+    windows: Mutex<Vec<u64>>,
     sequence: AtomicU64,
 }
 
 fn bridge() -> &'static Bridge {
     static BRIDGE: OnceLock<Bridge> = OnceLock::new();
-    BRIDGE.get_or_init(|| Bridge { commands: tokio::sync::broadcast::channel(64).0, pending: Mutex::new(HashMap::new()), windows: AtomicUsize::new(0), sequence: AtomicU64::new(0) })
+    BRIDGE.get_or_init(|| Bridge { commands: tokio::sync::broadcast::channel(64).0, pending: Mutex::new(HashMap::new()), windows: Mutex::new(Vec::new()), sequence: AtomicU64::new(0) })
 }
 
-/// Counts the window while its stream is open.
-struct Listening;
+fn open_windows() -> std::sync::MutexGuard<'static, Vec<u64>> {
+    bridge().windows.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Keeps the window on the list while its stream is open.
+struct Listening(u64);
 
 impl Drop for Listening {
     fn drop(&mut self) {
-        bridge().windows.fetch_sub(1, Ordering::Relaxed);
+        open_windows().retain(|window| *window != self.0);
     }
 }
 
-/// The stream of commands the studio's page executes.
-pub async fn window_events() -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
-    bridge().windows.fetch_add(1, Ordering::Relaxed);
+/// Only the studio's own page and local agents may drive it: a web page in
+/// the user's browser, or one rebinding a domain to this computer, sends its
+/// own origin and is refused.
+fn local_origin(headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else { return true };
+    let Ok(origin) = origin.to_str() else { return false };
+    let Some((scheme, rest)) = origin.split_once("://") else { return false };
+    let host = rest.split('/').next().unwrap_or_default();
+    let host = if host.starts_with('[') { host.split(']').next().map(|name| format!("{name}]")).unwrap_or_default() } else { host.split(':').next().unwrap_or_default().to_string() };
+    scheme == "tauri" || ["localhost", "127.0.0.1", "[::1]", "tauri.localhost"].contains(&host.as_str())
+}
+
+fn foreign_origin() -> Response {
+    (StatusCode::FORBIDDEN, "This studio answers only its own window and agents on this computer.").into_response()
+}
+
+/// The stream of commands the studio's page executes. Its first message
+/// names the window, so it knows the commands addressed to it.
+pub async fn window_events(headers: HeaderMap) -> Response {
+    if !local_origin(&headers) {
+        return foreign_origin();
+    }
+    let window = bridge().sequence.fetch_add(1, Ordering::Relaxed);
+    open_windows().push(window);
     let receiver = bridge().commands.subscribe();
-    let stream = futures_util::stream::unfold((receiver, Listening), |(mut receiver, listening)| async move {
+    let hello = futures_util::stream::once(async move { Ok::<Event, Infallible>(Event::default().data(json!({ "window": window }).to_string())) });
+    let commands = futures_util::stream::unfold((receiver, Listening(window)), |(mut receiver, listening)| async move {
         loop {
             match receiver.recv().await {
                 Ok(command) => return Some((Ok(Event::default().data(command)), (receiver, listening))),
@@ -266,7 +297,7 @@ pub async fn window_events() -> Sse<impl futures_util::Stream<Item = Result<Even
             }
         }
     });
-    Sse::new(stream).keep_alive(KeepAlive::default())
+    Sse::new(futures_util::StreamExt::chain(hello, commands)).keep_alive(KeepAlive::default()).into_response()
 }
 
 #[derive(serde::Deserialize)]
@@ -279,7 +310,10 @@ pub struct WindowAnswer {
 }
 
 /// The page's answer to one command.
-pub async fn window_result(Json(answer): Json<WindowAnswer>) -> StatusCode {
+pub async fn window_result(headers: HeaderMap, Json(answer): Json<WindowAnswer>) -> StatusCode {
+    if !local_origin(&headers) {
+        return StatusCode::FORBIDDEN;
+    }
     let waiting = bridge().pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).remove(&answer.id);
     match waiting {
         Some(sender) => {
@@ -294,13 +328,13 @@ pub async fn window_result(Json(answer): Json<WindowAnswer>) -> StatusCode {
 }
 
 async fn ask_window(command: &str, args: Value, seconds: u64) -> Result<Value, String> {
-    if bridge().windows.load(Ordering::Relaxed) == 0 {
+    let Some(window) = open_windows().last().copied() else {
         return Err("The studio's window is not open. Open YuE2 Studio and call the tool again; everything else works without it.".into());
-    }
+    };
     let id = format!("w{}", bridge().sequence.fetch_add(1, Ordering::Relaxed));
     let (sender, receiver) = tokio::sync::oneshot::channel();
     bridge().pending.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).insert(id.clone(), sender);
-    let _ = bridge().commands.send(json!({ "id": id, "command": command, "args": args }).to_string());
+    let _ = bridge().commands.send(json!({ "id": id, "window": window, "command": command, "args": args }).to_string());
     match tokio::time::timeout(Duration::from_secs(seconds), receiver).await {
         Ok(Ok(answer)) => answer,
         _ => {
@@ -604,7 +638,7 @@ fn tools() -> &'static [Tool] {
             },
             Tool {
                 name: "video_render",
-                description: "Render the open video editor's clip to MP4. It runs in the window and returns at once; video_get shows the progress, and export.saved names the file on this computer when it is done.",
+                description: "Render the open video editor's clip to MP4. It runs in the window and returns at once; video_get shows the progress; export.saved names the file on this computer when it is done, export.error says why it failed.",
                 schema: || object(json!({ "name": { "type": "string", "description": "file name, the song title by default" } }), &[]),
                 call: |args| window("video_render", args, 15),
             },
@@ -1360,7 +1394,7 @@ fn tools() -> &'static [Tool] {
                     "lyrics": { "type": "string", "enum": ["none", "missing", "all"] },
                     "style": { "type": "string", "enum": ["none", "missing", "all"] },
                     "language": { "type": "string", "description": "sung language code when known, e.g. ru" },
-                    "train": { "type": "object", "properties": { "name": { "type": "string" }, "recipe": { "type": "object" } } },
+                    "train": { "type": "object", "description": "not with writer agent: start the training once you have written the songs", "properties": { "name": { "type": "string" }, "recipe": { "type": "object" } } },
                     "writer": { "type": "string", "enum": ["studio", "agent"], "description": "agent: the studio finds, recognises and listens, and leaves the lyric layout and the styles to you - songs stay lyrics_state 'found' (lyrics as found, lyrics_source says from where) and style_state 'heard' (heard: genre, caption, bpm); write them with dataset_song_update, following writing_guide" }
                 }), &["dataset_id"]),
                 call: |args| post(format!("/v1/training/datasets/{}/prepare", segment(&text(args, "dataset_id")?)), body_without(args, &["dataset_id"])),
@@ -1412,18 +1446,20 @@ async fn call_route(call: Call) -> Result<(StatusCode, String), String> {
         Payload::Json(body) => builder.header(header::CONTENT_TYPE, "application/json").body(Body::from(body.to_string())),
         Payload::Form { fields, files } => {
             let boundary = format!("studio-mcp-{}", uuid::Uuid::now_v7().simple());
-            let mut body: Vec<u8> = Vec::new();
+            let mut parts: Vec<Part> = Vec::new();
             for (name, value) in fields {
-                body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n").as_bytes());
+                parts.push(Part::Text(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")));
             }
             for (name, path, file) in files {
-                let bytes = tokio::fs::read(&path).await.map_err(|error| format!("read {}: {error}", path.display()))?;
-                body.extend(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{}\"\r\nContent-Type: application/octet-stream\r\n\r\n", file.replace('"', "'")).as_bytes());
-                body.extend(bytes);
-                body.extend(b"\r\n");
+                if let Err(error) = tokio::fs::metadata(&path).await {
+                    return Err(format!("read {}: {error}", path.display()));
+                }
+                parts.push(Part::Text(format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{}\"\r\nContent-Type: application/octet-stream\r\n\r\n", file.replace('"', "'"))));
+                parts.push(Part::File(path));
+                parts.push(Part::Text("\r\n".into()));
             }
-            body.extend(format!("--{boundary}--\r\n").as_bytes());
-            builder.header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}")).body(Body::from(body))
+            parts.push(Part::Text(format!("--{boundary}--\r\n")));
+            builder.header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}")).body(Body::from_stream(streamed(parts)))
         }
     }
     .map_err(|error| error.to_string())?;
@@ -1438,6 +1474,40 @@ async fn call_route(call: Call) -> Result<(StatusCode, String), String> {
         text = if status.is_success() { "Done.".into() } else { status.to_string() };
     }
     Ok((status, text))
+}
+
+/// A piece of a multipart body: text, or a file read as it is sent.
+enum Part {
+    Text(String),
+    File(PathBuf),
+}
+
+/// The parts as a stream, a file a megabyte at a time: a folder of albums is
+/// sent without ever being held in memory whole.
+fn streamed(parts: Vec<Part>) -> impl futures_util::Stream<Item = std::io::Result<axum::body::Bytes>> {
+    futures_util::stream::unfold((parts.into_iter(), None::<tokio::fs::File>), |(mut parts, mut open)| async move {
+        loop {
+            if let Some(file) = open.as_mut() {
+                let mut chunk = vec![0u8; 1 << 20];
+                match tokio::io::AsyncReadExt::read(file, &mut chunk).await {
+                    Ok(0) => open = None,
+                    Ok(read) => {
+                        chunk.truncate(read);
+                        return Some((Ok(chunk.into()), (parts, open)));
+                    }
+                    Err(error) => return Some((Err(error), (parts, None))),
+                }
+                continue;
+            }
+            match parts.next()? {
+                Part::Text(text) => return Some((Ok(text.into()), (parts, None))),
+                Part::File(path) => match tokio::fs::File::open(&path).await {
+                    Ok(file) => open = Some(file),
+                    Err(error) => return Some((Err(error), (parts, None))),
+                },
+            }
+        }
+    })
 }
 
 /// Cuts an answer to what an agent reads in one go, and says how to get the rest.
@@ -1461,7 +1531,10 @@ fn rpc_error(id: Value, code: i64, message: String) -> Response {
     Json(json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })).into_response()
 }
 
-pub async fn handle(body: axum::body::Bytes) -> Response {
+pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
+    if !local_origin(&headers) {
+        return foreign_origin();
+    }
     let Ok(message) = serde_json::from_slice::<Value>(&body) else {
         return rpc_error(Value::Null, -32700, "Parse error".into());
     };
@@ -1605,10 +1678,44 @@ mod tests {
         assert_eq!(names, ["Artist/2020 - Album/01. Song.flac", "Artist/2020 - Album/01. Song.lrc"]);
     }
 
+    #[test]
+    fn a_tool_that_changes_something_is_not_read_only() {
+        for name in ["lora_install_catalog", "lora_import_files", "separator_runtime_install", "openrouter_catalog_refresh", "dataset_create"] {
+            assert_eq!(annotations(name)["readOnlyHint"], false, "{name}");
+        }
+        for name in ["lora_list", "training_status", "dataset_song_files", "ui_screenshot", "writing_guide"] {
+            assert_eq!(annotations(name)["readOnlyHint"], true, "{name}");
+        }
+    }
+
+    #[test]
+    fn only_local_pages_and_agents_may_drive_the_studio() {
+        let from = |origin: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ORIGIN, origin.parse().unwrap());
+            local_origin(&headers)
+        };
+        assert!(local_origin(&HeaderMap::new()), "an agent sends no origin");
+        assert!(from("http://127.0.0.1:3791") && from("http://localhost") && from("http://tauri.localhost") && from("tauri://localhost") && from("http://[::1]:8791"));
+        assert!(!from("https://example.com") && !from("http://127.0.0.1.evil.com") && !from("null"));
+    }
+
+    #[tokio::test]
+    async fn a_multipart_body_streams_its_files() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("song.flac");
+        std::fs::write(&path, vec![7u8; (1 << 20) + 5]).unwrap();
+        let parts = vec![Part::Text("head".into()), Part::File(path), Part::Text("tail".into())];
+        let chunks: Vec<axum::body::Bytes> = futures_util::StreamExt::collect::<Vec<_>>(streamed(parts)).await.into_iter().map(Result::unwrap).collect();
+        let whole: Vec<u8> = chunks.concat();
+        assert_eq!(whole.len(), 4 + (1 << 20) + 5 + 4);
+        assert!(whole.starts_with(b"head") && whole.ends_with(b"tail"));
+    }
+
     #[tokio::test]
     async fn the_server_introduces_itself_and_lists_its_tools() {
         let reply = |body: Value| async move {
-            let response = handle(axum::body::Bytes::from(body.to_string())).await;
+            let response = handle(HeaderMap::new(), axum::body::Bytes::from(body.to_string())).await;
             let bytes = axum::body::to_bytes(response.into_body(), 1 << 22).await.unwrap();
             serde_json::from_slice::<Value>(&bytes).unwrap()
         };

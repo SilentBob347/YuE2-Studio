@@ -95,7 +95,7 @@ writing guides (resources `studio://guide/<topic>`).
 1. `video_open` with a song id, `video_get` to see the presets and settings.
 2. `video_set`: preset, aspect ratio, colours, effects, text layers, karaoke lyrics,
    a background picture or video from a path. `video_seek` and `ui_screenshot` to look.
-3. `video_render`, then `video_get` until `export.saved` names the MP4.
+3. `video_render`, then `video_get` until `export.saved` names the MP4 (or `export.error` says why not).
 
 **Anything the tools do not cover**
 

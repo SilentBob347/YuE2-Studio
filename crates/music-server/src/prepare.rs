@@ -186,6 +186,10 @@ pub async fn start(
     if state.prepare.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().is_some_and(|running| !running.finished) {
         return Err(api_error(StatusCode::CONFLICT, "songs are already being prepared; wait for them or stop it".into()));
     }
+    // the agent writes after the preparation, so training cannot follow it
+    if request.writer == Writer::Agent && request.train.is_some() {
+        return Err(api_error(StatusCode::BAD_REQUEST, "with writer agent the songs are written after the preparation; start the training once they are, not with train".into()));
+    }
     let dataset = state.training.dataset(&id).map_err(crate::training_error)?;
     let chosen: Vec<String> = dataset.items.iter().filter(|item| request.items.as_ref().is_none_or(|ids| ids.contains(&item.id))).map(|item| item.id.clone()).collect();
     if chosen.is_empty() {
@@ -257,7 +261,7 @@ fn launch(state: &AppState, job: Job) -> anyhow::Result<PrepareStatus> {
         let _ = std::fs::remove_file(background.training.prepare_job_path());
         let clean = outcome.is_ok() && !cancelled && shared.lock().unwrap_or_else(|p| p.into_inner()).as_ref().is_some_and(|status| status.failures.is_empty());
         let train = background.prepare_train.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).take();
-        if let (true, Some(train)) = (clean, train) {
+        if let (true, Writer::Studio, Some(train)) = (clean, job.writer, train) {
             stage(&shared, "training", Vec::new());
             match crate::start_training_run(&background, &id, &train.name, train.recipe).await {
                 Ok(run) => update(&shared, |status| status.run = Some(run.id)),

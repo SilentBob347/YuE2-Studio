@@ -198,6 +198,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   // An export started by an agent goes to the studio's folder instead of a download
   const exportTargetRef = useRef<((blob: Blob) => Promise<void>) | null>(null);
   const [savedVideo, setSavedVideo] = useState<string | null>(null);
+  const [agentExportError, setAgentExportError] = useState<string | null>(null);
 
   // Config State
   const [config, setConfig] = useState<VisualizerConfig>({
@@ -630,7 +631,13 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       await renderOffline();
     } catch (error) {
       console.error('Rendering failed:', error);
-      alert('Video rendering failed. Please try again.');
+      // an agent's render reports to the agent, not to a dialog nobody watches
+      if (exportTargetRef.current) {
+        exportTargetRef.current = null;
+        setAgentExportError(error instanceof Error ? error.message : String(error));
+      } else {
+        alert('Video rendering failed. Please try again.');
+      }
       setIsExporting(false);
       setExportStage('idle');
     }
@@ -1177,7 +1184,11 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
       const target = exportTargetRef.current;
       if (target) {
         exportTargetRef.current = null;
-        await target(blob);
+        try {
+          await target(blob);
+        } catch (problem) {
+          setAgentExportError(problem instanceof Error ? problem.message : String(problem));
+        }
         await audioCtx.close().catch(() => undefined);
         setExportProgress(100);
         setIsExporting(false);
@@ -2249,7 +2260,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     background: { type: backgroundType, image: customImage ? 'set' : null, video: videoUrl || null },
     album_art: customAlbumArt ? 'set' : 'the song cover',
     playback: { playing: isPlaying, position_seconds: playbackTime, duration_seconds: playbackDuration },
-    export: { running: isExporting, progress: exportProgress, stage: exportStage, saved: savedVideo },
+    export: { running: isExporting, progress: exportProgress, stage: exportStage, saved: savedVideo, error: agentExportError },
   });
   const requireOpen = () => {
     if (!isOpen || !song) throw new Error('The video editor is closed; video_open opens it for a song.');
@@ -2301,6 +2312,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     requireOpen();
     if (isExporting) throw new Error('A render is already running; video_get shows its progress.');
     setSavedVideo(null);
+    setAgentExportError(null);
     exportTargetRef.current = async (blob: Blob) => {
       const file = `${String(name || song?.title || 'clip').replace(/[\\/:*?"<>|]+/g, '_')}.mp4`;
       const response = await fetch(apiUrl(`/v1/videos?name=${encodeURIComponent(file)}`), { method: 'POST', body: blob });
