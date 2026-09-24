@@ -190,6 +190,12 @@ if ($shipsTwoCudaBuilds) {
         if (-not (Test-Path $source)) { throw "ggml-cuda.dll is missing from the $($build.Folder) build." }
         Copy-Item $source $folder -Force
     }
+    # The CUDA 12 backend imports the CUDA runtime as a DLL, where CUDA 13's
+    # cudart.lib links it in: it goes beside the executable, where the loader
+    # resolves the backend's imports, as NVIDIA's redistribution terms allow.
+    $cudart = Join-Path $Cuda12Root 'bin\cudart64_12.dll'
+    if (-not (Test-Path $cudart)) { throw "cudart64_12.dll is missing from $Cuda12Root." }
+    Copy-Item $cudart $resolvedOutputDirectory -Force
     Remove-Item (Join-Path $resolvedOutputDirectory 'ggml-cuda.dll') -Force
 }
 
