@@ -1,5 +1,6 @@
 //! Processing a finished track: noise reduction, the Spectral Lifter, vocal
-//! naturalising and mastering to a reference, in that order.
+//! naturalising, the user's own VST3 plugins and mastering to a reference, in
+//! that order.
 //!
 //! A run never touches the track. It leaves a preview beside the library, to be
 //! heard against the original and then kept as a version or thrown away; a kept
@@ -22,6 +23,9 @@ pub struct ProcessRequest {
     pub lifter: Option<lifter::LifterSettings>,
     #[serde(default)]
     pub naturalize: Option<naturalize::NaturalizeSettings>,
+    /// VST3 plugins, run in order before mastering.
+    #[serde(default)]
+    pub vst: Option<Vec<crate::vst::VstSlot>>,
     #[serde(default)]
     pub master: Option<MasterSource>,
 }
@@ -46,6 +50,9 @@ impl ProcessRequest {
         }
         if self.naturalize.is_some() {
             stages.push("naturalize");
+        }
+        if self.vst.as_ref().is_some_and(|chain| chain.iter().any(|slot| slot.enabled)) {
+            stages.push("vst");
         }
         if self.master.is_some() {
             stages.push("master");
@@ -110,7 +117,13 @@ pub fn workspace_file(media: &Path, name: &str) -> Option<PathBuf> {
 }
 
 /// Runs the stages on `source`, calling `on_stage` as each begins.
-pub fn run(source: &Path, reference: Option<&Path>, request: &ProcessRequest, on_stage: impl Fn(&'static str)) -> Result<Stereo> {
+pub fn run(
+    source: &Path,
+    reference: Option<&Path>,
+    request: &ProcessRequest,
+    vst: Option<&crate::vst::VstHost>,
+    on_stage: impl Fn(&'static str),
+) -> Result<Stereo> {
     if request.stages().is_empty() {
         bail!("choose at least one kind of processing");
     }
@@ -126,6 +139,12 @@ pub fn run(source: &Path, reference: Option<&Path>, request: &ProcessRequest, on
     if let Some(settings) = &request.naturalize {
         on_stage("naturalize");
         audio = naturalize::naturalize(&audio, settings);
+    }
+    if let Some(chain) = request.vst.as_ref().filter(|chain| chain.iter().any(|slot| slot.enabled)) {
+        on_stage("vst");
+        let host = vst.context("the VST host is not installed")?;
+        let work = source.parent().context("the track has no folder")?.join("processing");
+        audio = host.process(&audio, chain, &work)?;
     }
     if request.master.is_some() {
         on_stage("master");
@@ -161,6 +180,15 @@ mod tests {
             serde_json::from_value(serde_json::json!({"lifter": {"shimmer_reduction_db": 3.0}, "master": {"type": "upload", "upload_id": "u"}})).unwrap();
         assert_eq!(parsed.stages(), vec!["lifter", "master"]);
         assert_eq!(parsed.lifter.unwrap().shimmer_reduction_db, 3.0);
+    }
+
+    #[test]
+    fn a_vst_chain_runs_before_mastering_only_with_a_plugin_on() {
+        let chain = |enabled| serde_json::json!([{ "path": "C:/x.vst3", "name": "X", "enabled": enabled }]);
+        let on: ProcessRequest = serde_json::from_value(serde_json::json!({ "vst": chain(true), "master": { "type": "upload", "upload_id": "u" } })).unwrap();
+        assert_eq!(on.stages(), vec!["vst", "master"]);
+        let off: ProcessRequest = serde_json::from_value(serde_json::json!({ "vst": chain(false) })).unwrap();
+        assert!(off.stages().is_empty());
     }
 
     #[test]

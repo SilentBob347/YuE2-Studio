@@ -1,5 +1,6 @@
 mod adapters;
 mod processing;
+mod vst;
 mod training;
 mod auto_title;
 mod tagging;
@@ -657,6 +658,9 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/library/songs/{id}/version", axum::routing::put(select_song_version))
         .route("/v1/library/songs/{id}/versions/{version}", axum::routing::delete(remove_song_version))
         .route("/v1/processing", get(read_processing))
+        .route("/v1/processing/vst", get(read_vst))
+        .route("/v1/processing/vst/scan", post(scan_vst))
+        .route("/v1/processing/vst/editor", post(open_vst_editor))
         .route("/v1/processing/preview", get(processing_preview))
         .route("/v1/processing/keep", post(keep_processing))
         .route("/v1/processing/discard", post(discard_processing))
@@ -1434,7 +1438,8 @@ async fn start_processing(
         let handle = tokio::runtime::Handle::current();
         let current = |run: &Option<processing::ProcessRun>| run.as_ref().is_some_and(|run| run.id == run_id);
         let outcome = (|| -> anyhow::Result<std::path::PathBuf> {
-            let audio = processing::run(&source, reference.as_deref(), &request, |stage| {
+            let vst = studio_data_root().and_then(|root| vst::VstHost::locate(&root));
+            let audio = processing::run(&source, reference.as_deref(), &request, vst.as_ref(), |stage| {
                 let state = background.clone();
                 let run_id = run_id.clone();
                 handle.spawn(async move {
@@ -1470,6 +1475,40 @@ async fn start_processing(
         });
     });
     Ok(Json(serde_json::json!({ "started": true })))
+}
+
+/// The VST host and the plugins its last scan found; `available` is false
+/// when the host did not ship with this build.
+async fn read_vst() -> Json<Value> {
+    let host = studio_data_root().and_then(|root| vst::VstHost::locate(&root));
+    Json(serde_json::json!({ "available": host.is_some(), "plugins": host.and_then(|host| host.plugins()) }))
+}
+
+async fn scan_vst() -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let host = studio_data_root()
+        .and_then(|root| vst::VstHost::locate(&root))
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "the VST host is not installed with this studio".into()))?;
+    let plugins = tokio::task::spawn_blocking(move || host.scan())
+        .await
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .map_err(|error| api_error(StatusCode::BAD_GATEWAY, format!("{error:#}")))?;
+    Ok(Json(serde_json::json!({ "available": true, "plugins": plugins })))
+}
+
+#[derive(Debug, Deserialize)]
+struct VstEditorRequest {
+    path: String,
+    #[serde(default)]
+    state_id: Option<String>,
+}
+
+/// Opens a plugin's window; the settings save into the slot's state when it closes.
+async fn open_vst_editor(Json(input): Json<VstEditorRequest>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let host = studio_data_root()
+        .and_then(|root| vst::VstHost::locate(&root))
+        .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "the VST host is not installed with this studio".into()))?;
+    let state_id = host.open_editor(&input.path, input.state_id).map_err(|error| api_error(StatusCode::BAD_REQUEST, format!("{error:#}")))?;
+    Ok(Json(serde_json::json!({ "state_id": state_id })))
 }
 
 async fn read_processing(State(state): State<AppState>) -> Json<Value> {
