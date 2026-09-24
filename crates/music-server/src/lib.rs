@@ -59,6 +59,12 @@ struct AppState {
     /// Owned local engine process, when this service started one.
     engine: Arc<tokio::sync::Mutex<Option<music_engine::yue_server::YueServerSupervisor>>>,
     engine_options: Arc<RwLock<EngineOptions>>,
+    /// Devices that failed under Auto in this session - the engine did not
+    /// start on them, or died with a CUDA or Vulkan error - and the one the
+    /// running engine computes on. Auto walks CUDA, Vulkan, the processor and
+    /// skips the failed; a restart of the studio tries them all again.
+    failed_devices: Arc<RwLock<Vec<music_engine::yue_server::ComputeBackend>>>,
+    active_device: Arc<RwLock<Option<music_engine::yue_server::ComputeBackend>>>,
     /// The CUDA libraries the engine binary imports. They are downloaded, not
     /// installed, so the engine cannot start until they are on disk.
     engine_runtime: Arc<engine_runtime::EngineRuntime>,
@@ -417,6 +423,28 @@ impl EngineOptions {
         self.max_batch.unwrap_or(1).max(1)
     }
 
+    /// The devices a start tries, in order. A device chosen in Settings is
+    /// the only one, whatever happens to it. Auto goes CUDA, Vulkan, the
+    /// processor: CUDA when one of its builds runs this card and driver,
+    /// Vulkan when there is a card, and the processor always, last.
+    fn device_chain(&self, failed: &[music_engine::yue_server::ComputeBackend]) -> Vec<music_engine::yue_server::ComputeBackend> {
+        use music_engine::yue_server::ComputeBackend;
+        if self.backend != ComputeBackend::Auto {
+            return vec![self.backend];
+        }
+        let hardware = hardware::hardware();
+        let mut chain = Vec::new();
+        if hardware.cuda.is_some() {
+            chain.push(ComputeBackend::Cuda);
+        }
+        if hardware.gpu_name.is_some() {
+            chain.push(ComputeBackend::Vulkan);
+        }
+        chain.retain(|device| !failed.contains(device));
+        chain.push(ComputeBackend::Cpu);
+        chain
+    }
+
     fn to_engine(self) -> music_engine::yue_server::YueServerOptions {
         music_engine::yue_server::YueServerOptions {
             backend: self.backend,
@@ -594,6 +622,8 @@ pub async fn serve() -> anyhow::Result<()> {
         engine: Arc::new(tokio::sync::Mutex::new(None)),
         engine_options: Arc::new(RwLock::new(persisted.as_ref().map(|settings| settings.engine_options).unwrap_or_default())),
         engine_runtime: Arc::new(engine_runtime::EngineRuntime::new(&engine_bundle_root())),
+        failed_devices: Arc::new(RwLock::new(Vec::new())),
+        active_device: Arc::new(RwLock::new(None)),
         assistant: Arc::new(RwLock::new(persisted.as_ref().map(|settings| settings.assistant.clone()).unwrap_or_default())),
         assistant_runtime: Arc::new(assistant_runtime::AssistantRuntime::new(
             &studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")),
@@ -754,6 +784,16 @@ pub async fn serve() -> anyhow::Result<()> {
                         // explains a log which suddenly starts again from
                         // "Listening on". Written once, not once a cycle.
                         music_engine::yue_server::note_in_log("the engine stopped answering; restarting it");
+                        // Under Auto a device that died of its own fault is
+                        // not tried again: the restart moves down the chain.
+                        let auto = state.engine_options.read().await.backend == music_engine::yue_server::ComputeBackend::Auto;
+                        let active = *state.active_device.read().await;
+                        if let Some(device) = active.filter(|device| auto && *device != music_engine::yue_server::ComputeBackend::Cpu) {
+                            if describes_device_failure(&last_run_log().to_lowercase()) {
+                                music_engine::yue_server::note_in_log(&format!("{} failed on this machine; leaving it for this session", device_name(device)));
+                                state.failed_devices.write().await.push(device);
+                            }
+                        }
                     }
                     match restart_engine(&state).await {
                         Ok(()) => complained = false,
@@ -3006,26 +3046,97 @@ async fn restart_engine(state: &AppState) -> Result<(), String> {
     if options.backend == music_engine::yue_server::ComputeBackend::Cuda && hardware::hardware().cuda.is_none() {
         return Err("CUDA was chosen, but this card or its driver runs neither CUDA build of the engine: it needs an NVIDIA card from the GTX 900 series on and driver 525 or newer. Update the NVIDIA driver, or choose Vulkan in Settings.".into());
     }
-    let cuda = options.cuda_build();
-    if !state.engine_runtime.is_ready(cuda) {
-        state
-            .engine_runtime
-            .install_missing(cuda)
-            .await
-            .map_err(|error| format!("the engine's runtime libraries could not be installed: {error}"))?;
+    let chain = options.device_chain(&state.failed_devices.read().await);
+    let mut last_error = String::new();
+    for (index, device) in chain.iter().copied().enumerate() {
+        let attempt = EngineOptions { backend: device, ..options };
+        let cuda = attempt.cuda_build();
+        if !state.engine_runtime.is_ready(cuda) {
+            state
+                .engine_runtime
+                .install_missing(cuda)
+                .await
+                .map_err(|error| format!("the engine's runtime libraries could not be installed: {error}"))?;
+        }
+        // The engine loads eleven gigabytes of weights the moment it starts.
+        // If the writing assistant is still holding the card, it does not finish.
+        free_the_card_for_the_engine(state).await;
+        let models = selected_engine_models(state).await?;
+        let config = engine_location(attempt)
+            .resolve(models)
+            .map_err(|error| format!("the local engine runtime was not found: {error}"))?;
+        let mut engine = music_engine::yue_server::YueServerSupervisor::new(config).map_err(|error| error.to_string())?;
+        match tokio::task::block_in_place(|| engine.ensure_started(std::time::Duration::from_secs(60))) {
+            Ok(_) => {
+                *supervisor = Some(engine);
+                *state.active_device.write().await = Some(device);
+                if options.backend == music_engine::yue_server::ComputeBackend::Auto {
+                    music_engine::yue_server::note_in_log(&format!("computing on {}", device_name(device)));
+                }
+                return Ok(());
+            }
+            Err(error) => {
+                last_error = format!("the local engine did not start: {error}");
+                // Only Auto moves on, and never past a card that ran out of
+                // memory: Vulkan has no more of it, and the reason is shown.
+                let next = chain.get(index + 1).copied();
+                let out_of_memory = describes_exhausted_memory(&last_run_log().to_lowercase());
+                match next {
+                    Some(next) if options.backend == music_engine::yue_server::ComputeBackend::Auto && !out_of_memory => {
+                        music_engine::yue_server::note_in_log(&format!(
+                            "{} did not start ({error}); trying {}",
+                            device_name(device),
+                            device_name(next)
+                        ));
+                        state.failed_devices.write().await.push(device);
+                    }
+                    _ => return Err(last_error),
+                }
+            }
+        }
     }
-    // The engine loads eleven gigabytes of weights the moment it starts. If
-    // the writing assistant is still holding the card, it does not finish.
-    free_the_card_for_the_engine(state).await;
-    let models = selected_engine_models(state).await?;
-    let config = engine_location(options)
-        .resolve(models)
-        .map_err(|error| format!("the local engine runtime was not found: {error}"))?;
-    let mut engine = music_engine::yue_server::YueServerSupervisor::new(config).map_err(|error| error.to_string())?;
-    tokio::task::block_in_place(|| engine.ensure_started(std::time::Duration::from_secs(60)))
-        .map_err(|error| format!("the local engine did not start: {error}"))?;
-    *supervisor = Some(engine);
-    Ok(())
+    Err(last_error)
+}
+
+/// The device's name as the settings show it.
+fn device_name(device: music_engine::yue_server::ComputeBackend) -> &'static str {
+    use music_engine::yue_server::ComputeBackend;
+    match device {
+        ComputeBackend::Auto => "Auto",
+        ComputeBackend::Cuda => "CUDA",
+        ComputeBackend::Vulkan => "Vulkan",
+        ComputeBackend::Cpu => "the processor",
+    }
+}
+
+/// The engine log since the last start, where the reason a run ended is.
+fn last_run_log() -> String {
+    let tail = music_engine::yue_server::startup_log_tail(400);
+    let start = tail.iter().rposition(|line| line.contains("---- starting")).unwrap_or(0);
+    tail[start..].join("\n")
+}
+
+/// Whether a lowercased engine log says the compute device itself failed -
+/// a CUDA or Vulkan error, a device lost, the engine's self-test - as opposed
+/// to running out of memory, which another device would not cure.
+fn describes_device_failure(log: &str) -> bool {
+    if describes_exhausted_memory(log) {
+        return false;
+    }
+    [
+        "cuda error",
+        "no kernel image",
+        "unsupported toolchain",
+        "ggml_cuda_compute_forward",
+        "fatal: self-test",
+        "_cuda_backend=",
+        "devicelost",
+        "device lost",
+        "vk::",
+        "ggml_vulkan: error",
+    ]
+    .iter()
+    .any(|marker| log.contains(marker))
 }
 
 /// Where the packaged or developer-built `yue-server` lives. Every value is
@@ -5847,6 +5958,30 @@ fn api_error(status: StatusCode, error: String) -> (StatusCode, Json<ApiError>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_device_failure_is_told_from_running_out_of_memory() {
+        let ptx = "[lm-kv] allocated 2 sets\nggml_cuda_compute_forward: get_rows failed\ncuda error: the provided ptx was compiled with an unsupported toolchain.";
+        assert!(describes_device_failure(ptx));
+        assert!(describes_device_failure("[load] fatal: self-test on vulkan0 failed (status -1, result nan, expected 132)"));
+        assert!(describes_device_failure("[load] fatal: yue_cuda_backend=c:\\x\\cuda13\\ggml-cuda.dll did not load"));
+        assert!(!describes_device_failure("cuda error: out of memory\ncudamalloc failed"));
+        assert!(!describes_device_failure("[load] self-test on cuda0: ok (1.2 ms)\n[server] listening on 127.0.0.1:18087"));
+    }
+
+    #[test]
+    fn a_device_chosen_in_settings_is_the_only_one_tried() {
+        use music_engine::yue_server::ComputeBackend;
+        for device in [ComputeBackend::Cuda, ComputeBackend::Vulkan, ComputeBackend::Cpu] {
+            let options = EngineOptions { backend: device, ..EngineOptions::default() };
+            assert_eq!(options.device_chain(&[device]), vec![device]);
+        }
+        // Auto always ends on the processor and never retries a failed device.
+        let auto = EngineOptions::default();
+        let chain = auto.device_chain(&[ComputeBackend::Cuda, ComputeBackend::Vulkan]);
+        assert_eq!(chain, vec![ComputeBackend::Cpu]);
+        assert_eq!(auto.device_chain(&[]).last(), Some(&ComputeBackend::Cpu));
+    }
 
     /// Every file the editor page loads has to be embedded; a missing
     /// WaveSurfer bundle left the editor blank in 1.0.0 to 1.0.3.
