@@ -44,6 +44,12 @@ connected and the address to paste.
   polling. It returns after at most 240 s with how far the work got; call it again.
 - **One heavy job holds the graphics card at a time.** While a LoRA trains no song is
   made; start training last.
+- **Answers are short by default**: a song job is its status and the songs it made, a
+  library song leaves out its audio codes, `lora_list` gives one line per LoRA. Pass
+  `response_format: detailed` when you need every field.
+- **Covers are drawn only with an image model set up** (`settings_get`, covers; an
+  OpenRouter key). Without one a `cover_prompt` is kept but no cover appears;
+  `cover_set_from_file` still works.
 - **Look ids up, never guess them**: `library_songs_list`, `training_status`,
   `dataset_get`, `lora_list`, `models_status`.
 - **Files on this computer are passed by path**: `dataset_add_folder`,
@@ -142,9 +148,10 @@ move around. Check the result with `ui_screenshot`.
 ## Tools by area
 
 - **studio**: status, wait, system, capabilities, open data folder; **settings** get/set.
-- **models**: status, catalog, download, select, cancel, remove; **engine**: options,
+- **models**: status, catalog, download, adopt (files already on disk), select, cancel,
+  remove; **engine**: options,
   restart, logs.
-- **song**: create, job get/list/cancel, replay; **score**: compose, transcribe, job
+- **song**: create, defaults (what a field left out becomes), job get/list/cancel, replay; **score**: compose, transcribe, job
   get/cancel.
 - **writing**: guide, examples; **assistant**: write, status, set, runtime, models;
   requests wait and answer (when you are the assistant).

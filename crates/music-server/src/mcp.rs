@@ -136,12 +136,70 @@ fn compact_preparation(prepare: &Value) -> Value {
     })
 }
 
+/// A song job as an agent follows it: where it is, what it made. The
+/// request's lyrics, score and audio codes are left to response_format detailed.
+fn compact_job(job: &Value) -> Value {
+    if !job.is_object() || job.get("error").is_some_and(|error| error.is_string()) && job.get("status").is_none() {
+        return job.clone();
+    }
+    let mut songs: Vec<Value> = job["songs"].as_array().into_iter().flatten().map(|song| json!({ "id": song["id"], "title": song["song"]["title"] })).collect();
+    if songs.is_empty() && job["song"].is_object() {
+        songs.push(json!({ "id": job["song"]["id"], "title": job["song"]["song"]["title"] }));
+    }
+    let settings = &job["generation_settings"];
+    json!({
+        "id": job["id"], "title": job["title"], "status": job["status"], "phase": job["phase"], "message": job["message"],
+        "duration_seconds": job["duration_seconds"], "seed": settings["seed"], "lm_seed": settings["lm_seed"],
+        "adapters": settings["adapters"], "songs": songs,
+    })
+}
+
+/// A library song without what only a re-render reads: its audio codes and
+/// the request they were made from, both large.
+fn compact_song(song: &Value) -> Value {
+    let mut song = song.clone();
+    if let Some(fields) = song.as_object_mut() {
+        let codes = fields.remove("audio_codes").is_some_and(|codes| !codes.is_null());
+        fields.remove("replay_request");
+        fields.insert("has_audio_codes".into(), codes.into());
+    }
+    song
+}
+
+/// A name or a description the catalogue gives in several languages, in English.
+fn english(value: &Value) -> Value {
+    if value.is_object() { value["en"].clone() } else { value.clone() }
+}
+
+/// The LoRA an agent picks from: installed ones with their slots and trigger,
+/// and the catalogue in one line each.
+fn compact_loras(loras: &Value) -> Value {
+    let installed: Vec<Value> = loras["installed"].as_array().into_iter().flatten().map(|lora| json!({
+        "id": lora["id"], "name": english(&lora["name"]), "kind": lora["kind"], "trigger": lora["trigger"],
+        "slots": lora["slots"], "scales": lora["scales"], "range": lora["range"], "error": lora["error"],
+    })).collect();
+    let catalog: Vec<Value> = loras["catalog"].as_array().into_iter().flatten().map(|lora| json!({
+        "id": lora["id"], "name": english(&lora["name"]), "kind": lora["kind"], "installed": lora["installed"],
+        "trigger": lora["trigger"], "slots": lora["slots"], "about": english(&lora["description"]),
+    })).collect();
+    json!({ "installed": installed, "catalog": catalog, "slots": loras["slots"], "download": loras["download"], "installing": loras["installing"] })
+}
+
 /// What an agent is answered: the parts it acts on, unless it asked for
 /// every field with response_format detailed.
 fn shape(name: &str, args: &Value, value: Value) -> Value {
     let detailed = args.get("response_format").and_then(Value::as_str) == Some("detailed");
     match name {
         "training_status" if !detailed => compact_training(&value),
+        "song_create" | "song_job_get" | "song_replay" if !detailed => compact_job(&value),
+        "song_jobs_list" if !detailed => Value::Array(value.as_array().into_iter().flatten().map(compact_job).collect()),
+        "library_song_get" if !detailed => compact_song(&value),
+        "lora_list" if !detailed => compact_loras(&value),
+        "training_checkpoint_install" | "lora_install_hf" | "lora_import_files" if value["slots"].as_array().is_some_and(Vec::is_empty) => {
+            let mut value = value;
+            value["slots"] = json!("not known yet: the engine reads them from the file; lora_list shows them");
+            value
+        }
         "dataset_get" => {
             let wanted = args.get("dataset_id").and_then(Value::as_str).unwrap_or_default();
             let Some(dataset) = value["datasets"].as_array().into_iter().flatten().find(|dataset| dataset["id"] == wanted).cloned() else {
@@ -182,7 +240,7 @@ async fn status_summary() -> Value {
     json!({
         "window_open": !open_windows().is_empty(),
         "assistant_requests_waiting": open_questions().len(),
-        "song_jobs": jobs,
+        "song_jobs": Value::Array(jobs.as_array().into_iter().flatten().map(compact_job).collect()),
         "covers_and_karaoke": running_activity,
         "preparation": compact_preparation(&training["prepare"]),
         "training": active_run,
@@ -204,6 +262,10 @@ async fn wait_for(args: &Value) -> Value {
                     state = fetch(&format!("/v1/scores/{}", segment(job))).await;
                 }
                 let status = state["status"].as_str().unwrap_or_default().to_string();
+                // a score job's state is its score; a song job's is summed up
+                if state.get("generation_settings").is_some() {
+                    state = compact_job(&state);
+                }
                 (["completed", "failed", "cancelled", "done", "error"].contains(&status.as_str()), state)
             }
             None => {
@@ -567,6 +629,18 @@ fn tools() -> &'static [Tool] {
                 call: |args| post("/setup/download".into(), args.clone()),
             },
             Tool {
+                name: "models_adopt",
+                description: "Take model files already on this computer instead of downloading them: every file of the catalogue found in the folder (by name, else by exact size) is linked into the studio's models. models_status shows the result.",
+                schema: || id_only("path", "folder with the model files"),
+                call: |args| post("/setup/adopt".into(), json!({ "path": text(args, "path")? })),
+            },
+            Tool {
+                name: "song_defaults",
+                description: "What the engine does with a song_create field left out: its default steps, guidance, duration and sampling, its version, and the weights it serves.",
+                schema: nothing,
+                call: |_| get("/v1/local-models/music".into()),
+            },
+            Tool {
                 name: "models_select",
                 description: "Use an installed model set (profile_id) or a custom mix of components (component_ids) for generation.",
                 schema: || object(json!({ "profile_id": { "type": "string" }, "component_ids": { "type": "array", "items": { "type": "string" } } }), &[]),
@@ -851,21 +925,21 @@ fn tools() -> &'static [Tool] {
                     "peak_clip": { "type": "integer", "description": "peak limiter, dB below full scale" },
                     "mp3_bitrate": { "type": "integer" },
                     "output_format": { "type": "string", "enum": ["mp3", "wav16", "wav24", "wav32"] },
-                    "cover_prompt": { "type": "string", "description": "What the cover should show" },
+                    "cover_prompt": { "type": "string", "description": "what the cover should show; it is drawn only when an image model is set up (settings_get, covers), else the song has no cover" },
                     "adapters": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "scales": { "type": "object", "description": "slot -> strength, e.g. {\"ar\": 1, \"nar\": 1}" } }, "required": ["id"] } }
                 }), &["style"]),
                 call: |args| post("/v1/music/jobs".into(), args.clone()),
             },
             Tool {
                 name: "song_job_get",
-                description: "A song job's status and progress; when completed it names the library song.",
-                schema: || id_only("job_id", "from song_create or song_replay"),
+                description: "A song job in short: status, phase, title, seeds, LoRA and, when completed, the library songs it made. response_format detailed gives the whole request.",
+                schema: || object(json!({ "job_id": { "type": "string", "description": "from song_create or song_replay" }, "response_format": { "type": "string", "enum": ["concise", "detailed"], "description": "detailed gives every field" } }), &["job_id"]),
                 call: |args| get(format!("/v1/music/jobs/{}", segment(&text(args, "job_id")?))),
             },
             Tool {
                 name: "song_jobs_list",
                 description: "Song jobs queued or running now.",
-                schema: nothing,
+                schema: || object(json!({ "response_format": { "type": "string", "enum": ["concise", "detailed"], "description": "detailed gives every field" } }), &[]),
                 call: |_| get("/v1/music/jobs".into()),
             },
             Tool {
@@ -960,8 +1034,8 @@ fn tools() -> &'static [Tool] {
             },
             Tool {
                 name: "library_song_get",
-                description: "One library song with its request, lyrics, score and settings.",
-                schema: || id_only("song_id", "library song id"),
+                description: "One library song with its style, lyrics, score, settings and metadata (derived: what it was made from). Its audio codes and replay request only with response_format detailed.",
+                schema: || object(json!({ "song_id": { "type": "string", "description": "library song id" }, "response_format": { "type": "string", "enum": ["concise", "detailed"], "description": "detailed gives every field" } }), &["song_id"]),
                 call: |args| get(format!("/v1/library/songs/{}", segment(&text(args, "song_id")?))),
             },
             Tool {
@@ -1075,8 +1149,8 @@ fn tools() -> &'static [Tool] {
             // ---------------------------------------------------------------- LoRA
             Tool {
                 name: "lora_list",
-                description: "Installed LoRA and the catalogue of ready ones: ids, names, trigger words, slots and default strengths, download progress.",
-                schema: nothing,
+                description: "Installed LoRA (id, name, trigger word, slots, default strengths) and the catalogue of ready ones in one line each, with download progress. Pass an installed id with a strength per slot in song_create adapters. response_format detailed gives every field in every language.",
+                schema: || object(json!({ "response_format": { "type": "string", "enum": ["concise", "detailed"], "description": "detailed gives every field" } }), &[]),
                 call: |_| get("/v1/adapters".into()),
             },
             Tool {
@@ -1981,6 +2055,31 @@ mod tests {
         let files = folder_files(&root.path().join("Artist")).unwrap();
         let names: Vec<&str> = files.iter().map(|(_, _, name)| name.as_str()).collect();
         assert_eq!(names, ["Artist/2020 - Album/01. Song.flac", "Artist/2020 - Album/01. Song.lrc"]);
+    }
+
+    #[test]
+    fn an_agent_is_answered_what_it_acts_on() {
+        let job = json!({
+            "id": "j", "title": "t", "status": "completed", "phase": "done", "message": "m", "duration_seconds": 60,
+            "lyrics": "[Verse 1]", "generation_settings": { "seed": 1, "lm_seed": 2, "lyrics": "[Verse 1]", "adapters": [{ "name": "a" }] },
+            "songs": [{ "id": "s", "audio_url": "/x", "song": { "title": "Song", "audio_codes": "1,2,3" } }],
+        });
+        let short = compact_job(&job);
+        assert_eq!(short["songs"], json!([{ "id": "s", "title": "Song" }]));
+        assert_eq!(short["seed"], 1);
+        assert!(!short.to_string().contains("[Verse 1]") && !short.to_string().contains("1,2,3"), "no lyrics, no codes");
+
+        let song = compact_song(&json!({ "id": "s", "lyrics": "[Verse 1]", "audio_codes": "1,2,3", "replay_request": { "x": 1 } }));
+        assert_eq!(song["has_audio_codes"], true);
+        assert!(song.get("audio_codes").is_none() && song.get("replay_request").is_none());
+
+        let loras = compact_loras(&json!({
+            "installed": [{ "id": "l", "name": "Mine", "trigger": "t", "slots": ["ar"], "scales": {}, "bytes": 5 }],
+            "catalog": [{ "id": "c", "name": { "en": "Pop", "ru": "Поп" }, "description": { "en": "Hooks", "ru": "Хуки" }, "installed": false, "slots": ["ar"] }],
+        }));
+        assert_eq!(loras["catalog"][0]["name"], "Pop");
+        assert_eq!(loras["catalog"][0]["about"], "Hooks");
+        assert!(loras["installed"][0].get("bytes").is_none());
     }
 
     #[test]

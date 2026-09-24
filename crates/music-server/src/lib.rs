@@ -4788,6 +4788,13 @@ async fn release_assistant_unless_kept(state: &AppState) {
     }
 }
 
+/// A path as other programs take it, without the `\\?\` prefix a
+/// canonical Windows path carries.
+fn plain_path(path: &std::path::Path) -> String {
+    let text = path.display().to_string();
+    text.strip_prefix(r"\\?\").map(str::to_string).unwrap_or(text)
+}
+
 /// Where a library song's files are, for an agent that reads or opens them.
 async fn library_song_files(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     let song = state
@@ -4795,10 +4802,10 @@ async fn library_song_files(State(state): State<AppState>, Path(id): Path<String
         .get_song(&id)
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
         .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
-    let stems: Vec<Value> = stems_on_disk(&state, &id).into_iter().map(|stem| serde_json::json!({ "stem": stem, "path": stem_path(&state, &id, &stem) })).collect();
+    let stems: Vec<Value> = stems_on_disk(&state, &id).into_iter().map(|stem| serde_json::json!({ "stem": stem, "path": plain_path(&stem_path(&state, &id, &stem)) })).collect();
     Ok(Json(serde_json::json!({
-        "audio": state.library.media_path_for_song(&song),
-        "cover": state.library.cover_path_for_song(&song).map(|(path, _)| path),
+        "audio": state.library.media_path_for_song(&song).map(|path| plain_path(&path)),
+        "cover": state.library.cover_path_for_song(&song).map(|(path, _)| plain_path(&path)),
         "stems": stems,
     })))
 }
@@ -4807,7 +4814,7 @@ async fn library_song_files(State(state): State<AppState>, Path(id): Path<String
 async fn dataset_song_files(State(state): State<AppState>, Path((id, item)): Path<(String, String)>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     let audio = state.training.item_audio(&id, &item).map_err(training_error)?;
     let vocals = state.training.item_vocals(&id, &item).map_err(training_error)?;
-    Ok(Json(serde_json::json!({ "audio": audio, "vocals": vocals.is_file().then_some(vocals) })))
+    Ok(Json(serde_json::json!({ "audio": plain_path(&audio), "vocals": vocals.is_file().then(|| plain_path(&vocals)) })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -4857,7 +4864,7 @@ async fn store_video(Query(query): Query<VideoName>, body: axum::body::Bytes) ->
         number += 1;
     }
     tokio::fs::write(&path, &body).await.map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("write {}: {error}", path.display())))?;
-    Ok(Json(serde_json::json!({ "path": path })))
+    Ok(Json(serde_json::json!({ "path": plain_path(&path) })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -4958,16 +4965,22 @@ async fn setup_remove(
 /// they are gigabytes each. This opens a folder picker,
 /// looks for the files the catalogue names - by name, then by matching size -
 /// and hard-links or copies them into the studio's own model directory.
-async fn setup_adopt(State(state): State<AppState>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+async fn setup_adopt(State(state): State<AppState>, body: axum::body::Bytes) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     let Some(models_root) = studio_data_root().map(|root| root.join("models").join(model_manager::ENGINE_ID)) else {
         return Err(api_error(StatusCode::INTERNAL_SERVER_ERROR, "the studio has no data directory".into()));
     };
     let catalog = state.model_manager.catalog();
-    let picked = tokio::task::spawn_blocking(move || {
-        rfd::FileDialog::new().set_title("Folder with YuE2 models").pick_folder()
-    })
-    .await
-    .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    // a folder an agent names is taken as it is; the window asks the user
+    let named = serde_json::from_slice::<Value>(&body).ok().and_then(|value| value.get("path").and_then(Value::as_str).map(std::path::PathBuf::from));
+    let picked = match named {
+        Some(folder) => Some(folder),
+        None => tokio::task::spawn_blocking(move || {
+            rfd::FileDialog::new().set_title("Folder with YuE2 models").pick_folder()
+        })
+        .await
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?,
+    };
+
     let Some(folder) = picked else {
         return Ok(Json(serde_json::json!({ "picked": false, "adopted": [] })));
     };
