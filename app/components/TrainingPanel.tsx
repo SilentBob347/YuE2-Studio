@@ -182,8 +182,11 @@ const RecipeForm: React.FC<{ recipe: Recipe; defaults: Recipe; fields: RecipeFie
 };
 
 function useStrings() {
-  const { t } = useI18n();
-  return { t, tt: t as unknown as (key: string) => string };
+  const { t, language } = useI18n();
+  const tt = t as unknown as (key: string) => string;
+  // "1 song", "3 песни", "61 песня": the form each language asks for
+  const songs = (count: number) => tt(`trainingSongs_${new Intl.PluralRules(language).select(count)}`).replace('{count}', String(count));
+  return { t, tt, songs };
 }
 
 const errorText = (problem: unknown) => (problem instanceof Error ? problem.message : String(problem));
@@ -478,7 +481,7 @@ const SongEditor: React.FC<{
         <div className="flex flex-wrap items-start gap-2">
           <p className={`min-w-0 flex-1 text-xs ${state.kind === 'working' ? 'text-pink-600 dark:text-pink-300' : state.kind === 'queued' ? 'text-zinc-500' : 'text-amber-600 dark:text-amber-300'}`}>{state.text}</p>
           {(state.kind === 'failed' || state.kind === 'missing') && (
-            <button type="button" onClick={() => onPrepare({ items: [item.id], lyrics: 'missing', style: 'missing' })} disabled={jobBusy} className={OUTLINE}>
+            <button type="button" onClick={() => onPrepare({ items: [item.id], lyrics: 'missing', style: 'missing' })} disabled={jobBusy} title={jobBusy ? t('trainingRedoBusy') : undefined} className={OUTLINE}>
               <RotateCcw size={13} />{t(state.kind === 'failed' ? 'trainingRetrySong' : 'trainingFinishSong')}
             </button>
           )}
@@ -499,7 +502,7 @@ const SongEditor: React.FC<{
         <span className="flex items-center justify-between gap-2">
           <span className={LABEL}>{styleKind === 'caption' ? t('trainingCaption') : t('trainingStyle')}</span>
           {listenReady ? (
-            <button type="button" onClick={() => onPrepare({ items: [item.id], lyrics: 'none', style: 'all' })} disabled={jobBusy} className={redo}><Headphones size={12} />{t('trainingListenAgain')}</button>
+            <button type="button" onClick={() => onPrepare({ items: [item.id], lyrics: 'none', style: 'all' })} disabled={jobBusy} title={jobBusy ? t('trainingRedoBusy') : undefined} className={redo}><Headphones size={12} />{t('trainingListenAgain')}</button>
           ) : styleKind === 'caption' ? (
             <button type="button" onClick={onDescribe} disabled={describing} className={redo}>{describing ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}{t('trainingDescribe')}</button>
           ) : null}
@@ -518,7 +521,7 @@ const SongEditor: React.FC<{
               {t('trainingLyrics')}
               {item.lyrics_source && <span className="ml-2 normal-case tracking-normal text-zinc-400">{item.lyrics_source === 'recognised' ? t('trainingLyricsRecognised') : t('trainingLyricsFrom').replace('{source}', item.lyrics_source)}</span>}
             </span>
-            <button type="button" onClick={() => onPrepare({ items: [item.id], lyrics: 'all', style: 'none' })} disabled={jobBusy} className={redo}><Mic2 size={12} />{t('trainingRecogniseAgain')}</button>
+            <button type="button" onClick={() => onPrepare({ items: [item.id], lyrics: 'all', style: 'none' })} disabled={jobBusy} title={jobBusy ? t('trainingRedoBusy') : undefined} className={redo}><Mic2 size={12} />{t('trainingRecogniseAgain')}</button>
           </span>
           <textarea value={lyrics} disabled={working} onChange={event => setLyrics(event.target.value)} onBlur={() => lyrics !== item.lyrics && save({ lyrics })} rows={14} className={`${CONTROL} mt-1 font-mono text-xs`} />
         </label>
@@ -542,7 +545,7 @@ const SongsStep: React.FC<{
   onRefresh: () => void;
   onError: (message: string) => void;
 }> = ({ state, dataset, job, adding, onAdd, onAddLibrary, onPrepare, onNext, onTrainAfter, onChanged, onRefresh, onError }) => {
-  const { t, tt } = useStrings();
+  const { t, tt, songs } = useStrings();
   const [open, setOpen] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [describing, setDescribing] = useState<string[]>([]);
@@ -610,7 +613,7 @@ const SongsStep: React.FC<{
                     : tt('trainingJob_job')
                   : t('trainingReadyCount').replace('{ready}', String(ready)).replace('{count}', String(dataset.items.length))}
             </p>
-            <p className="text-[11px] text-zinc-500">{t('trainingSongsTotal').replace('{count}', String(dataset.items.length)).replace('{time}', clock(total))}</p>
+            <p className="text-[11px] text-zinc-500">{t('trainingSongsTotal').replace('{songs}', songs(dataset.items.length)).replace('{time}', clock(total))}</p>
           </div>
           {working && <button type="button" onClick={() => void cancelPrepare().then(onRefresh)} className={OUTLINE}><X size={13} />{t('trainingStop')}</button>}
           {!working && !adding && ready < dataset.items.length && (
@@ -704,7 +707,7 @@ const SongsStep: React.FC<{
 
 /** Step two: what will be trained, checked, and the button that starts it. */
 const TrainStep: React.FC<{ state: TrainingState; dataset: Dataset; job: PrepareStatus | null; onBack: () => void; onStarted: () => void; onChanged: (dataset: Dataset) => void; onRefresh: () => void; onError: (message: string) => void }> = ({ state, dataset, job, onBack, onStarted, onChanged, onRefresh, onError }) => {
-  const { t } = useStrings();
+  const { t, songs } = useStrings();
   const [advanced, setAdvanced] = useState(false);
   const [recipe, setRecipe] = useState<Recipe | null>(null);
   const [starting, setStarting] = useState(false);
@@ -743,7 +746,7 @@ const TrainStep: React.FC<{ state: TrainingState; dataset: Dataset; job: Prepare
           </label>
         </div>
         <ul className="mt-4 space-y-1.5">
-          {check(dataset.items.length > 0, t('trainingSongsTotal').replace('{count}', String(dataset.items.length)).replace('{time}', clock(total)))}
+          {check(dataset.items.length > 0, t('trainingSongsTotal').replace('{songs}', songs(dataset.items.length)).replace('{time}', clock(total)))}
           {check(unsung === 0, unsung ? t('trainingNeedLyrics').replace('{count}', String(unsung)) : t('trainingCheckLyrics'))}
           {check(unstyled === 0, unstyled ? t('trainingNeedStyle').replace('{count}', String(unstyled)) : t('trainingCheckStyle'))}
         </ul>
@@ -776,7 +779,7 @@ const TrainStep: React.FC<{ state: TrainingState; dataset: Dataset; job: Prepare
 
 /** The datasets as cards, and the drop zone that makes a new one. */
 const DatasetList: React.FC<{ state: TrainingState; busy: boolean; onOpen: (id: string) => void; onNew: (files: PickedFile[]) => void; onImport: (files: File[]) => void; importing: boolean }> = ({ state, busy, onOpen, onNew, onImport, importing }) => {
-  const { t } = useStrings();
+  const { t, songs } = useStrings();
   const importPicker = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     importPicker.current?.setAttribute('webkitdirectory', '');
@@ -803,7 +806,7 @@ const DatasetList: React.FC<{ state: TrainingState; busy: boolean; onOpen: (id: 
           return (
             <button key={dataset.id} type="button" onClick={() => onOpen(dataset.id)} className={`${CARD} text-left transition-colors hover:border-pink-400/60`}>
               <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{dataset.name}</p>
-              <p className="mt-1 text-xs text-zinc-500">{t('trainingCardSongs').replace('{count}', String(dataset.items.length)).replace('{minutes}', String(minutes))}</p>
+              <p className="mt-1 text-xs text-zinc-500">{t('trainingCardSongs').replace('{songs}', songs(dataset.items.length)).replace('{minutes}', String(minutes))}</p>
               <p className="mt-2 flex items-center gap-1.5 text-xs">
                 {preparing ? <><Loader2 size={12} className="animate-spin text-pink-500" /><span className="text-pink-600 dark:text-pink-300">{t('trainingCardPreparing')}</span></>
                   : training ? <><Loader2 size={12} className="animate-spin text-pink-500" /><span className="text-pink-600 dark:text-pink-300">{t('trainingCardTraining')}</span></>
