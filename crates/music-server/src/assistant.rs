@@ -362,14 +362,29 @@ pub fn cyrillic_homoglyphs(text: &str) -> String {
 /// its lines go in numbered and what comes back is where each section starts
 /// and what it is. The studio puts the sheet's own lines under the tags, so no
 /// word can be changed, dropped or merged, whatever the model.
-pub const SHEET_SECTIONS_PROMPT: &str = r#"You mark the sections of a published lyric sheet. Its lines are numbered. Do not rewrite anything; answer only which lines form each section, in order. A block of lines that returns is a chorus, every time it is sung; the blocks between choruses are verses; a block sung once that is neither is a bridge; a block that leads into the chorus every time is a pre-chorus; lines before the first verse are the intro and after the last chorus the outro. Every line belongs to exactly one section: the first section starts at line 1, each next one starts right after the previous one ends, and the last ends at the last line.
+pub const SHEET_SECTIONS_PROMPT: &str = r#"You mark the sections of a published lyric sheet. Its lines are numbered. Do not rewrite anything; answer only which lines form each section, in order. A line marked [xN] is sung N times in the song: a block of such lines is the chorus, marked every time it returns, and the lines between two choruses are one verse, not several. A block of lines that returns is a chorus, every time it is sung; the blocks between choruses are verses; a block sung once that is neither is a bridge; a block that leads into the chorus every time is a pre-chorus; lines before the first verse are the intro and after the last chorus the outro. Every line belongs to exactly one section: the first section starts at line 1, each next one starts right after the previous one ends, and the last ends at the last line.
 Answer with ONLY a JSON object: {"sections": [{"kind": "verse", "from": 1, "to": 4}, {"kind": "chorus", "from": 5, "to": 8}]}, where kind is one of intro, verse, pre-chorus, chorus, bridge, outro."#;
 
 const SECTION_KINDS: [&str; 6] = ["intro", "verse", "pre-chorus", "chorus", "bridge", "outro"];
 
 /// The sheet's lines as the model reads them: "1. first line".
 pub fn numbered_lines(lines: &[&str]) -> String {
-    lines.iter().enumerate().map(|(index, line)| format!("{}. {line}", index + 1)).collect::<Vec<_>>().join("\n")
+    // a small model does not see a returning block in a plain list; each line
+    // sung more than once says how many times, so the chorus stands out
+    let key = |line: &str| line.to_lowercase().replace('ё', "е").chars().filter(|c| c.is_alphanumeric() || c.is_whitespace()).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for line in lines {
+        *counts.entry(key(line)).or_default() += 1;
+    }
+    lines
+        .iter()
+        .enumerate()
+        .map(|(index, line)| match counts[&key(line)] {
+            1 => format!("{}. {line}", index + 1),
+            times => format!("{}. {line} [x{times}]", index + 1),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The answer the model is held to when it runs locally.
@@ -564,6 +579,7 @@ mod tests {
         );
         assert_eq!(sheet_in_sections(r#"{"sections": []}"#, &lines), None);
         assert_eq!(numbered_lines(&lines[..2]), "1. Шёл я как-то по лесу,\n2. Шёл по грибы");
+        assert_eq!(numbered_lines(&["Ой, да!", "Куплет", "ой да"]), "1. Ой, да! [x2]\n2. Куплет\n3. ой да [x2]");
     }
 
     fn request(target: AssistTarget) -> AssistRequest {
