@@ -12,6 +12,8 @@ import { ScoreView } from './ScoreView';
 import { composeScore, transcribe } from '../services/transcription';
 import { profileLabel as setLabel } from '../services/modelCatalog';
 import { REQUEST_FILE_ACCEPT, parseRequestFile, requestFileTitle, serializeRequest, type RequestFileFormat } from '../services/requestFile';
+import { AdapterPicker } from './AdapterPicker';
+import { usesFromSettings, type AdapterUse } from '../services/adapters';
 
 /**
  * The YuE2 request form.
@@ -274,6 +276,17 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [assistDraft, setAssistDraft] = useState('');
   const [assistSeconds, setAssistSeconds] = useState(0);
   const [coverPrompt, setCoverPrompt] = useState('');
+  const [adapters, setAdapters] = useState<AdapterUse[]>([]);
+
+  // A picked LoRA's trigger word leads the style; removing the LoRA takes it out again.
+  const applyTrigger = useCallback((word: string, present: boolean) => {
+    setStyle(current => {
+      const parts = current.split(',').map(part => part.trim()).filter(Boolean);
+      const has = parts.some(part => part.toLowerCase() === word.toLowerCase());
+      if (present) return has ? current : [word, ...parts].join(', ');
+      return has ? parts.filter(part => part.toLowerCase() !== word.toLowerCase()).join(', ') : current;
+    });
+  }, []);
   const [activity, setActivity] = useState<Array<{ song_id: string; title: string; kind: string; state: string; detail?: string }>>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [mode, setMode] = useState<'studio' | 'simple' | 'cover'>('studio');
@@ -413,6 +426,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setPeakClip(asText(request.peak_clip));
     if (request.mp3_bitrate !== undefined) setMp3Bitrate(asText(request.mp3_bitrate));
     if (typeof request.output_format === 'string') setFormat(request.output_format as YueOutputFormat);
+    if (Array.isArray(request.adapters)) setAdapters(usesFromSettings(request));
     setError(null);
   }, []);
 
@@ -421,6 +435,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     const song = initialData.song;
     const settings = (song.generationParams ?? {}) as Record<string, unknown>;
     applyRequest({ style: song.style, lyrics: song.lyrics, ...settings }, song.title || '');
+    // A song made without LoRA reuses without it, whatever was picked before.
+    setAdapters(usesFromSettings(settings));
     setMode('studio');
   }, [initialData, applyRequest]);
 
@@ -467,6 +483,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setName(''); setStyle(''); setLyrics(''); setAbc(''); setCot('');
     resetParameters();
     setCoverPrompt('');
+    setAdapters([]);
     setError(null);
   };
 
@@ -523,6 +540,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     if (bitrate !== undefined && format === 'mp3') request.mp3_bitrate = bitrate;
     if (name.trim()) request.title = name.trim();
     if (coverPrompt.trim()) request.cover_prompt = coverPrompt.trim();
+    if (adapters.length > 0) request.adapters = adapters;
     return request;
   };
 
@@ -1156,6 +1174,14 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
               </>
             )}
           </Card>
+
+          <AdapterPicker
+            value={adapters}
+            onChange={setAdapters}
+            onTrigger={applyTrigger}
+            iconClass={ICON}
+            frame={(title, icon, actions, body) => <Card title={title} icon={icon} actions={actions}>{body}</Card>}
+          />
 
           <Card
             title={t('quality')}

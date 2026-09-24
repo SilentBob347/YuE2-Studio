@@ -35,7 +35,24 @@ pub struct YueModelFiles {
     pub vae: PathBuf,
     /// SheetSage2; without it the engine has no `/transcribe` route.
     pub transcriber: Option<PathBuf>,
+    /// The folder of adapters requests may name; without it they name none.
+    pub adapters: Option<PathBuf>,
 }
+
+/// A part of the model an adapter can change, with its own strength.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct AdapterSlot {
+    /// The engine's name for the part, its flag in `/props` and the prefix of
+    /// its `<id>_scale` request field.
+    pub id: &'static str,
+    /// What changing that part does to a song, for the interface to name.
+    pub role: &'static str,
+}
+
+/// YuE2's two halves share no weight: the autoregressive half writes the score
+/// and the semantic codes, the flow-matching half renders the sound.
+pub const ADAPTER_SLOTS: &[AdapterSlot] =
+    &[AdapterSlot { id: "ar", role: "composition" }, AdapterSlot { id: "nar", role: "sound" }];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct YueServerLaunchConfig {
@@ -166,6 +183,7 @@ impl YueServerLocation {
                 .transcriber
                 .map(|path| canonical_file(&path, "SheetSage2 transcriber"))
                 .transpose()?,
+            adapters: models.adapters.map(|path| canonical_directory(&path, "adapter folder")).transpose()?,
         };
         let host = self.host.unwrap_or_else(|| DEFAULT_HOST.into());
         validate_loopback_host(&host)?;
@@ -184,6 +202,10 @@ impl YueServerLaunchConfig {
         if let Some(transcriber) = &self.models.transcriber {
             arguments.push("--transcriber".into());
             arguments.push(strip_verbatim(transcriber).into());
+        }
+        if let Some(adapters) = &self.models.adapters {
+            arguments.push("--adapters".into());
+            arguments.push(strip_verbatim(adapters).into());
         }
         arguments.extend(["--host".into(), self.host.clone().into(), "--port".into(), self.port.to_string().into()]);
         arguments.extend(self.options.arguments().into_iter().map(Into::into));
@@ -514,6 +536,7 @@ mod tests {
         for name in ["b.gguf", "v.gguf", "t.gguf"] {
             fs::write(root.join(name), b"gguf").unwrap();
         }
+        fs::create_dir_all(root.join("adapters")).unwrap();
         let config = YueServerLocation {
             bundle_root: root.clone(),
             configured_executable: None,
@@ -521,7 +544,12 @@ mod tests {
             port: None,
             options: YueServerOptions { keep_loaded: true, max_batch: Some(2), ..Default::default() },
         }
-        .resolve(YueModelFiles { backbone: root.join("b.gguf"), vae: root.join("v.gguf"), transcriber: Some(root.join("t.gguf")) })
+        .resolve(YueModelFiles {
+            backbone: root.join("b.gguf"),
+            vae: root.join("v.gguf"),
+            transcriber: Some(root.join("t.gguf")),
+            adapters: Some(root.join("adapters")),
+        })
         .unwrap();
         assert_eq!(config.port, DEFAULT_PORT);
         let arguments: Vec<String> = config.arguments().iter().map(|value| value.to_string_lossy().into_owned()).collect();
@@ -529,6 +557,7 @@ mod tests {
         assert!(arguments[flag("--model") + 1].ends_with("b.gguf"));
         assert!(arguments[flag("--vae") + 1].ends_with("v.gguf"));
         assert!(arguments[flag("--transcriber") + 1].ends_with("t.gguf"));
+        assert!(arguments[flag("--adapters") + 1].ends_with("adapters"));
         assert_eq!(arguments[flag("--port") + 1], DEFAULT_PORT.to_string());
         assert!(arguments.contains(&"--keep-loaded".to_string()));
         assert_eq!(arguments[flag("--max-batch") + 1], "2");
@@ -567,7 +596,12 @@ mod tests {
             port: None,
             options: YueServerOptions::default(),
         }
-        .resolve(YueModelFiles { backbone: root.join("absent.gguf"), vae: root.join("absent.gguf"), transcriber: None });
+        .resolve(YueModelFiles {
+            backbone: root.join("absent.gguf"),
+            vae: root.join("absent.gguf"),
+            transcriber: None,
+            adapters: None,
+        });
         assert!(result.unwrap_err().to_string().contains("backbone"));
         fs::remove_dir_all(root).unwrap();
     }

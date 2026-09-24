@@ -1,6 +1,6 @@
 {
-  "repository": "https://github.com/ServeurpersoCom/yue2.cpp.git",
-  "commit": "ea07706f4958a9594f4ef1dd185e5ce1b5ab1175",
+  "repository": "https://github.com/timoncool/yue2.cpp.git",
+  "commit": "55bdb93cff1b993945a2616212afa431b9e8c878",
   "license": "MIT",
   "build": {
     "windows": "buildcuda.cmd",

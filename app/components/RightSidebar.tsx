@@ -11,6 +11,7 @@ import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
 import { openStems } from '../services/openStems';
 import { ScoreView } from './ScoreView';
+import { localized, useAdapterLibrary, usesFromSettings } from '../services/adapters';
 
 interface RightSidebarProps {
     song: Song | null;
@@ -83,7 +84,8 @@ const KaraokeAction: React.FC<{ song: Song; onDone?: (lrc: string) => void }> = 
 
 export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpenCoverRegen, onReuse, onReplayMusic, onSongUpdate, onNavigateToProfile, onNavigateToSong, isLiked, onToggleLike, onDelete, onAddToPlaylist, onPlay, isPlaying, currentSong }) => {
     const { user } = useAuth();
-    const { t } = useI18n();
+    const { t, language } = useI18n();
+    const adapterLibrary = useAdapterLibrary();
     const [showMenu, setShowMenu] = useState(false);
     const [isOwner, setIsOwner] = useState(false);
     const [tagsExpanded, setTagsExpanded] = useState(false);
@@ -581,6 +583,18 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                             [t('mp3Bitrate'), p.output_format === 'mp3' && p.mp3_bitrate ? `${p.mp3_bitrate} kbps` : undefined],
                             [t('peakClipLabel'), p.peak_clip],
                         ];
+                        // The LoRA the song was made with, each with its strength per part of the model.
+                        const uses = usesFromSettings(p);
+                        const tr = t as unknown as (key: string) => string;
+                        uses.forEach((use, index) => {
+                            const adapter = adapterLibrary.installed.find(entry => entry.id === use.id);
+                            const strengths = Object.entries(use.scales).map(([slot, scale]) => {
+                                const role = adapterLibrary.slots.find(entry => entry.id === slot)?.role;
+                                return `${role ? tr(`adapterRole_${role}`) : slot} ${scale.toFixed(2)}`;
+                            });
+                            const name = adapter ? localized(adapter.name, language) : use.id;
+                            paramRows.push([uses.length > 1 ? `LoRA ${index + 1}` : 'LoRA', [name, ...strengths].join(' · ')]);
+                        });
                         const visibleRows = paramRows.filter(([, v]) => v !== undefined && v !== null && v !== '');
                         if (visibleRows.length === 0) return null;
                         const copyText = visibleRows.map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -595,6 +609,9 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                                         )}
                                         {p.steps && (
                                             <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-200 dark:bg-white/10 text-zinc-600 dark:text-zinc-400">{p.steps}st</span>
+                                        )}
+                                        {uses.length > 0 && (
+                                            <span className="text-[11px] px-2 py-0.5 rounded bg-pink-500/10 text-pink-600 dark:text-pink-300 font-medium">LoRA ×{uses.length}</span>
                                         )}
                                     </div>
                                     <ChevronDown size={14} className="text-zinc-400 transition-transform group-open:rotate-180 flex-shrink-0 ml-2" />

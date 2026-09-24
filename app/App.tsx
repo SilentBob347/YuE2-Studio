@@ -67,6 +67,7 @@ import { SetupGate } from './components/SetupGate';
 import { EngineStarting } from './components/EngineStarting';
 import { StudioOffline } from './components/StudioOffline';
 import { StudioToolsPanel } from './components/StudioToolsPanel';
+import { AdaptersPage } from './components/AdaptersPage';
 import { createNativePlaylist, deleteNativeSong, loadNativeLibrarySongs, loadNativePlaylists, updateNativePlaylist } from './services/nativeLibrary';
 
 const NATIVE_LIKED_SONG_IDS_KEY = 'yue2-studio-liked-song-ids';
@@ -143,11 +144,18 @@ function AppContent() {
       setSettingsSection((event as CustomEvent<string>).detail);
       setShowSettingsModal(true);
     };
+    // A page asked for by another page, the LoRA card sending the user to its library.
+    const navigate = (event: Event) => {
+      const view = (event as CustomEvent<View>).detail;
+      if (view) setCurrentView(view);
+    };
     window.addEventListener('yue:open-stems', open);
     window.addEventListener('yue:open-settings', openSettings);
+    window.addEventListener('yue:navigate', navigate);
     return () => {
       window.removeEventListener('yue:open-stems', open);
       window.removeEventListener('yue:open-settings', openSettings);
+      window.removeEventListener('yue:navigate', navigate);
     };
   }, []);
 
@@ -1224,6 +1232,9 @@ function AppContent() {
     switch (currentView) {
       case 'tools':
         return <StudioToolsPanel initialSongId={stemsSongId} />;
+
+      case 'adapters':
+        return <AdaptersPage />;
 
       case 'library': {
         const allSongs = songs;

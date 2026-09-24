@@ -1,0 +1,800 @@
+{
+  "version": 1,
+  "adapters": [
+    {
+      "id": "yue2-instrumental",
+      "engine": "yue2-cpp",
+      "kind": "composition",
+      "author": "Mothersuperior",
+      "page": "https://huggingface.co/Mothersuperior/YuE2-instrumental-cot-full-loras",
+      "name": {
+        "en": "Instrumental",
+        "ru": "Инструментал",
+        "zh": "纯音乐",
+        "ja": "インストゥルメンタル",
+        "ko": "인스트루멘털"
+      },
+      "description": {
+        "en": "Songs without vocals. Write [instrumental] or only section tags such as [intro] [verse] [chorus] in the lyrics; the score mode works best.",
+        "ru": "Песни без вокала. В текст впишите [instrumental] или только теги частей: [intro] [verse] [chorus]. Лучше всего работает с партитурой.",
+        "zh": "无人声的歌曲。在歌词中写 [instrumental] 或只写段落标签，如 [intro] [verse] [chorus]；配合乐谱模式效果最佳。",
+        "ja": "ボーカルなしの曲。歌詞に [instrumental] か [intro] [verse] [chorus] などのセクションタグだけを書きます。スコアモードで最もよく機能します。",
+        "ko": "보컬 없는 곡. 가사에 [instrumental] 또는 [intro] [verse] [chorus] 같은 섹션 태그만 적으세요. 악보 모드에서 가장 잘 동작합니다."
+      },
+      "scales": {
+        "ar": 1
+      },
+      "files": [
+        {
+          "url": "https://huggingface.co/Mothersuperior/YuE2-instrumental-cot-full-loras/resolve/947f2f4b28978b2b6c3e316e6a87925c76bf3c4b/ar_lora_inst_v3abc.bf16.safetensors",
+          "file": "ar_lora_inst_v3abc.bf16.safetensors",
+          "bytes": 139502088
+        }
+      ]
+    },
+    {
+      "id": "yue2-realaudio",
+      "engine": "yue2-cpp",
+      "kind": "sound",
+      "author": "Mothersuperior",
+      "page": "https://huggingface.co/Mothersuperior/yue2-mothersuperior-realaudio-tokenizer-v4",
+      "name": {
+        "en": "Real Audio",
+        "ru": "Живой звук",
+        "zh": "真实音色",
+        "ja": "リアルオーディオ",
+        "ko": "리얼 오디오"
+      },
+      "description": {
+        "en": "Retrains the sound half on real recordings: fuller mixes and a more natural timbre. The composition is untouched.",
+        "ru": "Дообучает звуковую половину на реальных записях: плотнее микс, естественнее тембр. Композицию не меняет.",
+        "zh": "在真实录音上重新训练声音部分：混音更饱满，音色更自然。不改变作曲。",
+        "ja": "音のパートを実際の録音で再学習：ミックスが厚く、音色がより自然に。作曲はそのまま。",
+        "ko": "실제 녹음으로 사운드 부분을 재학습: 믹스가 풍성해지고 음색이 자연스러워집니다. 작곡은 그대로입니다."
+      },
+      "scales": {
+        "nar": 1
+      },
+      "files": [
+        {
+          "url": "https://huggingface.co/Mothersuperior/yue2-mothersuperior-realaudio-tokenizer-v4/resolve/e2e63d859f3af879baf1b4d4e9f22d1eeda6fde5/nar_lora_joint_v9.safetensors",
+          "file": "nar_lora_joint_v9.safetensors",
+          "bytes": 140560592
+        }
+      ]
+    },
+    {
+      "id": "yue2-industrial-rock",
+      "engine": "yue2-cpp",
+      "kind": "style",
+      "author": "monsterovich",
+      "page": "https://huggingface.co/monsterovich/yue2-industrial-rock-lora",
+      "name": {
+        "en": "Industrial Rock",
+        "ru": "Индастриал-рок",
+        "zh": "工业摇滚",
+        "ja": "インダストリアル・ロック",
+        "ko": "인더스트리얼 록"
+      },
+      "description": {
+        "en": "Heavy machine rhythms and distorted guitars. Changes both the composition and the sound.",
+        "ru": "Тяжёлые машинные ритмы и перегруженные гитары. Меняет и композицию, и звучание.",
+        "zh": "沉重的机械节奏与失真吉他。同时改变作曲与音色。",
+        "ja": "重い機械的リズムと歪んだギター。作曲とサウンドの両方を変えます。",
+        "ko": "묵직한 기계적 리듬과 디스토션 기타. 작곡과 사운드를 모두 바꿉니다."
+      },
+      "scales": {
+        "ar": 1,
+        "nar": 0.5
+      },
+      "files": [
+        {
+          "url": "https://huggingface.co/monsterovich/yue2-industrial-rock-lora/resolve/a71706d59e2874f1e6db9aa10e8da5cc19e6c924/adapter-ar-179/lora.safetensors",
+          "file": "industrial-ar.safetensors",
+          "bytes": 34907280
+        },
+        {
+          "url": "https://huggingface.co/monsterovich/yue2-industrial-rock-lora/resolve/a71706d59e2874f1e6db9aa10e8da5cc19e6c924/adapter-nar-179-v2/lora.safetensors",
+          "file": "industrial-nar.safetensors",
+          "bytes": 140046120
+        }
+      ]
+    },
+    {
+      "id": "yue2-epic-trailer",
+      "engine": "yue2-cpp",
+      "kind": "style",
+      "author": "monsterovich",
+      "page": "https://huggingface.co/monsterovich/yue2-steps-from-hell",
+      "name": {
+        "en": "Epic Trailer",
+        "ru": "Эпический трейлер",
+        "zh": "史诗预告片",
+        "ja": "エピック・トレーラー",
+        "ko": "에픽 트레일러"
+      },
+      "description": {
+        "en": "Cinematic epic in the manner of trailer music: choirs, brass, big drums.",
+        "ru": "Кинематографичный эпик в духе трейлерной музыки: хоры, медь, большие барабаны.",
+        "zh": "预告片风格的电影史诗：合唱、铜管、大鼓。",
+        "ja": "トレーラー音楽風のシネマティックなエピック：合唱、金管、大太鼓。",
+        "ko": "트레일러 음악 풍의 시네마틱 에픽: 합창, 금관, 큰 드럼."
+      },
+      "scales": {
+        "ar": 0.5,
+        "nar": 0.375
+      },
+      "files": [
+        {
+          "url": "https://huggingface.co/monsterovich/yue2-steps-from-hell/resolve/bc84ad1867158e1112ab9601c74b338847d9dff2/adapter-ar-195/lora.safetensors",
+          "file": "epic-ar.safetensors",
+          "bytes": 34907280
+        },
+        {
+          "url": "https://huggingface.co/monsterovich/yue2-steps-from-hell/resolve/bc84ad1867158e1112ab9601c74b338847d9dff2/adapter-nar-194/lora.safetensors",
+          "file": "epic-nar.safetensors",
+          "bytes": 140046120
+        }
+      ]
+    },
+    {
+      "id": "yue2-sv-billie",
+      "engine": "yue2-cpp",
+      "kind": "artist",
+      "author": "HaileyStorm",
+      "page": "https://huggingface.co/HaileyStorm/sv-billie-yue2-lora",
+      "trigger": "sv_billie",
+      "name": {
+        "en": "SV Billie",
+        "ru": "SV Billie",
+        "zh": "SV Billie",
+        "ja": "SV Billie",
+        "ko": "SV Billie"
+      },
+      "description": {
+        "en": "An artist LoRA: breathy intimate vocals over soft modern pop.",
+        "ru": "Артист-LoRA: шепчущий интимный вокал поверх мягкого современного попа.",
+        "zh": "艺人 LoRA：柔和现代流行上的气声亲密人声。",
+        "ja": "アーティストLoRA：柔らかなモダンポップに息づかいの多い親密なボーカル。",
+        "ko": "아티스트 LoRA: 부드러운 모던 팝 위의 숨결 섞인 친밀한 보컬."
+      },
+      "scales": {
+        "ar": 1,
+        "nar": 1
+      },
+      "files": [
+        {
+          "url": "https://huggingface.co/HaileyStorm/sv-billie-yue2-lora/resolve/94fe9fbf5dfd3e97eefeb3ef54e2801eb3b69077/sv_billie.safetensors",
+          "file": "sv_billie.safetensors",
+          "bytes": 117500888
+        }
+      ]
+    },
+    {
+      "id": "yue2-dreampop",
+      "engine": "yue2-cpp",
+      "kind": "style",
+      "author": "atomtanstudio",
+      "page": "https://huggingface.co/atomtanstudio/lora-library",
+      "trigger": "sv_dreampop",
+      "name": {
+        "en": "Dream Pop",
+        "ru": "Дрим-поп",
+        "zh": "梦幻流行",
+        "ja": "ドリームポップ",
+        "ko": "드림 팝"
+      },
+      "description": {
+        "en": "Hazy reverb guitars and floating vocals. Works best with the score off.",
+        "ru": "Туманные гитары в ревербе и парящий вокал. Лучше работает без партитуры.",
+        "zh": "朦胧混响吉他与漂浮人声。关闭乐谱时效果最佳。",
+        "ja": "霞んだリバーブギターと浮遊するボーカル。スコアなしで最もよく機能します。",
+        "ko": "몽환적인 리버브 기타와 떠다니는 보컬. 악보 없이 가장 잘 동작합니다."
+      },
+      "scales": {
+        "ar": 1,
+        "nar": 1
+      },
+      "files": [
+        {
+          "url": "https://huggingface.co/atomtanstudio/lora-library/resolve/b5727622224c267030be0054464d953188edba49/yue2/dreampop/dreampop_sv_dreampop.safetensors",
+          "file": "dreampop_sv_dreampop.safetensors",
+          "bytes": 234969024
+        }
+      ]
+    },
+    {
+      "id": "yue2-oldschool-hiphop",
+      "engine": "yue2-cpp",
+      "kind": "style",
+      "author": "atomtanstudio",
+      "page": "https://huggingface.co/atomtanstudio/lora-library",
+      "trigger": "sv_oldschoolhiphop",
+      "name": {
+        "en": "Old School Hip-Hop",
+        "ru": "Олдскул хип-хоп",
+        "zh": "老派嘻哈",
+        "ja": "オールドスクール・ヒップホップ",
+        "ko": "올드스쿨 힙합"
+      },
+      "description": {
+        "en": "Boom-bap drums, dusty samples and nineties flow. Works best with the score off.",
+        "ru": "Бум-бэп барабаны, пыльные сэмплы и флоу девяностых. Лучше работает без партитуры.",
+        "zh": "Boom-bap 鼓、复古采样与九十年代的 flow。关闭乐谱时效果最佳。",
+        "ja": "ブーンバップのドラム、埃っぽいサンプル、90年代のフロウ。スコアなしで最もよく機能します。",
+        "ko": "붐뱁 드럼, 빈티지 샘플, 90년대 플로우. 악보 없이 가장 잘 동작합니다."
+      },
+      "scales": {
+        "ar": 1,
+        "nar": 1
+      },
+      "files": [
+        {
+          "url": "https://huggingface.co/atomtanstudio/lora-library/resolve/b5727622224c267030be0054464d953188edba49/yue2/oldschoolhiphop/sv_oldschoolhiphop.safetensors",
+          "file": "sv_oldschoolhiphop.safetensors",
+          "bytes": 234969024
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-female",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Female",
+        "ru": "Женский вокал",
+        "zh": "女声",
+        "ja": "女性ボーカル",
+        "ko": "여성 보컬"
+      },
+      "description": {
+        "en": "One adult female lead, with the song's phrasing and timbre intact",
+        "ru": "Одна взрослая солистка, фразировка и тембр песни сохраняются",
+        "zh": "一位成年女主唱，保留歌曲的乐句与音色",
+        "ja": "成人女性のリードボーカル1人。曲のフレージングと音色はそのまま",
+        "ko": "성인 여성 리드 보컬 한 명, 곡의 프레이징과 음색은 유지"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/female_distilled_refined_rank8.safetensors",
+          "file": "female_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-male",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Male",
+        "ru": "Мужской вокал",
+        "zh": "男声",
+        "ja": "男性ボーカル",
+        "ko": "남성 보컬"
+      },
+      "description": {
+        "en": "One adult male lead, with the song's phrasing and timbre intact",
+        "ru": "Один взрослый солист, фразировка и тембр песни сохраняются",
+        "zh": "一位成年男主唱，保留歌曲的乐句与音色",
+        "ja": "成人男性のリードボーカル1人。曲のフレージングと音色はそのまま",
+        "ko": "성인 남성 리드 보컬 한 명, 곡의 프레이징과 음색은 유지"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/male_distilled_refined_rank8.safetensors",
+          "file": "male_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-pop",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Pop",
+        "ru": "Поп",
+        "zh": "流行",
+        "ja": "ポップ",
+        "ko": "팝"
+      },
+      "description": {
+        "en": "Clear hooks, crisp drums and a polished chorus",
+        "ru": "Яркие хуки, чёткие барабаны и отполированный припев",
+        "zh": "清晰的抓耳旋律、利落的鼓与精致的副歌",
+        "ja": "明快なフック、歯切れのいいドラム、磨かれたサビ",
+        "ko": "선명한 훅, 또렷한 드럼, 세련된 후렴"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/pop_distilled_refined_rank8.safetensors",
+          "file": "pop_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-hiphop",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Hip-Hop",
+        "ru": "Хип-хоп",
+        "zh": "嘻哈",
+        "ja": "ヒップホップ",
+        "ko": "힙합"
+      },
+      "description": {
+        "en": "Rapped verses, deep sub bass and nimble hats",
+        "ru": "Читка в куплетах, глубокий саб-бас и подвижные хэты",
+        "zh": "说唱主歌、深沉的超低音与灵活的踩镲",
+        "ja": "ラップのヴァース、深いサブベース、軽快なハット",
+        "ko": "랩 벌스, 깊은 서브 베이스, 경쾌한 하이햇"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/hiphop_distilled_refined_rank8.safetensors",
+          "file": "hiphop_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-rnb",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "R&B",
+        "ru": "R&B",
+        "zh": "R&B",
+        "ja": "R&B",
+        "ko": "R&B"
+      },
+      "description": {
+        "en": "Warm keys, deep pocket and fluid vocal phrasing",
+        "ru": "Тёплые клавиши, глубокий грув и плавная фразировка вокала",
+        "zh": "温暖的键盘、深沉的律动与流畅的人声",
+        "ja": "温かいキーボード、深いグルーヴ、滑らかなボーカル",
+        "ko": "따뜻한 건반, 깊은 그루브, 유려한 보컬"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/rnb_distilled_refined_rank8.safetensors",
+          "file": "rnb_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-indie-rock",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Indie Rock",
+        "ru": "Инди-рок",
+        "zh": "独立摇滚",
+        "ja": "インディーロック",
+        "ko": "인디 록"
+      },
+      "description": {
+        "en": "Chiming guitars, moving bass and a human drum kit",
+        "ru": "Звенящие гитары, подвижный бас и живые барабаны",
+        "zh": "清脆的吉他、灵动的贝斯与真实鼓组",
+        "ja": "きらめくギター、動くベース、人間味のあるドラム",
+        "ko": "맑게 울리는 기타, 움직이는 베이스, 사람 냄새 나는 드럼"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/indie-rock_distilled_refined_rank8.safetensors",
+          "file": "indie-rock_distilled_refined_rank8.safetensors",
+          "bytes": 12891952
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-pop-punk",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Pop Punk",
+        "ru": "Поп-панк",
+        "zh": "流行朋克",
+        "ja": "ポップパンク",
+        "ko": "팝 펑크"
+      },
+      "description": {
+        "en": "Palm-muted power chords and driving chorus drums",
+        "ru": "Глушёные пауэр-аккорды и напористые барабаны в припеве",
+        "zh": "闷音强力和弦与推进感十足的副歌鼓",
+        "ja": "パームミュートのパワーコードと疾走するサビのドラム",
+        "ko": "팜뮤트 파워 코드와 몰아치는 후렴 드럼"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/pop-punk_distilled_refined_rank8.safetensors",
+          "file": "pop-punk_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-metal",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Metal",
+        "ru": "Метал",
+        "zh": "金属",
+        "ja": "メタル",
+        "ko": "메탈"
+      },
+      "description": {
+        "en": "Heavy guitar riffs, tight kicks and big melodic choruses",
+        "ru": "Тяжёлые гитарные риффы, плотная бочка и большие мелодичные припевы",
+        "zh": "沉重的吉他连复段、紧实的底鼓与宏大的旋律副歌",
+        "ja": "ヘヴィなギターリフ、タイトなキック、壮大なメロディックなサビ",
+        "ko": "묵직한 기타 리프, 타이트한 킥, 웅장한 멜로디 후렴"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/metal_distilled_refined_rank8.safetensors",
+          "file": "metal_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-country",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Country",
+        "ru": "Кантри",
+        "zh": "乡村",
+        "ja": "カントリー",
+        "ko": "컨트리"
+      },
+      "description": {
+        "en": "Acoustic strum, twangy fills and an easy backbeat",
+        "ru": "Акустический бой, твэнговые сбивки и лёгкий бэкбит",
+        "zh": "原声扫弦、鼻音感的加花与轻松的反拍",
+        "ja": "アコースティックのストローク、トワンギーなフィル、軽いバックビート",
+        "ko": "어쿠스틱 스트럼, 트왱한 필, 편안한 백비트"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/country_distilled_refined_rank8.safetensors",
+          "file": "country_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-acoustic-folk",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Acoustic Folk",
+        "ru": "Акустический фолк",
+        "zh": "原声民谣",
+        "ja": "アコースティック・フォーク",
+        "ko": "어쿠스틱 포크"
+      },
+      "description": {
+        "en": "Fingerpicked strings and a warm small-room performance",
+        "ru": "Перебор струн и тёплое исполнение в небольшой комнате",
+        "zh": "指弹与温暖的小房间演奏",
+        "ja": "フィンガーピッキングと温かい小部屋の演奏",
+        "ko": "핑거피킹과 따뜻한 작은 방 연주"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/acoustic-folk_distilled_refined_rank8.safetensors",
+          "file": "acoustic-folk_distilled_refined_rank8.safetensors",
+          "bytes": 12891952
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-house",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "House",
+        "ru": "Хаус",
+        "zh": "浩室",
+        "ja": "ハウス",
+        "ko": "하우스"
+      },
+      "description": {
+        "en": "Steady club kick, offbeat hats and a rolling bass line",
+        "ru": "Ровная клубная бочка, хэты в офбит и катящийся бас",
+        "zh": "稳定的俱乐部底鼓、反拍踩镲与滚动的贝斯",
+        "ja": "一定のクラブキック、裏拍のハット、転がるベース",
+        "ko": "일정한 클럽 킥, 오프비트 하이햇, 굴러가는 베이스"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/house_distilled_refined_rank8.safetensors",
+          "file": "house_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-disco-funk",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Disco Funk",
+        "ru": "Диско-фанк",
+        "zh": "迪斯科放克",
+        "ja": "ディスコ・ファンク",
+        "ko": "디스코 펑크"
+      },
+      "description": {
+        "en": "Elastic bass, clipped guitar and bright dance-floor strings",
+        "ru": "Упругий бас, рубленая гитара и яркие танцевальные струнные",
+        "zh": "弹性的贝斯、切音吉他与明亮的舞池弦乐",
+        "ja": "弾むベース、カッティングギター、華やかなストリングス",
+        "ko": "탄력 있는 베이스, 커팅 기타, 화려한 댄스 스트링"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/disco-funk_distilled_refined_rank8.safetensors",
+          "file": "disco-funk_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-kpop",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "K-pop",
+        "ru": "K-pop",
+        "zh": "K-pop",
+        "ja": "K-POP",
+        "ko": "K-pop"
+      },
+      "description": {
+        "en": "Sharp synth hooks, tight edits and a big chorus lift",
+        "ru": "Острые синт-хуки, плотный монтаж и мощный подъём в припеве",
+        "zh": "尖锐的合成器旋律、紧凑的剪辑与副歌的大提升",
+        "ja": "鋭いシンセフック、タイトな編集、サビの大きな盛り上がり",
+        "ko": "날카로운 신스 훅, 타이트한 편집, 후렴의 큰 상승"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/kpop_distilled_refined_rank8.safetensors",
+          "file": "kpop_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-reggaeton",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Reggaeton",
+        "ru": "Реггетон",
+        "zh": "雷鬼动",
+        "ja": "レゲトン",
+        "ko": "레게톤"
+      },
+      "description": {
+        "en": "Dembow drums, rounded sub bass and clipped melodic hooks",
+        "ru": "Барабаны дембоу, округлый саб-бас и рубленые мелодичные хуки",
+        "zh": "Dembow 鼓、圆润的超低音与切分旋律",
+        "ja": "デンボウのドラム、丸いサブベース、刻むメロディフック",
+        "ko": "뎀보우 드럼, 둥근 서브 베이스, 끊어지는 멜로디 훅"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/reggaeton_distilled_refined_rank8.safetensors",
+          "file": "reggaeton_distilled_refined_rank8.safetensors",
+          "bytes": 12891952
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-afrobeats",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Afrobeats",
+        "ru": "Афробит",
+        "zh": "非洲节拍",
+        "ja": "アフロビーツ",
+        "ko": "아프로비트"
+      },
+      "description": {
+        "en": "Interlocking percussion, melodic bass and buoyant guitar",
+        "ru": "Переплетённая перкуссия, мелодичный бас и лёгкая гитара",
+        "zh": "交织的打击乐、旋律性贝斯与轻快的吉他",
+        "ja": "絡み合うパーカッション、メロディックなベース、軽やかなギター",
+        "ko": "얽히는 퍼커션, 멜로딕한 베이스, 경쾌한 기타"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/afrobeats_distilled_refined_rank8.safetensors",
+          "file": "afrobeats_distilled_refined_rank8.safetensors",
+          "bytes": 12891952
+        }
+      ]
+    },
+    {
+      "id": "yue2-slider-lofi",
+      "engine": "yue2-cpp",
+      "kind": "slider",
+      "author": "ntc-ai",
+      "page": "https://huggingface.co/ntc-ai/yue2-particle-sliders",
+      "name": {
+        "en": "Lo-fi",
+        "ru": "Лоу-фай",
+        "zh": "Lo-fi",
+        "ja": "ローファイ",
+        "ko": "로파이"
+      },
+      "description": {
+        "en": "Soft swung drums, mellow keys and gentle tape warmth",
+        "ru": "Мягкие свинговые барабаны, спокойные клавиши и тёплая плёнка",
+        "zh": "柔和的摇摆鼓、温润的键盘与温暖的磁带质感",
+        "ja": "柔らかいスウィングのドラム、穏やかな鍵盤、温かいテープ感",
+        "ko": "부드러운 스윙 드럼, 차분한 건반, 따뜻한 테이프 질감"
+      },
+      "scales": {
+        "ar": 1
+      },
+      "range": [
+        0,
+        1
+      ],
+      "files": [
+        {
+          "url": "https://huggingface.co/ntc-ai/yue2-particle-sliders/resolve/33cf42fb0a54f60d8264d64cf6c20f038c4d172b/distilled-rank8-v1/native/lofi_distilled_refined_rank8.safetensors",
+          "file": "lofi_distilled_refined_rank8.safetensors",
+          "bytes": 12891944
+        }
+      ]
+    }
+  ]
+}

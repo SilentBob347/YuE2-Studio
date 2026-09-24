@@ -1,3 +1,4 @@
+mod adapters;
 mod auto_title;
 mod tagging;
 mod cover_prompt;
@@ -76,6 +77,8 @@ struct AppState {
     /// The separation run in progress, if any. One at a time: the model wants
     /// the whole machine for a minute, and two runs would only make both slow.
     separation_run: Arc<RwLock<Option<SeparationRun>>>,
+    /// LoRA adapters for the local engine, and the example catalogue.
+    adapters: Arc<adapters::AdapterLibrary>,
 }
 
 #[derive(Clone)]
@@ -176,6 +179,18 @@ struct CreateMusicJobRequest {
     title: Option<String>,
     /// What the cover should show, when the assistant described it.
     cover_prompt: Option<String>,
+    /// Installed adapters to merge for this song, in order.
+    #[serde(default)]
+    adapters: Vec<AdapterUse>,
+}
+
+/// One adapter of a request: its folder and a strength per engine slot. A slot
+/// left out is not changed.
+#[derive(Debug, Clone, Default, Deserialize)]
+struct AdapterUse {
+    id: String,
+    #[serde(default)]
+    scales: std::collections::BTreeMap<String, f64>,
 }
 
 /// The name this request goes into the library under: the user's, or one
@@ -554,6 +569,10 @@ pub async fn serve() -> anyhow::Result<()> {
             &studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")),
         )),
         separation_run: Arc::new(RwLock::new(None)),
+        adapters: Arc::new(adapters::AdapterLibrary::new(
+            &studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")),
+            PRIMARY_MUSIC_ENGINE_ID,
+        )),
         selected_profile_id: Arc::new(RwLock::new(selected_profile_id)),
         selected_component_ids: Arc::new(RwLock::new(selected_component_ids)),
         settings_path,
@@ -613,6 +632,11 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/separation/settings", get(read_separation_settings).put(write_separation_settings))
         .route("/v1/separation/install", post(install_separation_model))
         .route("/v1/separation/remove", post(remove_separation_model))
+        .route("/v1/adapters", get(list_adapters))
+        .route("/v1/adapters/import", post(import_adapter))
+        .route("/v1/adapters/cancel", post(cancel_adapter_download))
+        .route("/v1/adapters/catalog/{id}", post(install_catalog_adapter))
+        .route("/v1/adapters/{id}", axum::routing::patch(update_adapter).delete(delete_adapter))
         .route("/v1/library/songs/{id}/stems", get(read_stems).post(start_separation))
         .route("/v1/library/songs/{id}/stems/{stem}", get(read_stem_audio))
         .route("/v1/library/songs/{id}/cover/auto", post(draw_cover_now))
@@ -1166,6 +1190,88 @@ async fn install_separation_model(State(state): State<AppState>) -> Result<Json<
         let _ = separator.downloader().install(&separation::MODEL).await;
     });
     Ok(Json(serde_json::json!({ "started": true })))
+}
+
+/// The adapter page: the parts of the model an adapter can change, the
+/// installed adapters with what the engine found in each, the catalogue, and
+/// the download in progress. The engine is asked only when it is already up;
+/// a stopped engine leaves the slots the studio remembered.
+async fn list_adapters(State(state): State<AppState>) -> Json<Value> {
+    let slot_ids: Vec<&str> = music_engine::yue_server::ADAPTER_SLOTS.iter().map(|slot| slot.id).collect();
+    let views = match tokio::time::timeout(std::time::Duration::from_secs(3), state.music_server.props()).await {
+        Ok(Ok(props)) => Some(adapters::engine_views(&props, &slot_ids)),
+        _ => None,
+    };
+    Json(serde_json::json!({
+        "slots": music_engine::yue_server::ADAPTER_SLOTS,
+        "installed": state.adapters.installed(views.as_ref()),
+        "catalog": state.adapters.offered(),
+        "engine_checked": views.is_some(),
+        "download": state.adapters.downloader().active_for(adapters::SCOPE).await,
+        "installing": state.adapters.installing(),
+    }))
+}
+
+async fn install_catalog_adapter(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
+    let library = state.adapters.clone();
+    tokio::spawn(async move {
+        if let Err(error) = library.install(&id).await {
+            eprintln!("[ERROR] adapter {id} did not install: {error:#}");
+        }
+    });
+    Json(serde_json::json!({ "started": true }))
+}
+
+async fn cancel_adapter_download(State(state): State<AppState>) -> Json<Value> {
+    state.adapters.downloader().cancel();
+    Json(serde_json::json!({ "cancelled": true }))
+}
+
+/// Stores uploaded adapter files: one or more `.safetensors`, and the
+/// `adapter_config.json` or `lora.json` that came with them.
+async fn import_adapter(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<(StatusCode, Json<adapters::AdapterMeta>), (StatusCode, Json<ApiError>)> {
+    let mut name = String::new();
+    let mut files = Vec::new();
+    while let Some(field) = multipart.next_field().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read adapter form: {e}")))? {
+        match (field.name().unwrap_or_default().to_owned(), field.file_name().map(str::to_owned)) {
+            (key, Some(file)) if key == "files" => {
+                let bytes = field.bytes().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read {file}: {e}")))?;
+                files.push((file, bytes.to_vec()));
+            }
+            (key, _) if key == "name" => {
+                name = field.text().await.map_err(|e| api_error(StatusCode::BAD_REQUEST, format!("read adapter name: {e}")))?;
+            }
+            _ => {}
+        }
+    }
+    if name.trim().is_empty() {
+        name = files
+            .iter()
+            .find(|(file, _)| file.ends_with(".safetensors"))
+            .and_then(|(file, _)| std::path::Path::new(file).file_stem().and_then(|stem| stem.to_str()).map(str::to_owned))
+            .unwrap_or_else(|| "Adapter".into());
+    }
+    let meta = state
+        .adapters
+        .import(&name, files, adapters::Origin::Imported)
+        .map_err(|e| api_error(StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok((StatusCode::CREATED, Json(meta)))
+}
+
+async fn update_adapter(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(patch): Json<adapters::Patch>,
+) -> Result<Json<adapters::AdapterMeta>, (StatusCode, Json<ApiError>)> {
+    state.adapters.update(&id, patch).map(Json).map_err(|e| api_error(StatusCode::NOT_FOUND, e.to_string()))
+}
+
+async fn delete_adapter(State(state): State<AppState>, Path(id): Path<String>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    state.adapters.remove(&id).map_err(|e| api_error(StatusCode::NOT_FOUND, e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn read_stems(State(state): State<AppState>, Path(id): Path<String>) -> Json<Value> {
@@ -2015,10 +2121,13 @@ async fn selected_engine_models(state: &AppState) -> Result<music_engine::yue_se
     }
     .map_err(|error| error.to_string())?;
     let root = state.model_manager.models_directory();
+    let adapters = state.adapters.root().to_path_buf();
+    fs::create_dir_all(&adapters).map_err(|error| format!("create the adapter folder {}: {error}", adapters.display()))?;
     Ok(music_engine::yue_server::YueModelFiles {
         backbone: root.join(&files.backbone),
         vae: root.join(&files.vae),
         transcriber: files.transcriber.map(|name| root.join(name)),
+        adapters: Some(adapters),
     })
 }
 
@@ -2039,6 +2148,11 @@ async fn reload_engine_if_models_changed(state: &AppState) {
     let unchanged = same(&current.backbone, &wanted.backbone)
         && same(&current.vae, &wanted.vae)
         && match (&current.transcriber, &wanted.transcriber) {
+            (Some(a), Some(b)) => same(a, b),
+            (None, None) => true,
+            _ => false,
+        }
+        && match (&current.adapters, &wanted.adapters) {
             (Some(a), Some(b)) => same(a, b),
             (None, None) => true,
             _ => false,
@@ -3821,6 +3935,10 @@ async fn create_music_job(
         return (StatusCode::ACCEPTED, Json(job));
     }
 
+    if let Some(missing) = request.adapters.iter().find(|adapter| !state.adapters.exists(&adapter.id)).map(|adapter| adapter.id.clone()) {
+        let error = format!("adapter {missing} is not installed; add it again on the LoRA page");
+        return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, error)));
+    }
     let max_batch = state.engine_options.read().await.effective_max_batch();
     let body = match yue_request_from(&request, max_batch) {
         Ok(value) => value,
@@ -4602,7 +4720,35 @@ fn yue_request_from(request: &CreateMusicJobRequest, max_batch: u32) -> Result<V
             body[key] = serde_json::to_value(preset).map_err(|error| error.to_string())?;
         }
     }
+    if !request.adapters.is_empty() {
+        body["adapters"] = Value::Array(adapter_fields(&request.adapters)?);
+    }
     Ok(body)
+}
+
+/// The engine's own spelling of an adapter list: the folder as `name`, and
+/// `<slot>_scale` for every slot, zero where the request leaves one out.
+fn adapter_fields(uses: &[AdapterUse]) -> Result<Vec<Value>, String> {
+    let slots = music_engine::yue_server::ADAPTER_SLOTS;
+    uses.iter()
+        .map(|adapter| {
+            if adapter.id.trim().is_empty() {
+                return Err("an adapter has no id".to_string());
+            }
+            if let Some(unknown) = adapter.scales.keys().find(|key| !slots.iter().any(|slot| slot.id == key.as_str())) {
+                return Err(format!("adapter {} names an unknown slot {unknown}", adapter.id));
+            }
+            let mut entry = serde_json::json!({ "name": adapter.id });
+            for slot in slots {
+                let scale = adapter.scales.get(slot.id).copied().unwrap_or(0.0);
+                if !scale.is_finite() || !(-4.0..=4.0).contains(&scale) {
+                    return Err(format!("adapter {} strength must be between -4 and 4", adapter.id));
+                }
+                entry[format!("{}_scale", slot.id)] = serde_json::json!(scale);
+            }
+            Ok(entry)
+        })
+        .collect()
 }
 
 fn insert_optional<T: Serialize>(body: &mut Value, key: &str, value: Option<T>) {
@@ -4756,6 +4902,28 @@ mod tests {
             lyrics: "[Verse]\r\none line".into(),
             ..CreateMusicJobRequest::default()
         }
+    }
+
+    #[test]
+    fn adapters_travel_as_engine_fields_with_every_slot_spelled_out() {
+        let mut scales = std::collections::BTreeMap::new();
+        scales.insert("ar".to_string(), 0.75);
+        let request = CreateMusicJobRequest {
+            adapters: vec![AdapterUse { id: "yue2-instrumental".into(), scales }],
+            ..sample_request()
+        };
+        let body = yue_request_from(&request, 1).unwrap();
+        assert_eq!(body["adapters"], serde_json::json!([{ "name": "yue2-instrumental", "ar_scale": 0.75, "nar_scale": 0.0 }]));
+        assert!(yue_request_from(&sample_request(), 1).unwrap().get("adapters").is_none());
+
+        let mut unknown = std::collections::BTreeMap::new();
+        unknown.insert("dit".to_string(), 1.0);
+        let refused = CreateMusicJobRequest { adapters: vec![AdapterUse { id: "x".into(), scales: unknown }], ..sample_request() };
+        assert!(yue_request_from(&refused, 1).unwrap_err().contains("unknown slot"));
+        let mut huge = std::collections::BTreeMap::new();
+        huge.insert("nar".to_string(), 40.0);
+        let refused = CreateMusicJobRequest { adapters: vec![AdapterUse { id: "x".into(), scales: huge }], ..sample_request() };
+        assert!(yue_request_from(&refused, 1).is_err());
     }
 
     #[test]
