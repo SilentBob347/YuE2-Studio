@@ -2062,12 +2062,12 @@ async fn upload_training_files(State(state): State<AppState>, Path(id): Path<Str
             let sheet = cues.iter().find(|(cue_stem, file, tracks)| tracks.len() > 1 && (file.as_deref() == Some(name.as_str()) || *cue_stem == stem));
             if let Some((_, _, tracks)) = sheet {
                 let album_artist = audio_pcm::tags(&path).artist;
-                dataset = training.add_album(&id, &path, tracks, &album_artist, &format!("file:{name}"))?;
+                dataset = training.add_album(&id, &path, tracks, &album_artist, &format!("file:{relative}"))?;
                 continue;
             }
             let lyrics = texts.get(&stem).map(|text| training::plain_lyrics(text)).unwrap_or_default();
             let (artist, title) = training::identify(&path, &relative);
-            dataset = training.add_item(&id, &path, &title, &artist, "", &lyrics, false, &format!("file:{name}"))?;
+            dataset = training.add_item(&id, &path, &title, &artist, "", &lyrics, false, &format!("file:{relative}"))?;
         }
         Ok::<_, anyhow::Error>(dataset)
     })
