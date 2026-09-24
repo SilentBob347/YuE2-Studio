@@ -2330,7 +2330,7 @@ async fn start_separation(
                         run.stems = stems;
                         run.used_gpu = Some(ran_on_gpu);
                     }
-                    Err(error) => run.error = Some(error.to_string()),
+                    Err(error) => run.error = Some(format!("{error:#}")),
                 }
             }
         });
@@ -2446,7 +2446,7 @@ async fn ensure_local_recogniser(state: &AppState, config: &lyrics_sync::LyricsS
     for asset in missing {
         if let Err(error) = state.lyrics_sync.downloader().install(asset).await {
             eprintln!("could not fetch the karaoke model {}: {error}", asset.id);
-            note_activity(state, song_id, &title, "karaoke", "failed", Some(error.to_string())).await;
+            note_activity(state, song_id, &title, "karaoke", "failed", Some(format!("{error:#}"))).await;
             return false;
         }
         // The downloader runs one file at a time in the background; the timings
@@ -2530,7 +2530,7 @@ async fn time_lyrics_for(state: AppState, song_id: String) {
         Ok(words) => words,
         Err(error) => {
             eprintln!("no karaoke for {song_id}: {error}");
-            note_activity(&state, &song_id, &song.title, "karaoke", "failed", Some(error.to_string())).await;
+            note_activity(&state, &song_id, &song.title, "karaoke", "failed", Some(format!("{error:#}"))).await;
             return;
         }
     };
@@ -2545,7 +2545,7 @@ async fn time_lyrics_for(state: AppState, song_id: String) {
         Ok(_) => note_activity(&state, &song_id, &song.title, "karaoke", "done", None).await,
         Err(error) => {
             eprintln!("could not store karaoke for {song_id}: {error}");
-            note_activity(&state, &song_id, &song.title, "karaoke", "failed", Some(error.to_string())).await;
+            note_activity(&state, &song_id, &song.title, "karaoke", "failed", Some(format!("{error:#}"))).await;
         }
     }
 }
@@ -2566,7 +2566,7 @@ async fn draw_cover_for(state: AppState, song_id: String) {
         Ok(()) => note_activity(&state, &song_id, &title, "cover", "done", None).await,
         Err(error) => {
             eprintln!("no cover for {song_id}: {error}");
-            note_activity(&state, &song_id, &title, "cover", "failed", Some(error.to_string())).await;
+            note_activity(&state, &song_id, &title, "cover", "failed", Some(format!("{error:#}"))).await;
         }
     }
 }

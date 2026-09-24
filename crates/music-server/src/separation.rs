@@ -169,7 +169,13 @@ pub fn separate(
     }
     let mut session = builder
         .commit_from_file(model)
-        .with_context(|| format!("load the separation model {}", model.display()))?;
+        .with_context(|| {
+            if used_gpu {
+                format!("the graphics card could not load the separation model {}; choose the processor in the separation settings to separate without it", model.display())
+            } else {
+                format!("load the separation model {}", model.display())
+            }
+        })?;
 
     let frames = audio.len() / CHANNELS;
     let overlap = overlap.clamp(0.0, 0.5);

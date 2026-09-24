@@ -394,7 +394,7 @@ export function StudioToolsPanel({ initialSongId }: { initialSongId?: string | n
           )}
 
           {run?.error && (
-            <p role="alert" className="mt-3 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">{run.error}</p>
+            <p role="alert" className="mt-3 select-text rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-700 [overflow-wrap:anywhere] dark:text-rose-300">{run.error}</p>
           )}
         </section>
 
