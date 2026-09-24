@@ -19,8 +19,66 @@ pub struct Hardware {
     /// An NVIDIA card: the engine runs on CUDA there, which needs cuBLAS.
     /// Every other card runs on Vulkan and needs nothing downloaded.
     pub nvidia: bool,
+    /// The CUDA build of the engine this card and its driver run, none when
+    /// neither does: such a card computes on Vulkan.
+    pub cuda: Option<CudaBuild>,
+    /// The NVIDIA card's compute capability, `[7, 5]` for Turing.
+    pub compute_capability: Option<(u32, u32)>,
     /// The model set id that fits this card, none when no set does.
     pub recommended: Option<&'static str>,
+}
+
+/// The engine ships one CUDA backend per toolkit. CUDA 13 targets Turing and
+/// newer and needs a driver from its own release on; CUDA 12 carries the
+/// Maxwell, Pascal and Volta cards CUDA 13 dropped, and every newer card whose
+/// driver predates CUDA 13. Both hold device code for each architecture, so no
+/// driver ever compiles PTX.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CudaBuild {
+    Cuda12,
+    Cuda13,
+}
+
+impl CudaBuild {
+    /// The folder beside yue-server.exe that holds this build's ggml-cuda.dll.
+    pub fn folder(self) -> &'static str {
+        match self {
+            CudaBuild::Cuda12 => "cuda12",
+            CudaBuild::Cuda13 => "cuda13",
+        }
+    }
+}
+
+/// The first driver of each CUDA major line on Windows, from NVIDIA's CUDA
+/// compatibility tables: minor version compatibility runs a whole major line
+/// on it, and device code needs nothing newer.
+const CUDA13_DRIVER: u32 = 580;
+const CUDA12_DRIVER: u32 = 525;
+
+/// The oldest architecture the CUDA 12 build has device code for: 5.2, the
+/// Maxwell of the GTX 900 series and the Tesla M40.
+const CUDA12_OLDEST: (u32, u32) = (5, 2);
+/// Turing, the oldest architecture CUDA 13 still targets.
+const CUDA13_OLDEST: (u32, u32) = (7, 5);
+
+/// Picks the build from the card's compute capability and the driver's major
+/// version, the way Ollama chooses between its CUDA runners.
+pub fn cuda_build(compute: (u32, u32), driver_major: u32) -> Option<CudaBuild> {
+    if compute >= CUDA13_OLDEST && driver_major >= CUDA13_DRIVER {
+        Some(CudaBuild::Cuda13)
+    } else if compute >= CUDA12_OLDEST && driver_major >= CUDA12_DRIVER {
+        Some(CudaBuild::Cuda12)
+    } else {
+        None
+    }
+}
+
+/// Tensor cores before Ampere accumulate in FP16, where the V projection can
+/// overflow to infinity and poison every later attention; the engine's clamp
+/// keeps it in range and changes nothing on a card that never overflows.
+pub fn accumulates_in_fp16() -> bool {
+    probe().compute_capability.is_some_and(|compute| compute < (8, 0))
 }
 
 /// `nvidia-smi` costs tens of milliseconds and the setup screen polls status
@@ -39,7 +97,18 @@ fn probe() -> &'static Hardware {
                 None => (None, 0.0, false),
             },
         };
-        Hardware { gpu_name, total_vram_gb, total_ram_gb, nvidia, recommended: profile_for_vram(total_vram_gb) }
+        let device = if nvidia { nvidia_cuda_device() } else { None };
+        let cuda = device.and_then(|(compute, driver)| cuda_build(compute, driver));
+        let compute_capability = device.map(|(compute, _)| compute);
+        Hardware {
+            gpu_name,
+            total_vram_gb,
+            total_ram_gb,
+            nvidia,
+            cuda,
+            compute_capability,
+            recommended: profile_for_vram(total_vram_gb),
+        }
     })
 }
 
@@ -48,8 +117,9 @@ pub fn hardware() -> Hardware {
 }
 
 /// VRAM tiers follow the strict-eviction peak of each set: the larger backbone
-/// half plus a full-context KV cache (2.7 GB per set, two under guidance) and
-/// the compute buffers. Upstream measured 5.8 GB for a 65 s song in Q8_0.
+/// half plus the KV cache and the compute buffers. The cache is sized to the
+/// song, about 1.5 GB for 130 s under guidance, so the tiers keep headroom for
+/// the longest songs.
 fn profile_for_vram(total_vram_gb: f64) -> Option<&'static str> {
     if total_vram_gb >= 12.0 {
         Some("native")
@@ -90,6 +160,25 @@ fn nvidia_smi() -> Option<(String, f64)> {
     let line = String::from_utf8_lossy(&output.stdout).lines().next()?.trim().to_owned();
     let (name, memory) = line.rsplit_once(',')?;
     Some((name.trim().into(), memory.trim().parse::<f64>().ok()? / 1024.0))
+}
+
+/// Asked apart from the name and memory: a driver too old to know
+/// `compute_cap` fails the whole query, and such a driver runs neither build.
+fn nvidia_cuda_device() -> Option<((u32, u32), u32)> {
+    let output = quiet("nvidia-smi").args(["--query-gpu=compute_cap,driver_version", "--format=csv,noheader"]).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let line = String::from_utf8_lossy(&output.stdout).lines().next()?.trim().to_owned();
+    parse_cuda_query(&line)
+}
+
+/// `7.5, 581.29` into the compute capability and the driver's major version.
+fn parse_cuda_query(line: &str) -> Option<((u32, u32), u32)> {
+    let (compute, driver) = line.split_once(',')?;
+    let (major, minor) = compute.trim().split_once('.')?;
+    let driver_major = driver.trim().split('.').next()?.parse().ok()?;
+    Some(((major.parse().ok()?, minor.parse().ok()?), driver_major))
 }
 
 /// The display adapter with the most dedicated memory, from the driver's own
@@ -159,6 +248,30 @@ mod tests {
             assert!(crate::model_manager::profile_exists(profile_for_vram(vram).unwrap()));
         }
         assert!(crate::model_manager::profile_exists(FALLBACK_PROFILE));
+    }
+
+    #[test]
+    fn the_cuda_build_follows_the_architecture_and_the_driver() {
+        // GTX 1660 Super on a current driver: device code from CUDA 13.
+        assert_eq!(cuda_build((7, 5), 581), Some(CudaBuild::Cuda13));
+        assert_eq!(cuda_build((12, 0), 590), Some(CudaBuild::Cuda13));
+        // Pascal and Maxwell, which CUDA 13 dropped, on any driver.
+        assert_eq!(cuda_build((6, 1), 581), Some(CudaBuild::Cuda12));
+        assert_eq!(cuda_build((5, 2), 560), Some(CudaBuild::Cuda12));
+        assert_eq!(cuda_build((7, 0), 552), Some(CudaBuild::Cuda12));
+        // A new card on a driver from before CUDA 13.
+        assert_eq!(cuda_build((8, 9), 566), Some(CudaBuild::Cuda12));
+        // Kepler, the first Maxwell and drivers older than CUDA 12: Vulkan.
+        assert_eq!(cuda_build((3, 5), 581), None);
+        assert_eq!(cuda_build((5, 0), 581), None);
+        assert_eq!(cuda_build((8, 6), 511), None);
+    }
+
+    #[test]
+    fn the_cuda_query_reads_the_capability_and_the_driver_major() {
+        assert_eq!(parse_cuda_query("7.5, 581.29"), Some(((7, 5), 581)));
+        assert_eq!(parse_cuda_query("12.0, 591.44"), Some(((12, 0), 591)));
+        assert_eq!(parse_cuda_query("[N/A], 581.29"), None);
     }
 
     #[test]

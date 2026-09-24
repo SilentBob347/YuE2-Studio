@@ -109,6 +109,10 @@ pub struct YueServerOptions {
     pub disable_flash_attention: bool,
     /// `--clamp-fp16`: clamp hidden states to the FP16 range.
     pub clamp_fp16: bool,
+    /// The folder beside the executable whose `ggml-cuda.dll` the engine
+    /// loads, passed as `YUE_CUDA_BACKEND`; none off CUDA. A release keeps
+    /// one CUDA backend per toolkit in folders of their own.
+    pub cuda_folder: Option<&'static str>,
 }
 
 impl YueServerOptions {
@@ -192,6 +196,22 @@ impl YueServerLocation {
 }
 
 impl YueServerLaunchConfig {
+    /// The CUDA backend the engine loads. A developer build keeps its one
+    /// `ggml-cuda.dll` beside the executable, which ggml finds by itself; a
+    /// release has only the folders, and one missing is a broken install.
+    pub fn cuda_backend(&self) -> Result<Option<PathBuf>> {
+        let Some(folder) = self.options.cuda_folder else { return Ok(None) };
+        let directory = self.executable.parent().context("the engine executable has no folder")?;
+        let backend = directory.join(folder).join("ggml-cuda.dll");
+        if backend.is_file() {
+            return Ok(Some(backend));
+        }
+        if directory.join("ggml-cuda.dll").is_file() {
+            return Ok(None);
+        }
+        bail!("the engine's CUDA backend {} is missing; reinstall the studio", backend.display())
+    }
+
     pub fn arguments(&self) -> Vec<std::ffi::OsString> {
         let mut arguments: Vec<std::ffi::OsString> = vec![
             "--model".into(),
@@ -243,6 +263,14 @@ impl YueServerSupervisor {
 
         let mut command = Command::new(&self.config.executable);
         command.args(self.config.arguments());
+        match self.config.cuda_backend()? {
+            Some(backend) => {
+                command.env("YUE_CUDA_BACKEND", backend);
+            }
+            None => {
+                command.env_remove("YUE_CUDA_BACKEND");
+            }
+        }
         match self.config.options.backend.ggml_device() {
             Some(device) => {
                 command.env("GGML_BACKEND", device);
@@ -566,6 +594,29 @@ mod tests {
     }
 
     #[test]
+    fn the_cuda_backend_comes_from_its_folder_or_a_developer_build() {
+        let root = fresh_directory("cuda-backend");
+        fs::write(root.join(EXECUTABLE), b"test").unwrap();
+        let config = |folder| YueServerLaunchConfig {
+            executable: root.join(EXECUTABLE),
+            models: YueModelFiles { backbone: root.join("b.gguf"), vae: root.join("v.gguf"), transcriber: None, adapters: None },
+            host: DEFAULT_HOST.into(),
+            port: DEFAULT_PORT,
+            options: YueServerOptions { cuda_folder: folder, ..Default::default() },
+        };
+        assert_eq!(config(None).cuda_backend().unwrap(), None);
+        // A release without the folder is broken, never quietly off CUDA.
+        assert!(config(Some("cuda12")).cuda_backend().is_err());
+        fs::create_dir_all(root.join("cuda12")).unwrap();
+        fs::write(root.join("cuda12").join("ggml-cuda.dll"), b"x").unwrap();
+        assert_eq!(config(Some("cuda12")).cuda_backend().unwrap(), Some(root.join("cuda12").join("ggml-cuda.dll")));
+        // A developer build: the one backend beside the executable.
+        fs::write(root.join("ggml-cuda.dll"), b"x").unwrap();
+        assert_eq!(config(Some("cuda13")).cuda_backend().unwrap(), None);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
     fn options_become_the_documented_flags() {
         let arguments = YueServerOptions {
             backend: ComputeBackend::Vulkan,
@@ -576,6 +627,7 @@ mod tests {
             vae_halo: Some(16),
             disable_flash_attention: true,
             clamp_fp16: true,
+            cuda_folder: None,
         }
         .arguments();
         assert_eq!(

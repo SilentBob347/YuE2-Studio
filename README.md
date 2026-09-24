@@ -120,8 +120,13 @@ or download the MP3s from [docs/samples](docs/samples).
 
 - Windows 10/11 x64.
 - A GPU with **6 GB of VRAM** or more:
-  - **NVIDIA**, GTX 16 / RTX 20 generation or newer (Turing through Blackwell), runs on
-    CUDA — the fastest path. Pascal and older are not supported by the CUDA 13 toolkit.
+  - **NVIDIA**, from the GTX 900 series on, runs on CUDA — the fastest path. The studio
+    ships two CUDA builds of the engine and picks the one your card and driver run:
+    CUDA 13 for Turing and newer (GTX 16, RTX 20–50, Tesla T4, A100, RTX A-series,
+    L4/L40, H100) with driver 580 or newer, CUDA 12 for Maxwell, Pascal and Volta
+    (GTX 900/1000, Titan X/Xp/V, Tesla M40, P40, P100, V100) and for any card on a driver
+    from 525 to 579. Both carry compiled code for every one of those architectures, so
+    nothing is left for the driver to compile.
   - **AMD or Intel — experimental.** The engine runs on Vulkan through the card's own
     driver. The Vulkan path itself is verified on NVIDIA (the same words heard as on
     CUDA), but on AMD Radeon integrated graphics the song came out with unintelligible

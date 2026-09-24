@@ -4,7 +4,9 @@ param(
     [string]$Version,
     [string]$ReleaseNotes = "",
     [ValidateSet('auto', 'cuda', 'vulkan', 'all')]
-    [string]$RuntimeBackend = 'all'
+    [string]$RuntimeBackend = 'all',
+    # The CUDA 12 toolkit of the engine's second CUDA backend.
+    [string]$Cuda12Root = $env:CUDA_PATH_V12_9
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,9 +57,9 @@ try {
     # for this backend: a CUDA build of ggml is the slow part of a release.
     $stampPath = Join-Path $engineResourceRoot 'runtime.json'
     $stamp = if (Test-Path $stampPath) { Get-Content -Raw $stampPath | ConvertFrom-Json } else { $null }
-    $stagedIsCurrent = $stamp -and $stamp.commit -eq $engineSource.commit -and $stamp.backend -eq $RuntimeBackend -and $stamp.cuda_architecture -eq 'universal' -and (Test-Path (Join-Path $engineResourceRoot 'yue-server.exe'))
+    $stagedIsCurrent = $stamp -and $stamp.commit -eq $engineSource.commit -and $stamp.backend -eq $RuntimeBackend -and $stamp.cuda_architecture -eq 'universal' -and ($RuntimeBackend -ne 'all' -or @($stamp.cuda_builds).Count -eq 2) -and (Test-Path (Join-Path $engineResourceRoot 'yue-server.exe'))
     if (-not $stagedIsCurrent) {
-        & (Join-Path $PSScriptRoot 'build-yue-runtime.ps1') -OutputDirectory $engineResourceRoot -RuntimeBackend $RuntimeBackend -CudaArchitecture universal
+        & (Join-Path $PSScriptRoot 'build-yue-runtime.ps1') -OutputDirectory $engineResourceRoot -RuntimeBackend $RuntimeBackend -CudaArchitecture universal -Cuda12Root $Cuda12Root
         if ($LASTEXITCODE -ne 0) { throw "the engine runtime build failed with exit code $LASTEXITCODE" }
     }
 

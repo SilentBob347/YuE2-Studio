@@ -388,14 +388,14 @@ struct EngineOptions {
 impl EngineOptions {
     /// Songs one request may draw, and the `--max-batch` the engine starts
     /// with. Each song reserves a KV set, so nothing is reserved unasked.
-    /// Whether the engine will compute on CUDA and so needs cuBLAS: chosen
-    /// outright, or left to ggml on a machine with an NVIDIA card.
-    fn uses_cuda(&self) -> bool {
+    /// The CUDA build the engine will compute on, and so the cuBLAS it needs:
+    /// chosen outright, or left to ggml on an NVIDIA card one of the builds
+    /// runs on. None on Vulkan and the processor.
+    fn cuda_build(&self) -> Option<hardware::CudaBuild> {
         use music_engine::yue_server::ComputeBackend;
         match self.backend {
-            ComputeBackend::Cuda => true,
-            ComputeBackend::Auto => hardware::hardware().nvidia,
-            ComputeBackend::Vulkan | ComputeBackend::Cpu => false,
+            ComputeBackend::Cuda | ComputeBackend::Auto => hardware::hardware().cuda,
+            ComputeBackend::Vulkan | ComputeBackend::Cpu => None,
         }
     }
 
@@ -407,7 +407,7 @@ impl EngineOptions {
             ComputeBackend::Vulkan => true,
             ComputeBackend::Auto => {
                 let hardware = hardware::hardware();
-                !hardware.nvidia && hardware.gpu_name.is_some()
+                hardware.cuda.is_none() && hardware.gpu_name.is_some()
             }
             ComputeBackend::Cuda | ComputeBackend::Cpu => false,
         }
@@ -429,7 +429,8 @@ impl EngineOptions {
             // On an AMD Radeon through Vulkan the hidden states leave the FP16
             // range and the song comes out as pure silence, which the engine's
             // MP3 path then crashes on; the engine's own clamp fixes it.
-            clamp_fp16: self.clamp_fp16 || self.uses_vulkan(),
+            clamp_fp16: self.clamp_fp16 || self.uses_vulkan() || (self.cuda_build().is_some() && hardware::accumulates_in_fp16()),
+            cuda_folder: self.cuda_build().map(hardware::CudaBuild::folder),
         }
     }
 }
@@ -3002,7 +3003,10 @@ async fn restart_engine(state: &AppState) -> Result<(), String> {
     // actually takes on launch, so the fetch belongs here rather than only in
     // the endpoint nothing calls.
     let options = *state.engine_options.read().await;
-    let cuda = options.uses_cuda();
+    if options.backend == music_engine::yue_server::ComputeBackend::Cuda && hardware::hardware().cuda.is_none() {
+        return Err("CUDA was chosen, but this card or its driver runs neither CUDA build of the engine: it needs an NVIDIA card from the GTX 900 series on and driver 525 or newer. Update the NVIDIA driver, or choose Vulkan in Settings.".into());
+    }
+    let cuda = options.cuda_build();
     if !state.engine_runtime.is_ready(cuda) {
         state
             .engine_runtime
@@ -3473,12 +3477,13 @@ async fn compose_setup_status(state: &AppState, manager_status: model_manager::M
         // an engine that starts in three seconds and one that starts in ten
         // minutes. A spinner that says nothing for ten minutes is the same
         // screen as a spinner that is stuck.
-        let runtime_total = engine_runtime::ASSETS.iter().map(|asset| asset.bytes).sum::<u64>();
+        let runtime_cuda = state.engine_options.read().await.cuda_build();
+        let runtime_total = runtime_cuda.map(|build| engine_runtime::cublas_asset(build).bytes).unwrap_or(0);
         let runtime_active = state.engine_runtime.downloader().active().await;
         fields.insert(
             "engine_runtime".into(),
             serde_json::json!({
-                "ready": state.engine_runtime.is_ready(state.engine_options.read().await.uses_cuda()),
+                "ready": state.engine_runtime.is_ready(runtime_cuda),
                 "downloading": runtime_active.is_some(),
                 "downloaded_bytes": runtime_active.as_ref().map(|progress| progress.downloaded_bytes).unwrap_or(0),
                 "total_bytes": runtime_total,

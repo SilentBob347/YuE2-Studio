@@ -5,7 +5,11 @@ param(
     [ValidateSet('auto', 'cuda', 'vulkan', 'all')]
     [string]$RuntimeBackend = 'auto',
     [ValidateSet('universal', 'native', 'sm_89')]
-    [string]$CudaArchitecture = 'universal'
+    [string]$CudaArchitecture = 'universal',
+    # CUDA 13 dropped Maxwell, Pascal and Volta, so a universal all-backends
+    # build adds a second ggml-cuda from a CUDA 12 toolkit: the redist archives
+    # unpacked into one folder, or an installed toolkit.
+    [string]$Cuda12Root = $env:CUDA_PATH_V12_9
 )
 
 # Cmdlet failures stop the build; native tools report progress on stderr, so
@@ -81,9 +85,11 @@ function Sync-PinnedSource {
 
 function Invoke-CMakeBuild([string]$backend) {
     # GGML_NATIVE=OFF plus an explicit architecture list: a binary that runs on
-    # other people's CPUs and on Turing through Blackwell, with PTX for JIT.
+    # other people's CPUs and on Turing through Blackwell. Every consumer card
+    # gets device code: PTX needs a driver as new as this toolkit, and an older
+    # one fails the first kernel with "PTX was compiled with an unsupported toolchain".
     $cudaArch = switch ($CudaArchitecture) {
-        'universal' { '-DGGML_NATIVE=OFF "-DCMAKE_CUDA_ARCHITECTURES=75-virtual;80-virtual;86-real;89-real;90-virtual;120a-real;120-virtual"' }
+        'universal' { '-DGGML_NATIVE=OFF "-DCMAKE_CUDA_ARCHITECTURES=75-real;80-real;86-real;89-real;90-real;120a-real;120-virtual"' }
         'native' { '-DCMAKE_CUDA_ARCHITECTURES=native' }
         'sm_89' { '-DCMAKE_CUDA_ARCHITECTURES=89' }
     }
@@ -115,9 +121,37 @@ function Invoke-CMakeBuild([string]$backend) {
     return $buildDirectoryName
 }
 
+# The CUDA 12 backend: ggml-cuda alone, from the same source, for the cards
+# CUDA 13 no longer targets and for drivers older than CUDA 13. Device code
+# for every architecture, including Turing and newer for those old drivers.
+function Invoke-Cuda12Build {
+    $nvcc = Join-Path $Cuda12Root 'bin\nvcc.exe'
+    if (-not (Test-Path $nvcc)) { throw "The CUDA 12 backend needs a CUDA 12 toolkit; nvcc.exe is missing under '$Cuda12Root'. Set -Cuda12Root or CUDA_PATH_V12_9." }
+    $root = $Cuda12Root.Replace('\', '/')
+    $buildDirectoryName = 'build-cuda12-universal'
+    # nvcc 12 predates this Visual Studio; ggml's own CUDA 12 release builds
+    # pass the same switch. -Wno-deprecated-gpu-targets silences the notice
+    # that CUDA 12 is the last toolkit for Maxwell, Pascal and Volta.
+    $cudaFlags = '-allow-unsupported-compiler -Wno-deprecated-gpu-targets'
+    $flags = "-DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CUDA=ON -DGGML_VULKAN=OFF `"-DCMAKE_CUDA_ARCHITECTURES=52-real;60-real;61-real;70-real;75-real;80-real;86-real;89-real;90-real;120a-real`" `"-DCMAKE_CUDA_COMPILER=$root/bin/nvcc.exe`" `"-DCUDAToolkit_ROOT=$root`" `"-DCMAKE_CUDA_FLAGS=$cudaFlags`""
+    $ccache = if (Get-Command ccache -ErrorAction SilentlyContinue) { '-DGGML_CCACHE=ON' } else { '-DGGML_CCACHE=OFF' }
+    $symbols = '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase -DCMAKE_EXE_LINKER_FLAGS=/DEBUG -DCMAKE_SHARED_LINKER_FLAGS=/DEBUG'
+    $parallelism = [Math]::Max(1, [Environment]::ProcessorCount)
+    $vcvars = Get-VcVars64
+    $command = "set `"VSLANG=1033`" && set `"CUDA_PATH=$Cuda12Root`" && call `"$vcvars`" >nul && cmake -S . -B `"$buildDirectoryName`" -G Ninja -DCMAKE_BUILD_TYPE=Release $ccache $symbols $flags && cmake --build `"$buildDirectoryName`" --target ggml-cuda --parallel $parallelism"
+    Push-Location $engineWorktree
+    try { & cmd.exe /d /s /c $command | Out-Host } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { throw 'yue2.cpp CUDA 12 backend build failed.' }
+    $dll = Get-ChildItem -Path (Join-Path $engineWorktree $buildDirectoryName) -Recurse -Filter 'ggml-cuda.dll' -File | Select-Object -First 1
+    if (-not $dll) { throw 'The CUDA 12 build completed without ggml-cuda.dll.' }
+    return $dll.DirectoryName
+}
+
 Sync-PinnedSource
 $backend = Resolve-RuntimeBackend
 $buildDirectoryName = Invoke-CMakeBuild $backend
+$shipsTwoCudaBuilds = $backend -eq 'all' -and $CudaArchitecture -eq 'universal'
+$cuda12Directory = if ($shipsTwoCudaBuilds) { Invoke-Cuda12Build } else { $null }
 $binDirectory = @(
     (Join-Path $engineWorktree "$buildDirectoryName\Release"),
     (Join-Path $engineWorktree "$buildDirectoryName\bin\Release"),
@@ -137,6 +171,19 @@ foreach ($target in $shippedTargets) {
 }
 Get-ChildItem -Path $binDirectory -Filter '*.dll' -File | Copy-Item -Destination $resolvedOutputDirectory -Force
 
+# Each CUDA backend in a folder of its own, none beside the executable: the
+# studio names the one the card and its driver run in YUE_CUDA_BACKEND.
+if ($shipsTwoCudaBuilds) {
+    foreach ($build in @(@{ Folder = 'cuda13'; Source = $binDirectory }, @{ Folder = 'cuda12'; Source = $cuda12Directory })) {
+        $folder = Join-Path $resolvedOutputDirectory $build.Folder
+        New-Item -ItemType Directory -Force -Path $folder | Out-Null
+        $source = Join-Path $build.Source 'ggml-cuda.dll'
+        if (-not (Test-Path $source)) { throw "ggml-cuda.dll is missing from the $($build.Folder) build." }
+        Copy-Item $source $folder -Force
+    }
+    Remove-Item (Join-Path $resolvedOutputDirectory 'ggml-cuda.dll') -Force
+}
+
 # The Visual C++ runtime travels with the engine, app-local as Microsoft's
 # redistribution terms allow, so a clean machine needs no system install.
 $vsRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Get-VcVars64))))
@@ -154,6 +201,7 @@ $stamp = [pscustomobject]@{
     commit = $engineSource.commit
     backend = $backend
     cuda_architecture = $CudaArchitecture
+    cuda_builds = if ($shipsTwoCudaBuilds) { @('cuda13', 'cuda12') } else { @() }
     runtime = 'yue-server.exe'
 }
 [System.IO.File]::WriteAllText((Join-Path $resolvedOutputDirectory 'runtime.json'), ($stamp | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
