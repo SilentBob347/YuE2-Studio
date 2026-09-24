@@ -180,7 +180,8 @@ footer a { color: var(--text); }
       <div class="card"><h3>単語単位のカラオケ</h3><p>すべての単語にタイムスタンプを持つ拡張 LRC。Parakeet または Whisper で同期。</p></div>
       <div class="card"><h3>GPU でステム分離</h3><p>ドラム、ベース、その他、ボーカル、ギター、ピアノを HT-Demucs で分離。</p></div>
       <div class="card"><h3>LoRA</h3><p>作曲またはサウンドに効く LoRA と LoKr を、それぞれ強さを付けて使えます。既製のカタログと、選んだものをダウンロードする Hugging Face 検索付き。</p></div>
-      <div class="card"><h3>自分だけの LoRA</h3><p>同じアーティストやスタイルの 5〜20 曲から、HOT-Step のトレーナーとレシピで LoRA を自分の GPU で学習。設定はすべて変更でき、データセットはこのスタジオと MiniMax Music3 Studio の間で移せます。</p></div>
+      <div class="card"><h3>自分だけの LoRA</h3><p>同じアーティストやスタイルの曲から、HOT-Step のトレーナーとレシピで LoRA を自分の GPU で学習。設定はすべて変更でき、データセットはこのスタジオと MiniMax Music3 Studio の間で移せます。</p></div>
+      <div class="card"><h3>フォルダを落とすだけでデータセット</h3><p>フォルダを落とすと、歌詞はプレーヤーが使う歌詞データベース（LRCLIB、QQ Music、Kugou）から一字一句取り込み、どこにもない曲だけ Whisper が聞き取ります。MOSS-Music が各曲を聴き、アシスタントがスタイルを書きます。曲ごとに進行が見え、再起動しても止まったところから続きます。</p></div>
       <div class="card"><h3>音声処理</h3><p>ノイズ除去、Spectral Lifter、ボーカルの自然化、自分の VST3 プラグイン、リファレンスマスタリング。処理前後を聴き比べ、バージョンとして残すか破棄します。</p></div>
     </div>
   </section>
@@ -257,6 +258,7 @@ footer a { color: var(--text); }
           <tr><td>ステム分離 — HT-Demucs</td><td>GPU または CPU</td><td>任意</td></tr>
           <tr><td>作詞アシスタント</td><td>ローカル Gemma または OpenRouter</td><td>任意</td></tr>
           <tr><td>LoRA 学習 — HOT-Step ace-train</td><td>NVIDIA RTX 30 以降、VRAM 11 GB</td><td>8 GB、任意</td></tr>
+          <tr><td>曲を聴いて説明 — MOSS-Music-8B</td><td>VRAM 約 12 GB</td><td>10 GB、任意</td></tr>
           <tr><td>VST3 ホスト — HOT-Step</td><td>あなたのマシン、独立したプロセス</td><td>同梱</td></tr>
         </tbody>
       </table>
