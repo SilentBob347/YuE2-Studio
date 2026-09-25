@@ -3,6 +3,39 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## Unreleased
+
+### Added
+
+- **Train further.** A run that is not there yet goes on from its latest checkpoint: set
+  the steps to reach and press **Train further** on the run. The same recipe and songs, the
+  optimizer as it was; the loss chart and the checkpoints continue instead of starting over.
+  Stops at that step. MCP: `training_continue`; `training_status` shows each run's
+  `resume_step`.
+- **Section tags for your own lyrics.** The tag button beside the lyrics lays them out in
+  [Verse 1], [Chorus], [Bridge]... without changing a word: the assistant only says where
+  each section starts, and the lines go under the tags as written. Tags already there are
+  replaced. MCP: `assistant_sections`.
+- **The song details show the sampling** of each stage when it was changed from the
+  model's own.
+
+### Fixed
+
+- **Renaming a track.** The pencil in the song details and the title in the library did
+  nothing for most tracks: songs of the local library carried no owner, so the studio took
+  them for someone else's. Every track can be renamed from both places now, and the library
+  row shows a pencil on hover.
+- **Models kept in several folders.** **Use models I already have** looked only at the top
+  of the folder you pick; it now searches its subfolders too (hidden ones aside), off the
+  window's thread.
+- **Wider side panels.** The create panel and the song details stretch up to 1200 px on a
+  wide screen, never past 40% of the window; a double click on the edge puts the default
+  width back, and the arrow keys move the focused edge.
+- **Max tokens above 9000 did nothing.** The engine caps the audio codes at the duration
+  times 25, so a longer budget never reached it and a long song stopped where the duration
+  ended. The form now says how long the stage is for the duration set, and warns when max
+  tokens asks for more. Songs per request and variations say what each of them does.
+
 ## 2026-09-25 — 2.0.0
 
 ### Added

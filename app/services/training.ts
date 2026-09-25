@@ -77,6 +77,11 @@ export interface TrainingRun {
   installed: number[];
   checkpoints: number[];
   log?: string[];
+  /** The step "train further" starts from, when the run can be continued. */
+  resume_step?: number;
+  /** Why the run cannot be continued: a code the page translates. */
+  resume_refused?: 'method' | 'prepared_gone' | 'no_checkpoint' | 'no_state' | 'no_run';
+  continuations?: { from: number; to: number; at: string }[];
 }
 
 export interface TrainingState {
@@ -152,6 +157,7 @@ export const deleteItem = (id: string, item: string) => call<Dataset>(`/v1/train
 
 export const startRun = (datasetId: string, name: string, recipe: Recipe) => call<TrainingRun>('/v1/training/runs', json('POST', { dataset_id: datasetId, name, recipe }));
 export const cancelRun = (id: string) => call<void>(`/v1/training/runs/${id}/cancel`, { method: 'POST' });
+export const continueRun = (id: string, steps: number) => call<TrainingRun>(`/v1/training/runs/${id}/continue`, json('POST', { steps }));
 export const deleteRun = (id: string) => call<void>(`/v1/training/runs/${id}`, { method: 'DELETE' });
 export const installCheckpoint = (id: string, step: number, name?: string) =>
   call<{ id: string }>(`/v1/training/runs/${id}/checkpoints/${step}/install`, json('POST', { name }));

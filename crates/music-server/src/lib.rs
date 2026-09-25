@@ -689,6 +689,7 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/assistant/local-models", get(assistant_local_models))
         .route("/v1/assistant/write", post(assistant_write))
         .route("/v1/assistant/write/stream", post(assistant_write_stream))
+        .route("/v1/assistant/sections", post(assistant_sections))
         .route("/v1/assistant/runtime", get(assistant_runtime_status))
         .route("/v1/assistant/runtime/install", post(assistant_runtime_install))
         .route("/v1/assistant/runtime/cancel", post(cancel_assistant_download))
@@ -765,6 +766,7 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/training/listen/install", post(install_listen_pack))
         .route("/v1/training/runs", post(start_training))
         .route("/v1/training/runs/{id}/cancel", post(cancel_training))
+        .route("/v1/training/runs/{id}/continue", post(continue_training))
         .route("/v1/training/runs/{id}", axum::routing::delete(delete_training_run))
         .route("/v1/training/runs/{id}/checkpoints/{step}/install", post(install_training_checkpoint))
         .route("/v1/library/songs/{id}/stems", get(read_stems).post(start_separation))
@@ -1963,6 +1965,13 @@ async fn read_training(State(state): State<AppState>) -> Json<Value> {
             let checkpoints = training.checkpoints(&run.id);
             let mut value = serde_json::to_value(&run).unwrap_or(Value::Null);
             value["checkpoints"] = serde_json::json!(checkpoints.iter().map(|checkpoint| checkpoint.step).collect::<Vec<_>>());
+            // where "train further" starts, or why it cannot; a run going now has neither
+            if run.status != training::RunStatus::Running {
+                match training.resume_point(&run.id) {
+                    Ok((step, _)) => value["resume_step"] = serde_json::json!(step),
+                    Err(reason) => value["resume_refused"] = serde_json::json!(reason),
+                }
+            }
             if active.as_deref() == Some(run.id.as_str()) || run.status == training::RunStatus::Failed {
                 value["log"] = serde_json::json!(training.log_tail(&run.id, 12));
             }
@@ -2307,6 +2316,30 @@ async fn card_free_of_training(state: &AppState, what: &str) -> Result<(), (Stat
         return Err(api_error(StatusCode::CONFLICT, format!("a LoRA is training on the card; {what} once it finishes")));
     }
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct ContinueTraining {
+    /// The steps the run is to reach in all.
+    steps: u32,
+}
+
+/// Trains a finished or stopped run further from its latest checkpoint.
+async fn continue_training(State(state): State<AppState>, Path(id): Path<String>, Json(input): Json<ContinueTraining>) -> Result<Json<training::Run>, (StatusCode, Json<ApiError>)> {
+    let preparing = state.prepare.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).as_ref().is_some_and(|job| !job.finished);
+    if preparing {
+        return Err(api_error(StatusCode::CONFLICT, "songs are being prepared; train once that is done".into()));
+    }
+    let rendering = state.jobs.read().await.values().any(|job| matches!(job.status, MusicJobStatus::Queued | MusicJobStatus::Running));
+    if rendering {
+        return Err(api_error(StatusCode::CONFLICT, "a song is being made; train once it is done".into()));
+    }
+    state
+        .training
+        .continue_run(Some(engine_bundle_root()), &id, input.steps, card_hooks(&state).await)
+        .await
+        .map(Json)
+        .map_err(|error| api_error(StatusCode::CONFLICT, format!("{error:#}")))
 }
 
 async fn cancel_training(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
@@ -4685,6 +4718,26 @@ async fn assistant_write(
     draft.map(Json)
 }
 
+#[derive(Deserialize)]
+struct LyricsSectionsRequest {
+    lyrics: String,
+}
+
+/// Lyrics laid out in tagged sections with their words untouched, the layout
+/// a dataset's published lyric sheets get. Tags already there are replaced.
+async fn assistant_sections(
+    State(state): State<AppState>,
+    Json(request): Json<LyricsSectionsRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let lines = assistant::without_section_tags(&request.lyrics);
+    if lines.trim().is_empty() {
+        return Err(api_error(StatusCode::BAD_REQUEST, "there are no lyrics to lay out".into()));
+    }
+    let laid_out = prepare::lay_out_lyrics(&state, &lines, assistant::AssistTarget::Sheet).await;
+    release_assistant_unless_kept(&state).await;
+    laid_out.map(|lyrics| Json(serde_json::json!({ "lyrics": lyrics }))).map_err(|error| api_error(StatusCode::BAD_GATEWAY, error))
+}
+
 /// A draft from the assistant, which stays loaded after it: a run of songs
 /// asks it many times and releases it once at the end.
 async fn assistant_draft(state: &AppState, request: &assistant::AssistRequest) -> Result<Value, (StatusCode, Json<ApiError>)> {
@@ -5351,6 +5404,23 @@ async fn setup_remove(
     })))
 }
 
+const ADOPT_FOLDER_DEPTH: usize = 8;
+
+/// Files in a folder and its subfolders, `depth` levels down; hidden folders
+/// (caches, `.git`) are left out.
+fn adoptable_files(folder: &std::path::Path, depth: usize) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    let Ok(entries) = std::fs::read_dir(folder) else { return files };
+    for path in entries.flatten().map(|entry| entry.path()) {
+        if path.is_file() {
+            files.push(path);
+        } else if depth > 0 && path.is_dir() && !path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.starts_with('.')) {
+            files.extend(adoptable_files(&path, depth - 1));
+        }
+    }
+    files
+}
+
 /// Takes models the user already has instead of downloading them again.
 ///
 /// Anyone who has run yue2.cpp by hand already has these weights on disk, and
@@ -5379,12 +5449,13 @@ async fn setup_adopt(State(state): State<AppState>, body: axum::body::Bytes) -> 
 
     let _ = std::fs::create_dir_all(&models_root);
     let mut adopted: Vec<String> = Vec::new();
-    let entries: Vec<std::path::PathBuf> = std::fs::read_dir(&folder)
-        .map_err(|error| api_error(StatusCode::BAD_REQUEST, error.to_string()))?
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|path| path.is_file())
-        .collect();
+    std::fs::read_dir(&folder).map_err(|error| api_error(StatusCode::BAD_REQUEST, error.to_string()))?;
+    // Model sets are often kept one component per folder, so the picked
+    // folder is searched with its subfolders.
+    let searched = folder.clone();
+    let entries = tokio::task::spawn_blocking(move || adoptable_files(&searched, ADOPT_FOLDER_DEPTH))
+        .await
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
     for component in &catalog.components {
         let target = models_root.join(component.filename);
@@ -6643,6 +6714,21 @@ fn api_error(status: StatusCode, error: String) -> (StatusCode, Json<ApiError>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn models_are_found_in_subfolders_but_not_hidden_ones() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("YuE2").join("vae");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(root.path().join(".cache")).unwrap();
+        std::fs::write(root.path().join("top.gguf"), b"a").unwrap();
+        std::fs::write(nested.join("deep.gguf"), b"b").unwrap();
+        std::fs::write(root.path().join(".cache").join("hidden.gguf"), b"c").unwrap();
+        let mut names: Vec<String> = adoptable_files(root.path(), ADOPT_FOLDER_DEPTH).iter().map(|path| path.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["deep.gguf", "top.gguf"]);
+        assert_eq!(adoptable_files(root.path(), 0).len(), 1, "depth 0 is the folder itself");
+    }
 
     #[test]
     fn a_device_failure_is_told_from_running_out_of_memory() {

@@ -250,6 +250,17 @@ pub struct Run {
     /// Checkpoints already added to the adapter library, by step.
     #[serde(default)]
     pub installed: Vec<u32>,
+    /// Each time the run was trained further, oldest first.
+    #[serde(default)]
+    pub continuations: Vec<Continuation>,
+}
+
+/// The run trained on from the checkpoint at `from` up to `to` steps.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Continuation {
+    pub from: u32,
+    pub to: u32,
+    pub at: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -995,6 +1006,7 @@ impl Training {
             created_at: now(),
             finished_at: None,
             installed: Vec::new(),
+            continuations: Vec::new(),
         };
         self.save_run(&run)?;
         let cancel = Arc::new(tokio::sync::Notify::new());
@@ -1008,28 +1020,96 @@ impl Training {
                 Ok(true) => training.work(&trainer, libraries.as_deref(), &run_dir, &run_id, stages, cancel).await,
                 other => other,
             };
-            {
-                let _edit = training.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                if let Ok(mut run) = training.run(&run_id) {
-                    run.finished_at = Some(now());
-                    match outcome {
-                        Ok(true) => {
-                            run.status = RunStatus::Done;
-                            run.stage = None;
-                        }
-                        Ok(false) => run.status = RunStatus::Cancelled,
-                        Err(error) => {
-                            run.status = RunStatus::Failed;
-                            run.error = Some(format!("{error:#}"));
-                        }
-                    }
-                    let _ = training.save_run(&run);
-                }
-            }
-            *training.active.write().await = None;
+            training.settle(&run_id, outcome).await;
             (card.give_back)().await;
         });
         Ok(run)
+    }
+
+    /// Where a run can be trained further from, or which [`RESUME_REFUSALS`]
+    /// keeps it from going on.
+    pub fn resume_point(&self, run_id: &str) -> Result<(u32, PathBuf), &'static str> {
+        let dir = self.run_dir(run_id).map_err(|_| "no_run")?;
+        if !dir.join("prepared").join("dataset.json").is_file() {
+            return Err("prepared_gone");
+        }
+        yue_train::resume_point(&dir).ok_or("no_checkpoint")
+    }
+
+    /// Trains a run further, up to `steps` in all, from its latest checkpoint:
+    /// the same recipe, the same prepared songs, the steps and the chart go on
+    /// where they stopped. Stops by steps only - a likeness target would be
+    /// judged on a window the resumed trainer starts empty.
+    pub async fn continue_run(self: &Arc<Self>, libraries: Option<PathBuf>, run_id: &str, steps: u32, card: CardHooks) -> Result<Run> {
+        let trainer = self.trainer();
+        if !self.pack_ready() {
+            bail!("the training files are not downloaded yet");
+        }
+        if !trainer.is_file() {
+            bail!("the trainer is not installed: {} is missing", trainer.display());
+        }
+        let (from, state) = self.resume_point(run_id).map_err(|code| anyhow::anyhow!(refusal(code)))?;
+        if steps <= from {
+            bail!("set the steps above {from}, the checkpoint the run goes on from");
+        }
+        let mut active = self.active.write().await;
+        if active.is_some() {
+            bail!("a training run is already going");
+        }
+        let run_dir = self.run_dir(run_id)?;
+        let mut run = self.run(run_id)?;
+        let mut recipe = run.recipe.clone();
+        recipe.steps = steps;
+        recipe.target_kl = 0.0;
+        recipe.stop = "kl".into();
+        let output = run_dir.join(format!("output-{}", new_id()));
+        let stage = yue_train::continuation_stage(&self.models_dir(), &run_dir, &recipe, &output, &state);
+        run.recipe = recipe;
+        run.status = RunStatus::Running;
+        run.stage = None;
+        run.stages = vec![stage.id.to_string()];
+        run.error = None;
+        run.finished_at = None;
+        // steps past the checkpoint are trained again; the chart keeps the new ones
+        run.steps.retain(|record| record.step <= from);
+        run.continuations.push(Continuation { from, to: steps, at: now() });
+        self.save_run(&run)?;
+        let cancel = Arc::new(tokio::sync::Notify::new());
+        *active = Some(Active { run_id: run_id.to_string(), cancel: cancel.clone() });
+        drop(active);
+
+        let training = self.clone();
+        let run_id = run_id.to_string();
+        tokio::spawn(async move {
+            (card.take)().await;
+            let outcome = training.work(&trainer, libraries.as_deref(), &run_dir, &run_id, vec![stage], cancel).await;
+            training.settle(&run_id, outcome).await;
+            (card.give_back)().await;
+        });
+        Ok(run)
+    }
+
+    /// Records how a run ended and lets the next one start.
+    async fn settle(&self, run_id: &str, outcome: Result<bool>) {
+        {
+            let _edit = self.edits.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Ok(mut run) = self.run(run_id) {
+                run.finished_at = Some(now());
+                match outcome {
+                    Ok(true) => {
+                        run.status = RunStatus::Done;
+                        run.stage = None;
+                    }
+                    Ok(false) => run.status = RunStatus::Cancelled,
+                    Err(error) => {
+                        run.status = RunStatus::Failed;
+                        run.error = Some(format!("{error:#}"));
+                    }
+                }
+                let _ = self.save_run(&run);
+            }
+        }
+        *self.active.write().await = None;
     }
 
     /// Separates the vocals still missing, one song at a time; the result is
@@ -1182,6 +1262,15 @@ impl Training {
         }
         std::fs::remove_dir_all(dir)?;
         Ok(())
+    }
+}
+
+/// Why a run cannot be trained further, by the code the page translates.
+fn refusal(code: &str) -> &'static str {
+    match code {
+        "prepared_gone" => "the prepared songs of this run are gone; train it again from the dataset",
+        "no_checkpoint" => "this run saved no checkpoint to continue from",
+        _ => "no such training run",
     }
 }
 

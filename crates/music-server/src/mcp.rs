@@ -1079,6 +1079,12 @@ fn tools() -> &'static [Tool] {
             },
             // ---------------------------------------------------------------- the writing assistant
             Tool {
+                name: "assistant_sections",
+                description: "Lay lyrics out in tagged sections (verse, chorus, bridge...) with their words untouched - the form's tag button. Tags already in the text are replaced. Returns the tagged lyrics.",
+                schema: || object(json!({ "lyrics": { "type": "string" } }), &["lyrics"]),
+                call: |args| post("/v1/assistant/sections".into(), args.clone()),
+            },
+            Tool {
                 name: "assistant_write",
                 description: "The studio's writing assistant. target: all (lyrics, style, title and cover prompt from an idea in description), lyrics (rewrite the lyrics to fit style), style (write the style for the lyrics), score (edit abc as instruction asks), transcript (lay out recognised words as a lyric sheet). Returns a draft to use in song_create.",
                 schema: || object(json!({
@@ -1756,6 +1762,12 @@ fn tools() -> &'static [Tool] {
                 description: "Train a LoRA on a dataset. recipe: the recipe from training_status (recipe_defaults) with your changes, e.g. stop 'kl' with target_kl 1.4, or stop 'epochs' with epochs. Watch training_status; one run at a time, and it holds the card.",
                 schema: || object(json!({ "dataset_id": { "type": "string" }, "name": { "type": "string" }, "recipe": { "type": "object" } }), &["dataset_id", "recipe"]),
                 call: |args| post("/v1/training/runs".into(), args.clone()),
+            },
+            Tool {
+                name: "training_continue",
+                description: "Train a finished or stopped run further, from its latest checkpoint up to steps in all (training_status shows resume_step, or resume_refused with the reason). Same recipe and songs; the loss chart and the checkpoints go on from there. Stops by steps only.",
+                schema: || object(json!({ "run_id": { "type": "string" }, "steps": { "type": "integer", "description": "the total steps to reach, above resume_step" } }), &["run_id", "steps"]),
+                call: |args| post(format!("/v1/training/runs/{}/continue", segment(&text(args, "run_id")?)), json!({ "steps": args.get("steps").cloned().unwrap_or(Value::Null) })),
             },
             Tool {
                 name: "training_cancel",

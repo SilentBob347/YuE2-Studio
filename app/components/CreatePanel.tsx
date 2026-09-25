@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { karaokeReason } from '../services/karaoke';
 import {
   AlertTriangle, AudioLines, ChevronDown, CircleAlert, Dices, Eye, EyeOff, FileMusic, FolderOpen, Loader2,
-  Music2, Pause, Play, RotateCcw, Save, Sparkles, Square, Upload, Wand2, Settings2, X,
+  Music2, Pause, Play, RotateCcw, Save, Sparkles, Square, Tags, Upload, Wand2, Settings2, X,
 } from 'lucide-react';
 import { AudioWaveform } from './AudioWaveform';
 import type { Song, YueCot, YueOutputFormat, YueRequest, YueSampling } from '../types';
@@ -67,6 +67,9 @@ type EngineCatalog = {
 
 type SamplingText = Record<keyof YueSampling, string>;
 
+/** The style as it is sent: a trigger's comma with nothing after it goes. */
+const finishedStyle = (text: string) => text.trim().replace(/,$/, '').trimEnd();
+const SEMANTIC_CODES_PER_SECOND = 25;
 /** 9000 semantic frames at 25 per second, the stage's own budget. */
 const MAX_DURATION_SECONDS = 360;
 /** A new prompt's ceiling: 2:10. Examples and prompt files keep their own. */
@@ -218,7 +221,7 @@ const AutoTextarea: React.FC<React.TextareaHTMLAttributes<HTMLTextAreaElement> &
 };
 
 /** Seven knobs of one autoregressive stage, each defaulting to the checkpoint. */
-const SamplingGrid: React.FC<{ value: SamplingText; defaults?: YueSampling; onChange: (value: SamplingText) => void; t: (key: never) => string }> = ({ value, defaults, onChange, t }) => {
+const SamplingGrid: React.FC<{ value: SamplingText; defaults?: YueSampling; onChange: (value: SamplingText) => void; t: (key: never) => string; maxTokensCap?: number }> = ({ value, defaults, onChange, t, maxTokensCap }) => {
   const label: Record<keyof YueSampling, string> = {
     temperature: t('samplingTemperature' as never),
     top_p: 'Top P',
@@ -235,7 +238,7 @@ const SamplingGrid: React.FC<{ value: SamplingText; defaults?: YueSampling; onCh
           <input
             value={value[key]}
             onChange={event => onChange({ ...value, [key]: event.target.value })}
-            placeholder={asText(defaults?.[key])}
+            placeholder={key === 'max_tokens' && maxTokensCap !== undefined ? asText(Math.min(Number(defaults?.max_tokens ?? maxTokensCap), maxTokensCap)) : asText(defaults?.[key])}
             inputMode="decimal"
             className={CONTROL}
           />
@@ -279,7 +282,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [serviceDown, setServiceDown] = useState(false);
   const [catalog, setCatalog] = useState<EngineCatalog | null>(null);
   const [assistantReady, setAssistantReady] = useState(false);
-  const [assisting, setAssisting] = useState<'all' | 'lyrics' | 'style' | 'score' | null>(null);
+  const [assisting, setAssisting] = useState<'all' | 'lyrics' | 'style' | 'score' | 'sections' | null>(null);
   const [assistStage, setAssistStage] = useState<string | null>(null);
   const [assistModel, setAssistModel] = useState<string | null>(null);
   const [assistDraft, setAssistDraft] = useState('');
@@ -292,7 +295,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     setStyle(current => {
       const parts = current.split(',').map(part => part.trim()).filter(Boolean);
       const has = parts.some(part => part.toLowerCase() === word.toLowerCase());
-      if (present) return has ? current : [word, ...parts].join(', ');
+      // into an empty style the word comes with its comma, so what is typed next stays apart
+      if (present) return has ? current : parts.length ? [word, ...parts].join(', ') : `${word}, `;
       return has ? parts.filter(part => part.toLowerCase() !== word.toLowerCase()).join(', ') : current;
     });
   }, []);
@@ -512,7 +516,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   // switch on, the file stays a prompt rather than one particular take.
   const buildRequest = (forFile = false): YueRequest => {
     const request: YueRequest = {
-      style: style.trim(),
+      style: finishedStyle(style),
       lyrics: lyrics.replace(/\r\n?/g, '\n').trim(),
       output_format: format,
     };
@@ -630,7 +634,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     try {
       const pinned = randomizeSeed ? undefined : numberOrUndefined(lmSeed);
       const score = await composeScore({
-        style: style.trim(),
+        style: finishedStyle(style),
         lyrics: lyrics.replace(/\r\n?/g, '\n').trim(),
         cot: effectiveCot,
         lmSeed: pinned !== undefined && pinned >= 0 ? pinned : undefined,
@@ -677,7 +681,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
         description: freshSong ? '' : name.trim(),
         instruction: (target === 'score' ? scoreInstruction : assistInstruction).trim(),
         lyrics: freshSong ? '' : lyrics.trim(),
-        style: freshSong ? '' : style.trim(),
+        style: freshSong ? '' : finishedStyle(style),
         abc: freshSong ? '' : abc.trim(),
         duration_seconds: numberOrUndefined(duration) ?? 120,
       });
@@ -743,6 +747,33 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       setAssisting(null);
       setAssistStage(null);
       setAssistDraft('');
+    }
+  };
+
+  // Tags the lyrics already in the form: the assistant marks where each
+  // section starts, the words stay exactly as written.
+  const layOutLyrics = async () => {
+    if (!assistantReady || assisting || !lyrics.trim()) return;
+    const run = new AbortController();
+    assistRun.current = run;
+    setAssisting('sections');
+    setError(null);
+    try {
+      const response = await fetch('/v1/assistant/sections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lyrics }),
+        signal: run.signal,
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok || typeof body?.lyrics !== 'string') throw new Error(body?.error || String(response.status));
+      setLyrics(body.lyrics);
+    } catch (reason) {
+      const cancelled = reason instanceof DOMException && reason.name === 'AbortError';
+      if (!cancelled) setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      assistRun.current = null;
+      setAssisting(null);
     }
   };
 
@@ -823,6 +854,12 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const totalTracks = songs * variations;
   const durationFallback = Number(defaults.duration ?? MAX_DURATION_SECONDS);
   const formatDuration = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`;
+  // The engine caps the audio-code stage at duration x 25 codes: what a
+  // larger max tokens would ask for is never drawn.
+  const effectiveDuration = Math.min(Math.max(numberOrUndefined(duration) ?? durationFallback, 1), MAX_DURATION_SECONDS);
+  const semanticBudget = Math.round(effectiveDuration * SEMANTIC_CODES_PER_SECOND);
+  const semanticMaxTokens = numberOrUndefined(semanticSampling.max_tokens);
+  const budgetText = (key: string) => tt(key).replace('{frames}', String(semanticBudget)).replace('{time}', formatDuration(effectiveDuration));
   const scoreDisabled = effectiveCot === 'off';
   // The model card: melody mode does not strip chord symbols by itself.
   const melodyWithChords = effectiveCot === 'melody' && CHORD_SYMBOL.test(abc);
@@ -1112,6 +1149,11 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
             actions={
               <>
                 {assistantReady && (
+                  <button type="button" onClick={() => void layOutLyrics()} disabled={assisting !== null || !lyrics.trim()} className={ICON} title={t('formatLyrics')}>
+                    {assisting === 'sections' ? <Loader2 size={14} className="animate-spin" /> : <Tags size={14} />}
+                  </button>
+                )}
+                {assistantReady && (
                   <button type="button" onClick={() => void askAssistant('lyrics')} disabled={assisting !== null} className={ICON} title={t('writeLyrics')}>
                     {assisting === 'lyrics' ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} className="text-pink-500" />}
                   </button>
@@ -1289,7 +1331,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                 onChange={setLmBatch}
                 disabled={maxBatch <= 1}
               />
-              {maxBatch <= 1 && <p className="text-[11px] leading-4 text-zinc-500">{tt('songsPerRequestHint')}</p>}
+              <p className="text-[11px] leading-4 text-zinc-500">{tt('songsPerRequestExplain')}{maxBatch <= 1 && ` ${tt('songsPerRequestHint')}`}</p>
               <SliderRow
                 label={t('variationsBatch')}
                 value={synthBatch}
@@ -1299,6 +1341,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                 step={1}
                 onChange={setSynthBatch}
               />
+              <p className="text-[11px] leading-4 text-zinc-500">{tt('variationsExplain')}</p>
               <Switch checked={randomizeSeed} onChange={setRandomizeSeed} label={t('randomizeSeed')} />
               {!randomizeSeed && (
                 <div className="grid grid-cols-2 gap-2">
@@ -1338,7 +1381,10 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                       <input value={cfgScale} onChange={event => setCfgScale(event.target.value)} placeholder={tt('guidanceAuto')} inputMode="decimal" className={CONTROL} />
                     </Field>
                     <div className="mt-3">
-                      <SamplingGrid value={semanticSampling} defaults={defaults.semantic_sampling} onChange={setSemanticSampling} t={t as never} />
+                      <SamplingGrid value={semanticSampling} defaults={defaults.semantic_sampling} onChange={setSemanticSampling} t={t as never} maxTokensCap={semanticBudget} />
+                      <p className={`mt-2 text-[11px] leading-4 ${semanticMaxTokens !== undefined && semanticMaxTokens > semanticBudget ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-500'}`}>
+                        {budgetText(semanticMaxTokens !== undefined && semanticMaxTokens > semanticBudget ? 'semanticBudgetOver' : 'semanticBudget')}
+                      </p>
                     </div>
                     <div className="mt-3">
                       <Field label={tt('semanticTokens')} hint={tt('semanticTokensHint')}>

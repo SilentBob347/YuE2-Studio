@@ -564,7 +564,7 @@ export const zh = {
     generate: '生成',
     generating: '生成中...',
     createButton: '创建',
-    formatLyrics: '格式化歌词',
+    formatLyrics: '标注段落标签（歌词不变）',
     formatting: '格式化中...',
     clearAll: '清空全部',
 

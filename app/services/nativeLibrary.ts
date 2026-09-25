@@ -71,12 +71,16 @@ function stringMetadata(metadata: Record<string, unknown> | null | undefined, ke
   return typeof value === 'string' ? value : undefined;
 }
 
+/** The one user of this desktop studio; every song in its library is theirs. */
+export const LOCAL_USER_ID = 'local-studio';
+
 export function mapNativeLibrarySong(song: NativeLibrarySong): Song {
   const metadata = song.metadata ?? {};
   const tags = Array.isArray(metadata.tags) ? metadata.tags.filter((tag): tag is string => typeof tag === 'string') : [];
 
   return {
     id: song.id,
+    userId: LOCAL_USER_ID,
     title: song.title,
     lyrics: song.lyrics,
     style: song.caption,

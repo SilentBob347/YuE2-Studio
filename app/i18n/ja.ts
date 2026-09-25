@@ -564,7 +564,7 @@ export const ja = {
   generate: '生成',
   generating: '生成中...',
   createButton: '作成',
-  formatLyrics: '歌詞をフォーマット',
+  formatLyrics: 'セクションタグを付ける（歌詞はそのまま）',
   formatting: 'フォーマット中...',
   clearAll: 'すべてクリア',
 

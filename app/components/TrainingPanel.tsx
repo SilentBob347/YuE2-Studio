@@ -19,6 +19,7 @@ import {
   addPicked,
   cancelPrepare,
   cancelRun,
+  continueRun,
   cancelTrainingPack,
   clock,
   createDataset,
@@ -837,6 +838,52 @@ const LossLine: React.FC<{ steps: TrainingRun['steps'] }> = ({ steps }) => {
   );
 };
 
+/** Trains a stopped or finished run further: the steps it is to reach in
+ *  all, from the checkpoint the server says it can go on from. */
+const ContinueRun: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (message: string) => void }> = ({ run, onChanged, onError }) => {
+  const { t, tt } = useStrings();
+  const from = run.resume_step;
+  const [steps, setSteps] = useState('');
+  const [starting, setStarting] = useState(false);
+  if (from === undefined) {
+    return run.resume_refused && run.checkpoints.length > 0 ? <p className="mt-3 text-[11px] leading-4 text-zinc-500">{tt(`trainingResume_${run.resume_refused}`)}</p> : null;
+  }
+  const suggested = from + Math.max(Number(run.recipe.save_every) || 1, 1) * 4;
+  const target = Number(steps || suggested);
+  const valid = Number.isInteger(target) && target > from;
+  const start = () => {
+    if (!valid || starting) return;
+    setStarting(true);
+    void continueRun(run.id, target)
+      .then(onChanged)
+      .catch(problem => onError(errorText(problem)))
+      .finally(() => setStarting(false));
+  };
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-200 p-2.5 dark:border-white/10">
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={start} disabled={!valid || starting} className={OUTLINE}>
+          {starting ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+          {t('trainingContinue')}
+        </button>
+        <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+          {t('trainingContinueTo')}
+          <input
+            value={steps}
+            onChange={event => setSteps(event.target.value.replace(/[^0-9]/g, ''))}
+            onKeyDown={event => { if (event.key === 'Enter') start(); }}
+            placeholder={String(suggested)}
+            inputMode="numeric"
+            aria-label={t('trainingContinueTo')}
+            className="w-24 rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs tabular-nums text-zinc-900 outline-none focus:border-pink-500 dark:border-white/10 dark:bg-black/30 dark:text-white"
+          />
+        </label>
+      </div>
+      <p className="mt-1.5 text-[11px] leading-4 text-zinc-500">{tt('trainingContinueHint').replace('{step}', String(from))}</p>
+    </div>
+  );
+};
+
 const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (message: string) => void; onDelete: () => void }> = ({ run, onChanged, onError, onDelete }) => {
   const { t, tt } = useStrings();
   const running = run.status === 'running';
@@ -925,6 +972,14 @@ const RunCard: React.FC<{ run: TrainingRun; onChanged: () => void; onError: (mes
           </div>
         </div>
       )}
+
+      {(run.continuations ?? []).length > 0 && (
+        <p className="mt-2 text-[11px] text-zinc-500">
+          {(run.continuations ?? []).map(({ from, to }) => tt('trainingContinued').replace('{from}', String(from)).replace('{to}', String(to))).join(' · ')}
+        </p>
+      )}
+
+      {!running && <ContinueRun run={run} onChanged={onChanged} onError={onError} />}
 
       {run.error && <p role="alert" className="mt-3 text-xs text-rose-600 dark:text-rose-300">{run.error}</p>}
       {run.log && run.log.length > 0 && (

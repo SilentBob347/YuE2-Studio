@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useMemo, useState, ReactNode } from 'react';
+import { LOCAL_USER_ID } from '../services/nativeLibrary';
 
 /**
  * YuE2 Studio is a single-user desktop application: the library, the
@@ -21,7 +22,6 @@ interface AuthContextType {
 
 const DISPLAY_NAME_KEY = 'music3.displayName';
 const DEFAULT_DISPLAY_NAME = 'Local Studio';
-const LOCAL_USER_ID = 'local-studio';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 

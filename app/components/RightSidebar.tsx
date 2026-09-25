@@ -633,9 +633,23 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                             [t('mp3Bitrate'), p.output_format === 'mp3' && p.mp3_bitrate ? `${p.mp3_bitrate} kbps` : undefined],
                             [t('peakClipLabel'), p.peak_clip],
                         ];
+                        const tr = t as unknown as (key: string) => string;
+                        // A stage's sampling is recorded only when it was changed from the checkpoint's.
+                        const samplingLabel: Record<string, string> = {
+                            temperature: tr('samplingTemperature'), top_p: 'Top P', top_k: 'Top K',
+                            repetition_penalty: tr('samplingRepetitionPenalty'), penalty_window: tr('samplingPenaltyWindow'),
+                            min_tokens: tr('samplingMinTokens'), max_tokens: tr('samplingMaxTokens'),
+                        };
+                        ([['abc_sampling', 'stageScoreSampling'], ['semantic_sampling', 'stageSemantic']] as const).forEach(([key, title]) => {
+                            const preset = p[key];
+                            if (!preset || typeof preset !== 'object') return;
+                            const parts = Object.entries(preset as Record<string, unknown>)
+                                .filter(([, value]) => value !== undefined && value !== null && value !== '')
+                                .map(([name, value]) => `${samplingLabel[name] ?? name} ${value}`);
+                            if (parts.length) paramRows.push([tr(title), parts.join(' · ')]);
+                        });
                         // The LoRA the song was made with, each with its strength per part of the model.
                         const uses = usesFromSettings(p);
-                        const tr = t as unknown as (key: string) => string;
                         uses.forEach((use, index) => {
                             const adapter = adapterLibrary.installed.find(entry => entry.id === use.id);
                             const strengths = Object.entries(use.scales).map(([slot, scale]) => {
@@ -671,7 +685,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                                         {visibleRows.map(([label, value]) => (
                                             <React.Fragment key={label}>
                                                 <span className="text-zinc-500 dark:text-zinc-500 text-right whitespace-nowrap">{label}</span>
-                                                <span className="text-zinc-800 dark:text-zinc-200 font-mono truncate">{String(value)}</span>
+                                                <span className="text-zinc-800 dark:text-zinc-200 font-mono break-words min-w-0">{String(value)}</span>
                                             </React.Fragment>
                                         ))}
                                     </div>

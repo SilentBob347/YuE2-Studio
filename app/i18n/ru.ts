@@ -568,7 +568,7 @@ export const ru = {
     generate: 'Генерировать',
     generating: 'Генерация...',
     createButton: 'Создать',
-    formatLyrics: 'Форматировать текст',
+    formatLyrics: 'Расставить теги секций — слова не меняются',
     formatting: 'Форматирование...',
     clearAll: 'Очистить всё',
 

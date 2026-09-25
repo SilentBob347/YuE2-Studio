@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Song } from '../types';
-import { Play, MoreHorizontal, Heart, ThumbsDown, ListPlus, Pause, Search, Filter, Check, Globe, Lock, Loader2, ThumbsUp, Share2, Video, Info, Clock, Timer, ImagePlus } from 'lucide-react';
+import { Play, MoreHorizontal, Heart, ThumbsDown, ListPlus, Pause, Search, Filter, Check, Globe, Lock, Loader2, ThumbsUp, Share2, Video, Info, Clock, Timer, ImagePlus, Pencil } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
 import type { TranslationKey } from '../i18n/translations';
@@ -698,6 +698,17 @@ const SongItem: React.FC<SongItemProps> = ({
                             >
                                 {song.title || (song.isGenerating ? (song.queuePosition ? t('queued') || "Queued..." : (t(song.stage) || song.stage || t('creating') || "Creating...")) : t('untitled') || "Untitled")}
                             </h3>
+                        )}
+                        {isOwner && !song.isGenerating && !isEditingTitle && (
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setIsEditingTitle(true); }}
+                                className="flex-shrink-0 rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:text-black focus-visible:opacity-100 group-hover:opacity-100 dark:hover:text-white"
+                                title={t('renameSong')}
+                                aria-label={t('renameSong')}
+                            >
+                                <Pencil size={14} />
+                            </button>
                         )}
                         {song.derived && (
                             <button

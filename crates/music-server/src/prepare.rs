@@ -843,10 +843,19 @@ fn transcript(words: &[(f64, String)]) -> Option<String> {
     })
 }
 
+/// A timed transcript line without its "[m:ss] " time; any other bracket at
+/// the start of a line is the singer's and stays.
+fn without_time(line: &str) -> &str {
+    match line.strip_prefix('[').and_then(|rest| rest.split_once("] ")) {
+        Some((time, words)) if !time.is_empty() && time.chars().all(|c| c.is_ascii_digit() || c == ':' || c == '.') => words,
+        _ => line,
+    }
+}
+
 /// The transcript laid out in tagged sections by the assistant. A small model
 /// can answer a Cyrillic transcript in Latin letters; that is not the song, so
 /// it is asked once more and then refused, never stored.
-async fn lay_out_lyrics(state: &AppState, transcript: &str, target: assistant::AssistTarget) -> Result<String, String> {
+pub(crate) async fn lay_out_lyrics(state: &AppState, transcript: &str, target: assistant::AssistTarget) -> Result<String, String> {
     let request = assistant::AssistRequest {
         target,
         description: transcript.to_string(),
@@ -861,7 +870,7 @@ async fn lay_out_lyrics(state: &AppState, transcript: &str, target: assistant::A
     if target == assistant::AssistTarget::Sheet {
         let sheet: Vec<&str> = transcript
             .lines()
-            .map(|line| line.split_once("] ").filter(|_| line.starts_with('[')).map_or(line, |(_, words)| words).trim())
+            .map(|line| without_time(line).trim())
             .filter(|line| !line.is_empty())
             .collect();
         for _ in 0..2 {
@@ -917,6 +926,13 @@ async fn describe(state: &AppState, heard: &listen::Heard, facts: &audio_facts::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_time_leaves_the_start_of_a_line() {
+        assert_eq!(without_time("[1:05] Среди связок"), "Среди связок");
+        assert_eq!(without_time("[Смех] ха-ха"), "[Смех] ха-ха");
+        assert_eq!(without_time("[x] в горле"), "[x] в горле");
+    }
 
     #[test]
     fn the_language_comes_from_the_letters() {

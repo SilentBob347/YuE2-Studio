@@ -564,7 +564,7 @@ export const ko = {
     generate: '생성',
     generating: '생성 중...',
     createButton: '만들기',
-    formatLyrics: '가사 포맷',
+    formatLyrics: '섹션 태그 달기(가사는 그대로)',
     formatting: '포맷 중...',
     clearAll: '모두 지우기',
 

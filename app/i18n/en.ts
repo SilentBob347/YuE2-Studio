@@ -567,7 +567,7 @@ export const en = {
     generate: 'Generate',
     generating: 'Generating...',
     createButton: 'Create',
-    formatLyrics: 'Format Lyrics',
+    formatLyrics: 'Tag the sections - the words stay',
     formatting: 'Formatting...',
     clearAll: 'Clear All',
 

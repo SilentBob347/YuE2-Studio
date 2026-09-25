@@ -283,26 +283,19 @@ fn path(value: &Path) -> OsString {
     value.as_os_str().to_owned()
 }
 
-/// The trainer's stages of a run, in order: latents, semantic codes, lyric
-/// timing, scores, the joint dataset, then training. The vocal stems the
-/// timing stage reads are the studio's to separate before these start.
-pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
-    let models = &inputs.models;
-    let cache = inputs.run.join("cache");
-    let manifest = cache.join("yue2_preprocess.json");
-    let prepared = inputs.run.join("prepared");
+/// The training stage's arguments: the prepared songs of `run`, trained by
+/// `recipe` into `output`, which the trainer wants new.
+fn train_args(models: &Path, run: &Path, recipe: &Recipe, output: &Path) -> Vec<OsString> {
     let arg = |text: &str| OsString::from(text);
-    let model = |name: &str, file: &str| OsString::from(format!("{name}={}", models.join(file).display()));
-    let recipe = &inputs.recipe;
     let text = |value: &dyn ToString| OsString::from(value.to_string());
     let mut train = vec![
         arg("yue2-joint-train"),
         arg("--checkpoint"),
         path(&models.join(TRAINING_FILES[0].file)),
         arg("--dataset"),
-        path(&prepared.join("dataset.json")),
+        path(&run.join("prepared").join("dataset.json")),
         arg("--output"),
-        path(&inputs.run.join("output")),
+        path(output),
         arg("--steps"),
         text(&recipe.steps),
         arg("--save-every"),
@@ -335,6 +328,56 @@ pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
     if recipe.target_kl > 0.0 {
         train.extend([arg("--target-kl"), text(&recipe.target_kl)]);
     }
+    train
+}
+
+/// A finished or stopped run trained further, up to `recipe.steps`: the
+/// trainer picks up the optimizer, the song order and the step count from
+/// `resume` and writes the new checkpoints into `output`. The recipe must be
+/// the one the run started with; the trainer refuses any other.
+pub fn continuation_stage(models: &Path, run: &Path, recipe: &Recipe, output: &Path, resume: &Path) -> TrainingStage {
+    let mut args = train_args(models, run, recipe, output);
+    args.extend([OsString::from("--resume"), path(resume)]);
+    TrainingStage { id: "train", args }
+}
+
+/// The checkpoint a run can be continued from: the latest one that kept its
+/// optimizer state, with that state's file.
+pub fn resume_point(run: &Path) -> Option<(u32, PathBuf)> {
+    checkpoint_dirs(run)
+        .into_iter()
+        .filter_map(|(step, dir)| {
+            let state = dir.join("optimizer.resume");
+            state.is_file().then_some((step, state))
+        })
+        .max_by_key(|(step, _)| *step)
+}
+
+/// Every `checkpoint-step<N>` folder of a run: the first training writes into
+/// `output`, each continuation into an `output-<id>` of its own.
+fn checkpoint_dirs(run: &Path) -> Vec<(u32, PathBuf)> {
+    let Ok(outputs) = std::fs::read_dir(run) else { return Vec::new() };
+    outputs
+        .flatten()
+        .filter(|entry| entry.file_name().to_str().is_some_and(|name| name == "output" || name.starts_with("output-")))
+        .filter_map(|entry| std::fs::read_dir(entry.path()).ok())
+        .flat_map(|entries| entries.flatten())
+        .filter_map(|entry| Some((entry.file_name().to_str()?.strip_prefix("checkpoint-step")?.parse().ok()?, entry.path())))
+        .collect()
+}
+
+/// The trainer's stages of a run, in order: latents, semantic codes, lyric
+/// timing, scores, the joint dataset, then training. The vocal stems the
+/// timing stage reads are the studio's to separate before these start.
+pub fn training_stages(inputs: &TrainingInputs) -> Vec<TrainingStage> {
+    let models = &inputs.models;
+    let cache = inputs.run.join("cache");
+    let manifest = cache.join("yue2_preprocess.json");
+    let prepared = inputs.run.join("prepared");
+    let arg = |text: &str| OsString::from(text);
+    let model = |name: &str, file: &str| OsString::from(format!("{name}={}", models.join(file).display()));
+    let recipe = &inputs.recipe;
+    let train = train_args(models, &inputs.run, recipe, &inputs.run.join("output"));
     let mut prepare = vec![
         arg("yue2-prepare-aitk"),
         arg("--legacy-manifest"),
@@ -444,22 +487,67 @@ pub struct TrainingCheckpoint {
 /// The checkpoints a run has written so far, the latest first. A folder
 /// counts once both native exports are in it.
 pub fn checkpoints(run: &Path) -> Vec<TrainingCheckpoint> {
-    let Ok(entries) = std::fs::read_dir(run.join("output")) else { return Vec::new() };
-    let mut found: Vec<TrainingCheckpoint> = entries
-        .flatten()
-        .filter_map(|entry| {
-            let step = entry.file_name().to_str()?.strip_prefix("checkpoint-step")?.parse().ok()?;
-            let files: Vec<PathBuf> = ["native-ar.safetensors", "native-nar.safetensors"].iter().map(|name| entry.path().join(name)).collect();
+    let mut found: Vec<TrainingCheckpoint> = checkpoint_dirs(run)
+        .into_iter()
+        .filter_map(|(step, dir)| {
+            let files: Vec<PathBuf> = ["native-ar.safetensors", "native-nar.safetensors"].iter().map(|name| dir.join(name)).collect();
             files.iter().all(|file| file.is_file()).then_some(TrainingCheckpoint { step, files })
         })
         .collect();
-    found.sort_by(|a, b| b.step.cmp(&a.step));
+    // a continuation that retrains steps a stopped run had passed writes them again: the newer one counts
+    found.sort_by(|a, b| b.step.cmp(&a.step).then_with(|| newest(&b.files[0]).cmp(&newest(&a.files[0]))));
+    found.dedup_by_key(|checkpoint| checkpoint.step);
     found
+}
+
+fn newest(file: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(file).and_then(|meta| meta.modified()).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("yue-train-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_run_goes_on_from_its_latest_checkpoint_with_a_state_across_outputs() {
+        let run = scratch("resume");
+        for (output, step, state) in [("output", 500, true), ("output", 750, false), ("output-2", 900, true)] {
+            let dir = run.join(output).join(format!("checkpoint-step{step}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            if state {
+                std::fs::write(dir.join("optimizer.resume"), b"state").unwrap();
+            }
+            for file in ["native-ar.safetensors", "native-nar.safetensors"] {
+                std::fs::write(dir.join(file), b"w").unwrap();
+            }
+        }
+        let (step, state) = resume_point(&run).unwrap();
+        assert_eq!(step, 900);
+        assert!(state.ends_with("output-2/checkpoint-step900/optimizer.resume"));
+        assert_eq!(checkpoints(&run).iter().map(|checkpoint| checkpoint.step).collect::<Vec<_>>(), [900, 750, 500]);
+        let _ = std::fs::remove_dir_all(&run);
+    }
+
+    #[test]
+    fn a_continuation_trains_the_prepared_songs_into_a_new_output_from_the_state() {
+        let recipe = Recipe { steps: 1400, target_kl: 0.0, ..Recipe::default() };
+        let stage = continuation_stage(Path::new("models"), Path::new("run"), &recipe, Path::new("run/output-x"), Path::new("run/output/checkpoint-step1000/optimizer.resume"));
+        let args: Vec<String> = stage.args.iter().map(|arg| arg.to_string_lossy().replace('\\', "/")).collect();
+        let after = |flag: &str| args[args.iter().position(|arg| arg == flag).unwrap() + 1].clone();
+        assert_eq!(stage.id, "train");
+        assert_eq!(after("--resume"), "run/output/checkpoint-step1000/optimizer.resume");
+        assert_eq!(after("--output"), "run/output-x");
+        assert_eq!(after("--dataset"), "run/prepared/dataset.json");
+        assert_eq!(after("--steps"), "1400");
+        assert!(!args.iter().any(|arg| arg == "--target-kl"), "a continuation stops by steps");
+    }
 
     #[test]
     fn epochs_become_steps_and_turn_the_likeness_stop_off() {

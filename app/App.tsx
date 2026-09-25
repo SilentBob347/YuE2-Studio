@@ -15,27 +15,43 @@ import { apiUrl } from './services/apiBase';
 import { SettingsModal } from './components/SettingsModal';
 import { Song, YueRequest, YueJob, YueProgress, View, Playlist } from './types';
 // Resizable panel hook
-function useResizablePanel(key: string, defaultWidth: number, min: number, max: number, direction: 'left' | 'right' = 'left') {
+const PANEL_MAX_SHARE = 0.4;
+const PANEL_KEY_STEP = 16;
+
+/** A side panel the user sizes by dragging its edge, with the arrow keys once
+ *  the edge has focus, or back to its default with a double click. Wide
+ *  screens get wide panels; the middle always keeps the rest of the window. */
+function useResizablePanel(key: string, defaultWidth: number, min: number, max: number, direction: 'left' | 'right' = 'left', label = '') {
+  const limitNow = React.useCallback(() => Math.max(min, Math.min(max, Math.round(window.innerWidth * PANEL_MAX_SHARE))), [min, max]);
   const [width, setWidth] = React.useState(() => {
-    const saved = localStorage.getItem(`panel-${key}`);
-    return saved ? Number(saved) : defaultWidth;
+    const saved = Number(localStorage.getItem(`panel-${key}`));
+    return Number.isFinite(saved) && saved > 0 ? saved : defaultWidth;
   });
+  const [limit, setLimit] = React.useState(limitNow);
+  React.useEffect(() => {
+    const onResize = () => setLimit(limitNow());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [limitNow]);
+  // a width saved on a larger window is drawn within this one, and kept for the larger one
+  const shown = Math.min(Math.max(width, min), limit);
+
+  const commit = React.useCallback((next: number) => {
+    const clamped = Math.min(limitNow(), Math.max(min, Math.round(next)));
+    setWidth(clamped);
+    localStorage.setItem(`panel-${key}`, String(clamped));
+  }, [key, min, limitNow]);
 
   const onMouseDown = React.useCallback((e: React.MouseEvent) => {
     const startX = e.clientX;
-    const startW = width;
+    const startW = shown;
+    const bound = limitNow();
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
-
-    const onMouseMove = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX;
-      const newW = Math.min(max, Math.max(min, startW + (direction === 'left' ? delta : -delta)));
-      setWidth(newW);
-    };
+    const at = (ev: MouseEvent) => Math.min(bound, Math.max(min, startW + (direction === 'left' ? 1 : -1) * (ev.clientX - startX)));
+    const onMouseMove = (ev: MouseEvent) => setWidth(at(ev));
     const onMouseUp = (ev: MouseEvent) => {
-      const delta = ev.clientX - startX;
-      const finalW = Math.min(max, Math.max(min, startW + (direction === 'left' ? delta : -delta)));
-      localStorage.setItem(`panel-${key}`, String(finalW));
+      commit(at(ev));
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       document.removeEventListener('mousemove', onMouseMove);
@@ -43,18 +59,41 @@ function useResizablePanel(key: string, defaultWidth: number, min: number, max: 
     };
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
-  }, [width, key, min, max, direction]);
+  }, [shown, min, direction, limitNow, commit]);
+
+  const onKeyDown = React.useCallback((e: React.KeyboardEvent) => {
+    const grow = direction === 'left' ? 'ArrowRight' : 'ArrowLeft';
+    const shrink = direction === 'left' ? 'ArrowLeft' : 'ArrowRight';
+    const step = e.shiftKey ? PANEL_KEY_STEP * 4 : PANEL_KEY_STEP;
+    const next = e.key === grow ? shown + step : e.key === shrink ? shown - step : e.key === 'Home' ? min : e.key === 'End' ? limitNow() : null;
+    if (next === null) return;
+    e.preventDefault();
+    commit(next);
+  }, [shown, min, direction, limitNow, commit]);
 
   const handle = (
     <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      aria-valuenow={shown}
+      aria-valuemin={min}
+      aria-valuemax={limit}
+      tabIndex={0}
       onMouseDown={onMouseDown}
-      className="hidden md:flex w-[5px] flex-shrink-0 items-center justify-center cursor-col-resize group z-20 relative bg-zinc-200/50 dark:bg-zinc-800 hover:bg-pink-500/30 transition-colors"
+      onDoubleClick={() => {
+        // the default is kept as it is; a narrow window only draws it narrower
+        setWidth(defaultWidth);
+        localStorage.removeItem(`panel-${key}`);
+      }}
+      onKeyDown={onKeyDown}
+      className="hidden md:flex w-[5px] flex-shrink-0 items-center justify-center cursor-col-resize group z-20 relative bg-zinc-200/50 dark:bg-zinc-800 hover:bg-pink-500/30 focus-visible:bg-pink-500/40 focus-visible:outline-none transition-colors"
     >
-      <div className="w-[3px] h-10 rounded-full bg-zinc-400/30 dark:bg-zinc-600/50 group-hover:bg-pink-500 transition-colors" />
+      <div className="w-[3px] h-10 rounded-full bg-zinc-400/30 dark:bg-zinc-600/50 group-hover:bg-pink-500 group-focus-visible:bg-pink-500 transition-colors" />
     </div>
   );
 
-  return { width, handle };
+  return { width: shown, handle };
 }
 import { getAudioUrl } from './services/api';
 import { useAuth } from './context/AuthContext';
@@ -110,8 +149,8 @@ function AppContent() {
 
   // Auth
   const { user } = useAuth();
-  const leftPanel = useResizablePanel('create', 420, 320, 600);
-  const rightPanel = useResizablePanel('details', 400, 320, 600, 'right');
+  const leftPanel = useResizablePanel('create', 420, 320, 1200, 'left', t('createMusic'));
+  const rightPanel = useResizablePanel('details', 400, 320, 1200, 'right', t('songDetails'));
   const [nativeSetupReady, setNativeSetupReady] = useState(false);
   // A track sent here from a menu's "separate into stems".
   const [stemsSongId, setStemsSongId] = useState<string | null>(null);

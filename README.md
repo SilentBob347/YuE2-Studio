@@ -72,7 +72,8 @@ Code, save [docs/mcp-skill.md](docs/mcp-skill.md) as `~/.claude/skills/yue2-stud
   format, so they move freely between the studio, the yue2.cpp WebUI and `yue-synth`.
 - **A writing assistant** — a local Gemma model or OpenRouter writes the style and lyrics
   from an idea and edits the score on request; or pick your connected agent (MCP) and it
-  writes instead.
+  writes instead. Lyrics you wrote yourself get their section tags with one button, the
+  words exactly as you wrote them.
 - **Word-level karaoke** — enhanced LRC with a timestamp on every word, aligned by Parakeet
   or Whisper. Your lyrics are kept; only the timing is borrowed.
 - **Six stems on the GPU** — drums, bass, other, vocals, guitar and piano with HT-Demucs.
@@ -108,6 +109,9 @@ Code, save [docs/mcp-skill.md](docs/mcp-skill.md) as `~/.claude/skills/yue2-stud
     the base, or after a set number of passes over the songs.
   - **A trigger word from the start** — every dataset gets a rare word made from its name,
     which you can change.
+  - **Train further** — not there yet at 750 steps? Set 1000 and the run goes on from its
+    latest checkpoint with the same recipe and songs; the loss chart and the checkpoints
+    continue instead of starting over.
 - **Audio processing** — noise reduction, the Spectral Lifter, a vocal naturaliser, your
   own VST3 plugins in a chain, and mastering to a reference track. Compare before and
   after while it plays, then keep the result as a version of the track or throw it away.
@@ -204,7 +208,7 @@ While the studio is open it serves MCP at `http://127.0.0.1:8791/mcp`: an agent 
 Claude Code, Claude Desktop or Cursor does everything the page does, through the same code -
 songs and scores, the library, covers, stems, MIDI, karaoke, processing, video clips, the player,
 LoRA, and a LoRA from a folder of songs end to end - and sees and works the window itself:
-a screenshot, its controls, clicks and typing. 160 tools, grouped by area. The model's
+a screenshot, its controls, clicks and typing. 162 tools, grouped by area. The model's
 writing rules and official examples come with the server, so the agent writes the styles,
 lyrics and lyric layouts itself instead of the studio's small assistant.
 
