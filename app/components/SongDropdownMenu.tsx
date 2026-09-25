@@ -34,6 +34,9 @@ interface SongDropdownMenuProps {
     direction?: 'up' | 'down';
 }
 
+/** The space between a menu and its button: mt-2 / mb-2. */
+const MENU_GAP = 8;
+
 interface MenuItemProps {
     icon: React.ReactNode;
     label: string;
@@ -126,19 +129,28 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
             setUp(direction === 'up');
             return;
         }
-        if (direction === 'up' || !node) return;
-        const menu = node.getBoundingClientRect();
-        let panel = { top: 0, bottom: window.innerHeight };
-        for (let element = node.parentElement; element; element = element.parentElement) {
-            if (/(auto|scroll|hidden)/.test(getComputedStyle(element).overflowY)) {
-                const box = element.getBoundingClientRect();
-                panel = { top: Math.max(0, box.top), bottom: Math.min(window.innerHeight, box.bottom) };
-                break;
+        if (direction === 'up' || !node || !node.parentElement) return;
+        const anchor = node.parentElement;
+        const place = () => {
+            let panel = { top: 0, bottom: window.innerHeight };
+            for (let element: HTMLElement | null = anchor; element; element = element.parentElement) {
+                if (/(auto|scroll|hidden)/.test(getComputedStyle(element).overflowY)) {
+                    const box = element.getBoundingClientRect();
+                    panel = { top: Math.max(0, box.top), bottom: Math.min(window.innerHeight, box.bottom) };
+                    break;
+                }
             }
-        }
-        if (menu.bottom <= panel.bottom) return;
-        if (menu.top - menu.height - 8 >= panel.top) setUp(true);
-        else node.scrollIntoView({ block: 'nearest' });
+            const around = anchor.getBoundingClientRect();
+            const height = node.getBoundingClientRect().height;
+            if (around.bottom + MENU_GAP + height <= panel.bottom) setUp(false);
+            else if (around.top - MENU_GAP - height >= panel.top) setUp(true);
+            else node.scrollIntoView({ block: 'nearest' });
+        };
+        place();
+        // items that appear later (karaoke) make the menu taller
+        const watch = new ResizeObserver(place);
+        watch.observe(node);
+        return () => watch.disconnect();
     }, [isOpen, direction]);
     const { ready: karaokeReady, busy: karaokeBusy, make: makeKaraoke, failed: karaokeFailed } = useKaraoke(song, actions.update);
 
@@ -196,7 +208,7 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
         onClose();
     };
 
-    const positionClasses = position === 'left' ? 'left-0' : 'right-0';
+    const positionClasses = position === 'left' ? 'left-0' : position === 'center' ? 'left-1/2 -translate-x-1/2' : 'right-0';
     const directionClasses = up
         ? 'bottom-full mb-2'
         : 'top-full mt-2';

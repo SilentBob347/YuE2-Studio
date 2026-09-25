@@ -3,6 +3,17 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-25 — 2.1.1
+
+### Fixed
+
+- **Create video everywhere.** The song menu of the Library page, of the song details and of
+  the player had no Create video (nor Re-render, Reuse prompt or Delete in some of them): each
+  place built its own menu. There is one song menu now, the same wherever it opens, and Create
+  video is also a button on every track row and in the song details.
+- **A menu near the bottom of a panel** opens upward, or the panel scrolls it into view,
+  instead of hiding its last items under the edge.
+
 ## 2026-09-25 — 2.1.0
 
 ### Added

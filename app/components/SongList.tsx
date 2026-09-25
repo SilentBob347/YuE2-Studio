@@ -6,9 +6,8 @@ import { useI18n } from '../context/I18nContext';
 import type { TranslationKey } from '../i18n/translations';
 import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
-import { openStems } from '../services/openStems';
 import { updateNativeSong } from '../services/nativeLibrary';
-import { useSongActions } from '../context/SongActionsContext';
+import { SongActionsProvider, useSongActions } from '../context/SongActionsContext';
 import { captionSummary } from '../services/examples';
 
 interface SongListProps {
@@ -866,6 +865,8 @@ const SongItem: React.FC<SongItemProps> = ({
     );
 };
 
+const NO_SONG_ACTIONS = {};
+
 const UploadItem: React.FC<{
     track: { id: string; filename: string; audio_url: string; duration?: number | null };
     onPlay: (audioUrl: string, title: string) => void;
@@ -874,7 +875,9 @@ const UploadItem: React.FC<{
     const duration = track.duration
         ? `${Math.floor(track.duration / 60)}:${String(Math.floor(track.duration % 60)).padStart(2, '0')}`
         : '--:--';
+    // an upload is not a library song yet: none of the song actions apply to it
     return (
+        <SongActionsProvider value={NO_SONG_ACTIONS}>
         <SongItem
             song={{
                 id: `upload_${track.id}`,
@@ -903,5 +906,6 @@ const UploadItem: React.FC<{
             onShowDetails={() => undefined}
             onNavigateToProfile={() => undefined}
         />
+        </SongActionsProvider>
     );
 };

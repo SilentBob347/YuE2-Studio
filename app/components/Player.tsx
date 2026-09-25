@@ -2,12 +2,10 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { TRACK_ARTIST } from '../services/studio';
 import { Song } from '../types';
 import { Play, Pause, SkipBack, SkipForward, Repeat, Shuffle, Download, Heart, MoreVertical, Volume2, VolumeX, Maximize2, Repeat1, ChevronDown, ChevronUp } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
 import { useResponsive } from '../context/ResponsiveContext';
 import { useI18n } from '../context/I18nContext';
 import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
-import { openStems } from '../services/openStems';
 import { downloadSongAudio } from '../services/songDownload';
 import { captionSummary } from '../services/examples';
 import { getCurrentLrcIndex, parseLrc } from '../services/lrc-parser';
@@ -57,7 +55,6 @@ export const Player: React.FC<PlayerProps> = ({
     onToggleLike,
     onPlayFirst,
 }) => {
-    const { user } = useAuth();
     const { isMobile } = useResponsive();
     const { t } = useI18n();
     const progressBarRef = useRef<HTMLDivElement>(null);

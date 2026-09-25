@@ -9,7 +9,6 @@ import { openExternal } from '../services/externalLinks';
 import { apiUrl } from '../services/apiBase';
 import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
-import { openStems } from '../services/openStems';
 import { ScoreView } from './ScoreView';
 import { localized, useAdapterLibrary, usesFromSettings } from '../services/adapters';
 import { useSongActions } from '../context/SongActionsContext';

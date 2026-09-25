@@ -1,10 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { Song, Playlist } from '../types';
 import { Heart, Plus, Music, Play, MoreHorizontal, Trash2, Upload, Loader2 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
 import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
-import { openStems } from '../services/openStems';
 import { useI18n } from '../context/I18nContext';
 import { captionSummary } from '../services/examples';
 
@@ -16,7 +14,6 @@ interface LibraryViewProps {
   onCreatePlaylist: () => void;
   onSelectPlaylist: (playlist: Playlist) => void;
   onImported?: () => void;
-  isNativeLibrary?: boolean;
 }
 
 export const LibraryView: React.FC<LibraryViewProps> = ({ 
@@ -27,10 +24,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     onCreatePlaylist,
     onSelectPlaylist,
     onImported,
-    isNativeLibrary = false,
 }) => {
     const { t } = useI18n();
-    const { user } = useAuth();
     const [openMenuSong, setOpenMenuSong] = useState<Song | null>(null);
     const [activeTab, setActiveTab] = useState<'all' | 'playlists' | 'liked' | 'import'>('all');
     const [importing, setImporting] = useState(false);
