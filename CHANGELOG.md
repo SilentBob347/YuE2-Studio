@@ -3,11 +3,26 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
-## Unreleased
+## 2026-09-25 — 2.0.0
 
 ### Added
 
-- **An MCP server in the studio.** `http://127.0.0.1:8791/mcp` gives an agent 151 tools: every
+- **Any track to MIDI.** A song, a stem or a processed take becomes multi-instrument MIDI -
+  34 instrument groups and drums, each on its own channel - with MuScriptor (Kyutai & Mirelo)
+  on the GPU through HOT-Step's native port. It is on the tools page and in every track's
+  menu (**To MIDI**); a piano roll fills in while it listens, the MIDI plays against the
+  original with a crossfade and per-instrument mute and solo, and the .mid is kept beside the
+  track and saved from there. Nothing is installed up front: the transcriber (126 MB) and the
+  chosen model - small 0.4 GB, medium 1.2 GB, large 5.5 GB - download the first time, or
+  ahead from the tools page. The weights come from an open mirror of the official files, so
+  no Hugging Face sign-in is needed; they are CC BY-NC 4.0, for non-commercial use. MCP:
+  `midi_transcribe`, `midi_get`, `midi_status`, `midi_install`, `midi_remove`,
+  `midi_delete`, `midi_cancel`, and `studio_wait until: midi`.
+- **Tracks made by tools are tracks of the library.** Stems, a kept processing, a re-render and a cover of a library song
+  are new tracks linked to the one they were made from: the list says **Made from «...»**
+  with the tool, the click opens the original, and the track keeps the tool's settings.
+  Splitting a song again replaces its stems instead of adding more.
+- **An MCP server in the studio.** `http://127.0.0.1:8791/mcp` gives an agent 160 tools: every
   route of the studio's API, called inside the process, and the window itself - a
   screenshot, its controls, the player and the video editor - through a bridge the page
   answers. Files are passed by their path; the model's writing rules and official
@@ -57,6 +72,25 @@ Windows build.
 
 ### Fixed
 
+- **Resampling to 16 kHz is band-limited.** Every reader of 16 kHz audio - Whisper, Parakeet,
+  and now MIDI - got the audio through linear interpolation, which folds everything above
+  8 kHz back into the band as noise: MuScriptor heard a clean vocal as distorted guitar and
+  drums. The studio now filters before it decimates.
+- `studio_wait` until idle waited for songs, the preparation and training only; it now waits
+  for stems, MIDI, covers, karaoke and processing too, and refuses a `job_id` that names no
+  job instead of saying "still running" forever.
+- A LoRA passed to `song_create` without strengths ran at zero on every slot; it now starts
+  where the create page starts it - its own strengths, else full on every slot it touches.
+- A song's delete names the files it could not remove (a player holding one) instead of
+  only logging them. MCP names the studio's own version.
+- `video_set` and `create_form_set` refuse a field or a value the window does not have
+  (`aspectRatio`, not `aspect_ratio`), instead of saying "Set" and changing nothing.
+- A kept processing is named by its label; a render started by an agent can no longer leave
+  the next manual export going to the studio's folder.
+- A seed left to chance was drawn by the engine as a 64-bit number, more than the page's
+  JavaScript numbers hold exactly, so a song made without one could not be made again; the
+  studio now draws a 32-bit one.
+- `writing_examples` no longer ranks official requests by words like "with" and "the".
 - The assistant's JSON schema reached llama-server in a field it does not read, so local
   answers were never held to it; it now goes where llama-server reads it.
 - The engine watcher no longer starts the music engine, and with it unloads the assistant,

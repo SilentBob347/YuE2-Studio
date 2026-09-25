@@ -1,5 +1,29 @@
 [
   {
+    "id": "yue2-studio-2-0-0",
+    "date": "2026-09-25",
+    "title": {
+      "en": "YuE2 Studio 2.0.0",
+      "ru": "YuE2 Studio 2.0.0",
+      "zh": "YuE2 Studio 2.0.0",
+      "ja": "YuE2 Studio 2.0.0",
+      "ko": "YuE2 Studio 2.0.0"
+    },
+    "body": {
+      "en": "Two big things. The studio now has an MCP server: an agent such as Claude Code connects to http://127.0.0.1:8791/mcp and does everything the studio does - songs, scores, the library, stems, karaoke, video clips, LoRA training from a folder of songs - and sees and works the window itself; pick Agent (MCP) as the writing assistant and the agent writes instead of the small local model. And any track becomes MIDI: a song, a stem or a processed take turns into multi-instrument MIDI on the GPU, with a piano roll that fills in as it listens and playback against the original; it downloads the first time you use it. Tracks made by tools - stems, processing, re-renders, covers - are now tracks of the library linked to their original.",
+      "ru": "Два больших изменения. В студии появился MCP-сервер: агент вроде Claude Code подключается к http://127.0.0.1:8791/mcp и делает всё, что умеет студия, - песни, партитуры, библиотеку, стемы, караоке, клипы, обучение LoRA по папке песен, - и видит окно, работая в нём как пользователь; выберите Агент (MCP) ассистентом, и тексты будет писать агент вместо маленькой локальной модели. И любой трек теперь переводится в MIDI: песня, стем или обработанная версия превращается в многодорожечный MIDI на видеокарте, пианоролл заполняется по ходу, можно слушать вместе с оригиналом; всё нужное скачивается при первом запуске. Треки, сделанные инструментами, - стемы, обработка, перерендер, каверы - теперь треки библиотеки со ссылкой на оригинал.",
+      "zh": "两项重大更新。工作室现在内置 MCP 服务器：Claude Code 等智能体连接 http://127.0.0.1:8791/mcp 后即可完成工作室的所有操作——歌曲、乐谱、曲库、分轨、卡拉 OK、视频、用一个歌曲文件夹训练 LoRA——还能像用户一样查看并操作窗口；把写作助手选为 Agent (MCP)，就由智能体代替本地小模型写词。此外，任何音轨都能转成 MIDI：歌曲、分轨或处理后的版本都可在 GPU 上转为多乐器 MIDI，钢琴卷帘随识别实时填充，并可与原曲对照播放；首次使用时自动下载。由工具生成的音轨——分轨、处理、重新渲染、翻唱——现在都是曲库中的音轨，并链接到原曲。",
+      "ja": "大きな変更が 2 つあります。スタジオに MCP サーバーが入りました。Claude Code などのエージェントが http://127.0.0.1:8791/mcp に接続すると、曲、楽譜、ライブラリ、ステム、カラオケ、動画、曲フォルダーからの LoRA 学習など、スタジオでできることをすべて行え、ウィンドウもユーザーと同じように見て操作できます。作詞アシスタントに Agent (MCP) を選ぶと、小さなローカルモデルの代わりにエージェントが書きます。さらに、どのトラックも MIDI にできるようになりました。曲、ステム、処理済みテイクを GPU でマルチ楽器の MIDI に変換し、ピアノロールが聴き取りに合わせて埋まり、原曲と重ねて再生できます。初回使用時にダウンロードされます。ツールで作ったトラック（ステム、処理、再レンダー、カバー）は、元の曲にリンクしたライブラリのトラックになりました。",
+      "ko": "큰 변화 두 가지입니다. 스튜디오에 MCP 서버가 생겼습니다. Claude Code 같은 에이전트가 http://127.0.0.1:8791/mcp 에 연결하면 노래, 악보, 라이브러리, 스템, 가라오케, 영상, 노래 폴더로 LoRA 학습까지 스튜디오가 하는 모든 일을 하고, 창을 사용자처럼 보고 조작합니다. 작사 도우미로 Agent (MCP)를 고르면 작은 로컬 모델 대신 에이전트가 씁니다. 그리고 이제 어떤 트랙이든 MIDI로 바꿀 수 있습니다. 노래, 스템, 처리된 테이크를 GPU에서 다중 악기 MIDI로 바꾸고, 피아노 롤이 듣는 대로 채워지며 원곡과 함께 재생할 수 있습니다. 처음 쓸 때 내려받습니다. 도구로 만든 트랙(스템, 처리, 재렌더, 커버)은 이제 원곡에 연결된 라이브러리 트랙입니다."
+    },
+    "tags": [
+      "YuE2",
+      "2.0.0",
+      "MCP",
+      "MIDI"
+    ]
+  },
+  {
     "id": "yue2-studio-1-1-2",
     "date": "2026-09-24",
     "title": {

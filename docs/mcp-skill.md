@@ -1,6 +1,6 @@
 ---
 name: yue2-studio
-description: Drive YuE2 Studio on this computer through its MCP server - write and make songs with YuE2 (style, lyrics, scores, covers of recordings), manage the library, draw covers, split stems, time karaoke, process audio, make video clips, play songs, install LoRA, and build a LoRA from a folder of songs end to end, writing the lyrics layout and styles yourself instead of the studio's small assistant. Sees and works the studio's window like a user. Use whenever the user asks for anything the studio does.
+description: Drive YuE2 Studio on this computer through its MCP server - write and make songs with YuE2 (style, lyrics, scores, covers of recordings), manage the library, draw covers, split stems, turn any track into MIDI, time karaoke, process audio, make video clips, play songs, install LoRA, and build a LoRA from a folder of songs end to end, writing the lyrics layout and styles yourself instead of the studio's small assistant. Sees and works the studio's window like a user. Use whenever the user asks for anything the studio does.
 ---
 
 # YuE2 Studio through MCP
@@ -39,8 +39,8 @@ connected and the address to paste.
 ## Ground rules
 
 - **Start with `studio_status`.** It tells what runs now and whether the window is open.
-- **Long work is a job**: songs, scores, stems, karaoke, preparation, training. Start it,
-  then `studio_wait` (a `job_id`, or `until: stems | processing | covers_and_karaoke |
+- **Long work is a job**: songs, scores, stems, MIDI, karaoke, preparation, training. Start it,
+  then `studio_wait` (a `job_id`, or `until: stems | midi | processing | covers_and_karaoke |
   song_jobs | preparation | training | idle`) instead of
   polling. It returns within a minute (30 s by default, 55 at most) with how far the work got; call
   it again.
@@ -164,7 +164,7 @@ move around. Check the result with `ui_screenshot`.
   **playlist**: list/create/update/delete.
 - **cover**: draw, set from file, templates, prompt render; **karaoke**: make, delete,
   settings; **recogniser**: install/remove; **stems**: split, get; **separator**: status,
-  install, settings; **processing**: start, get, keep, discard, reference; **vst**.
+  install, settings; **midi**: status, transcribe, get, delete, install, remove, cancel; **processing**: start, get, keep, discard, reference; **vst**.
 - **lora**: list, install from the catalogue or Hugging Face, import files, update,
   delete.
 - **dataset**: create, add folder or library songs, import, get, update, delete, song
@@ -174,3 +174,16 @@ move around. Check the result with `ui_screenshot`.
   settings, notify, console; **create_form**: get, set, submit; **player**: state, play, pause, seek, next, previous, set; **video**: open,
   get, set, render, play, pause, seek, close.
 - **openrouter**: status, key, catalog, log, complete, cover, transcribe.
+
+## Turn a track into MIDI
+
+1. `midi_transcribe` with `song_id` - a song, a stem, a processed take - or `path` of any
+   audio file; `size` small, medium (default) or large. The transcriber and the model are
+   downloaded the first time (0.1 GB plus 0.4, 1.2 or 5.5 GB); `midi_install` fetches them
+   ahead. It runs on the card: NVIDIA from GTX 16 and RTX 20 on, driver 580 or newer.
+2. `studio_wait until: midi`.
+3. `midi_get` names the .mid on this computer, its model and instruments (34 groups and
+   drums); `response_format: detailed` gives every note. `library_song_files` lists it too.
+   A file named by path is written to the studio's `midi` folder (`midi_status` run.file).
+4. The weights are MuScriptor by Kyutai & Mirelo, CC BY-NC 4.0: say so when the user wants
+   the MIDI for commercial work.
