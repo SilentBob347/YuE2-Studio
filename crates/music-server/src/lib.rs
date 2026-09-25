@@ -6065,6 +6065,13 @@ fn studio_encodes_mp3(settings: &Value) -> bool {
 /// What the engine is asked for. An MP3 is made by the studio with LAME from
 /// the engine's unencoded 32-bit float output - the model's own rate and
 /// precision - so no track is ever encoded twice or by an engine's own encoder.
+/// A seed for a request that leaves it to chance, drawn here as a 32-bit
+/// number: the engine's own draw is 64-bit, more than the page's JavaScript
+/// numbers hold exactly, so a song made from it could not be made again.
+fn drawn_seed() -> i64 {
+    i64::from(uuid::Uuid::now_v7().as_u128() as u32)
+}
+
 fn engine_submission(body: &Value) -> Value {
     let mut engine = body.clone();
     if studio_encodes_mp3(body) {
@@ -6124,8 +6131,8 @@ fn yue_request_from(request: &CreateMusicJobRequest, max_batch: u32) -> Result<V
     }
     insert_optional(&mut body, "cot", request.cot.clone());
     insert_optional(&mut body, "duration", request.duration_seconds);
-    insert_optional(&mut body, "lm_seed", request.lm_seed.filter(|seed| *seed >= 0));
-    insert_optional(&mut body, "seed", request.seed.filter(|seed| *seed >= 0));
+    body["lm_seed"] = Value::from(request.lm_seed.filter(|seed| *seed >= 0).unwrap_or_else(drawn_seed));
+    body["seed"] = Value::from(request.seed.filter(|seed| *seed >= 0).unwrap_or_else(drawn_seed));
     insert_optional(&mut body, "steps", request.steps);
     insert_optional(&mut body, "lm_batch_size", request.lm_batch_size);
     insert_optional(&mut body, "synth_batch_size", request.synth_batch_size);
@@ -6394,7 +6401,10 @@ mod tests {
     fn a_sparse_request_stays_sparse() {
         let body = yue_request_from(&sample_request(), 1).unwrap();
         let object = body.as_object().unwrap();
-        assert_eq!(object.len(), 2, "only style and lyrics travel when nothing else was set: {body}");
+        // the seeds are drawn here when left out, so the song can be made again
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, ["lm_seed", "lyrics", "seed", "style"], "only style, lyrics and the drawn seeds travel when nothing else was set: {body}");
         assert_eq!(body["lyrics"], "[Verse]\none line");
     }
 
@@ -6422,7 +6432,8 @@ mod tests {
         assert_eq!(body["cot"], "melody");
         assert_eq!(body["duration"], 95.0);
         assert_eq!(body["lm_seed"], 42);
-        assert!(body.get("seed").is_none(), "a negative seed is the engine's random draw");
+        let drawn = body["seed"].as_i64().expect("a negative seed is drawn here");
+        assert!((0..1_i64 << 32).contains(&drawn), "a drawn seed fits 32 bits: {drawn}");
         assert_eq!(body["steps"], 40);
         assert_eq!(body["lm_batch_size"], 2);
         assert_eq!(body["synth_batch_size"], 3);
