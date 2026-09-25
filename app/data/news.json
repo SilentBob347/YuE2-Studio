@@ -1,27 +1,5 @@
 [
   {
-    "id": "yue2-studio-2-1-1",
-    "date": "2026-09-25",
-    "title": {
-      "en": "YuE2 Studio 2.1.1",
-      "ru": "YuE2 Studio 2.1.1",
-      "zh": "YuE2 Studio 2.1.1",
-      "ja": "YuE2 Studio 2.1.1",
-      "ko": "YuE2 Studio 2.1.1"
-    },
-    "body": {
-      "en": "Create video is back wherever you look for it: the song menu is now one and the same on the create page, the Library page, the song details and the player, and there is a Create video button on every track row and in the song details. A menu near the bottom of a panel no longer hides its last items.",
-      "ru": "«Создать видео» теперь есть везде, где его ищут: меню песни одно и то же на странице создания, на странице «Библиотека», в деталях песни и в плеере, а на каждой плашке трека и в деталях песни появилась кнопка «Создать видео». Меню у нижнего края панели больше не прячет последние пункты.",
-      "zh": "“创建视频”现在随处可见：创建页、曲库页、歌曲详情和播放器里的歌曲菜单完全一致，每条音轨和歌曲详情里也都有“创建视频”按钮。靠近面板底部的菜单不再遮住最后几项。",
-      "ja": "「動画を作成」がどこからでも使えるようになりました。曲のメニューは作成ページ、ライブラリページ、曲の詳細、プレーヤーで同じになり、各トラックの行と曲の詳細にも「動画を作成」ボタンがあります。パネル下端近くのメニューが最後の項目を隠すこともなくなりました。",
-      "ko": "「영상 만들기」를 이제 어디서나 쓸 수 있습니다. 곡 메뉴가 만들기 페이지, 라이브러리 페이지, 곡 상세, 플레이어에서 모두 같아졌고, 모든 트랙 줄과 곡 상세에 「영상 만들기」 버튼이 생겼습니다. 패널 아래쪽 메뉴가 마지막 항목을 가리지 않습니다."
-    },
-    "tags": [
-      "YuE2",
-      "2.1.1"
-    ]
-  },
-  {
     "id": "yue2-studio-2-1-0",
     "date": "2026-09-25",
     "title": {
