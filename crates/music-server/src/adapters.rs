@@ -508,6 +508,18 @@ impl AdapterLibrary {
     pub fn exists(&self, id: &str) -> bool {
         self.read_meta(id).is_some_and(|meta| meta.engine == self.engine)
     }
+
+    /// The strengths an adapter starts at when a request gives none, as the
+    /// create page picks them: its own, else full on every slot it touches
+    /// (every slot while the engine has not said which).
+    pub fn starting_scales(&self, id: &str, all_slots: &[&str]) -> BTreeMap<String, f64> {
+        let Some(meta) = self.read_meta(id) else { return BTreeMap::new() };
+        let touched: Vec<String> = if meta.slots.is_empty() { all_slots.iter().map(|slot| slot.to_string()).collect() } else { meta.slots.clone() };
+        touched.into_iter().map(|slot| {
+            let scale = meta.scales.get(&slot).copied().unwrap_or(1.0);
+            (slot, scale)
+        }).collect()
+    }
 }
 
 /// The Hugging Face tags that mark an engine's adapters, from the catalogue

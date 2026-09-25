@@ -990,7 +990,7 @@ fn tools() -> &'static [Tool] {
                     "output_format": { "type": "string", "enum": ["mp3", "wav16", "wav24", "wav32"] },
                     "cover_prompt": { "type": "string", "description": "what the cover should show; it is drawn only when an image model is set up (settings_get, covers), else the song has no cover" },
                     "cover_of": { "type": "string", "description": "for a cover: the library song whose melody abc came from (score_transcribe of it); the new song names it as the track it was made from" },
-                    "adapters": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "scales": { "type": "object", "description": "slot -> strength, e.g. {\"ar\": 1, \"nar\": 1}" } }, "required": ["id"] } }
+                    "adapters": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "scales": { "type": "object", "description": "slot -> strength, e.g. {\"ar\": 1, \"nar\": 1}; left out, the LoRA's own strengths, else 1 on each slot it touches" } }, "required": ["id"] } }
                 }), &["style"]),
                 call: |args| post("/v1/music/jobs".into(), args.clone()),
             },

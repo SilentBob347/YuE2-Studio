@@ -5273,7 +5273,7 @@ fn describes_exhausted_memory(log: &str) -> bool {
 
 async fn create_music_job(
     State(state): State<AppState>,
-    Json(request): Json<CreateMusicJobRequest>,
+    Json(mut request): Json<CreateMusicJobRequest>,
 ) -> (StatusCode, Json<MusicJob>) {
     let engine_id = selected_local_music_engine(&*state.configuration.read().await)
         .unwrap_or_else(|| "unconfigured".into());
@@ -5286,6 +5286,11 @@ async fn create_music_job(
     if state.training.active_run().await.is_some() {
         let error = "a training run has the card; songs can be made once it finishes or is stopped".to_string();
         return (StatusCode::CONFLICT, Json(failed_request_job(request, engine_id, error)));
+    }
+    // an adapter named without strengths starts where the create page starts it
+    let slot_ids: Vec<&str> = music_engine::yue_server::ADAPTER_SLOTS.iter().map(|slot| slot.id).collect();
+    for adapter in request.adapters.iter_mut().filter(|adapter| adapter.scales.is_empty()) {
+        adapter.scales = state.adapters.starting_scales(&adapter.id, &slot_ids);
     }
     if let Some(missing) = request.adapters.iter().find(|adapter| !state.adapters.exists(&adapter.id)).map(|adapter| adapter.id.clone()) {
         let error = format!("adapter {missing} is not installed; add it again on the LoRA page");
@@ -6161,6 +6166,10 @@ fn adapter_fields(uses: &[AdapterUse]) -> Result<Vec<Value>, String> {
         .map(|adapter| {
             if adapter.id.trim().is_empty() {
                 return Err("an adapter has no id".to_string());
+            }
+            // no strengths at all would send every slot at zero: a LoRA that does nothing
+            if adapter.scales.is_empty() {
+                return Err(format!("adapter {} has no strengths: give one per slot ({}); lora_list shows the ones it has", adapter.id, slots.iter().map(|slot| slot.id).collect::<Vec<_>>().join(", ")));
             }
             if let Some(unknown) = adapter.scales.keys().find(|key| !slots.iter().any(|slot| slot.id == key.as_str())) {
                 return Err(format!("adapter {} names an unknown slot {unknown}", adapter.id));
