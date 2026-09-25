@@ -171,6 +171,9 @@ export const SongList: React.FC<SongListProps> = ({
         });
     };
 
+    // the track a derived track was made from, found without a scan per row
+    const songsById = useMemo(() => new Map(songs.map(entry => [entry.id, entry])), [songs]);
+
     const filteredSongs = useMemo(() => {
         return songs.filter(song => {
             // 1. Search Logic
@@ -406,7 +409,7 @@ export const SongList: React.FC<SongListProps> = ({
                                     onPlay={() => onPlay(item.song)}
                                     onSelect={() => onSelect(item.song)}
                                     onOpenOriginal={(() => {
-                                        const original = item.song.derived ? songs.find(entry => entry.id === item.song.derived?.from) : undefined;
+                                        const original = item.song.derived ? songsById.get(item.song.derived.from) : undefined;
                                         return original ? () => onSelect(original) : undefined;
                                     })()}
                                     onToggleSelect={() => {
@@ -525,7 +528,8 @@ const SongItem: React.FC<SongItemProps> = ({
     onSongUpdate,
     onCancelJob,
     onResetJob,
- onOpenOriginal}) => {
+    onOpenOriginal,
+}) => {
     const { t } = useI18n();
     const [showDropdown, setShowDropdown] = useState(false);
     const [imageError, setImageError] = useState(false);

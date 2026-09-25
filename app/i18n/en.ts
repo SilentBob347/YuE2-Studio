@@ -1299,6 +1299,7 @@ export const en = {
     derivedTool_stems: 'stems',
     derivedTool_processing: 'processing',
     derivedTool_replay: 're-render',
+    derivedTool_cover: 'cover',
     originalGone: 'The original is no longer in the library',
     openOriginal: 'Open the track it was made from',
     assistantNoAnswer: 'The assistant\'s answer did not arrive; try again.',

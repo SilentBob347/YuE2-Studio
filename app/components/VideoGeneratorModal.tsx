@@ -2272,14 +2272,21 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   useBridgeCommand('video_set', (args) => {
     requireOpen();
     const object = (value: unknown) => (value && typeof value === 'object' ? value as Record<string, unknown> : null);
+    // a name the editor does not have is refused before anything changes
+    const known = (given: Record<string, unknown> | null, current: object, what: string) => {
+      const unknown = Object.keys(given ?? {}).filter(key => !(key in current));
+      if (unknown.length) throw new Error(`Unknown ${what}: ${unknown.join(', ')}. The ${what} are: ${Object.keys(current).join(', ')}.`);
+    };
     const nextConfig = object(args.config);
-    if (nextConfig) {
-      if (nextConfig.preset !== undefined && !PRESETS.some(preset => preset.id === nextConfig.preset)) throw new Error(`Presets: ${PRESETS.map(preset => preset.id).join(', ')}.`);
-      setConfig(current => ({ ...current, ...nextConfig }));
-    }
     const nextEffects = object(args.effects);
-    if (nextEffects) setEffects(current => ({ ...current, ...nextEffects }));
     const nextIntensities = object(args.intensities);
+    known(nextConfig, config, 'config fields');
+    known(nextEffects, effects, 'effects');
+    known(nextIntensities, intensities, 'intensities');
+    if (nextConfig?.preset !== undefined && !PRESETS.some(preset => preset.id === nextConfig.preset)) throw new Error(`Presets: ${PRESETS.map(preset => preset.id).join(', ')}.`);
+    if (nextConfig?.aspectRatio !== undefined && !(String(nextConfig.aspectRatio) in RESOLUTIONS)) throw new Error(`Aspect ratios: ${Object.keys(RESOLUTIONS).join(', ')}.`);
+    if (nextConfig) setConfig(current => ({ ...current, ...nextConfig }));
+    if (nextEffects) setEffects(current => ({ ...current, ...nextEffects }));
     if (nextIntensities) setIntensities(current => ({ ...current, ...nextIntensities }));
     if (Array.isArray(args.text_layers)) {
       setTextLayers((args.text_layers as Partial<TextLayer>[]).map((layer, index) => ({ id: String(layer.id ?? index + 1), text: String(layer.text ?? ''), x: Number(layer.x ?? 50), y: Number(layer.y ?? 50), size: Number(layer.size ?? 36), color: String(layer.color ?? '#ffffff'), font: String(layer.font ?? 'Inter') })));
@@ -2311,6 +2318,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
   useBridgeCommand('video_render', ({ name }) => {
     requireOpen();
     if (isExporting) throw new Error('A render is already running; video_get shows its progress.');
+    if (!canvasRef.current) throw new Error('The editor is still opening; call video_render again in a moment.');
     setSavedVideo(null);
     setAgentExportError(null);
     exportTargetRef.current = async (blob: Blob) => {

@@ -1294,6 +1294,7 @@ export const zh = {
     derivedTool_stems: '分轨',
     derivedTool_processing: '处理',
     derivedTool_replay: '重新渲染',
+    derivedTool_cover: '翻唱',
     originalGone: '原曲已不在曲库中',
     openOriginal: '打开它所来自的曲目',
     assistantNoAnswer: '助手的回答没有送达，请重试。',

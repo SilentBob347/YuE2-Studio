@@ -1294,6 +1294,7 @@ export const ja = {
     derivedTool_stems: 'ステム',
     derivedTool_processing: '処理',
     derivedTool_replay: '再レンダー',
+    derivedTool_cover: 'カバー',
     originalGone: '元の曲はもうライブラリにありません',
     openOriginal: '元になった曲を開く',
     assistantNoAnswer: 'アシスタントの回答が届きませんでした。もう一度お試しください。',

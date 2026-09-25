@@ -1298,6 +1298,7 @@ export const ru = {
     derivedTool_stems: 'стемы',
     derivedTool_processing: 'обработка',
     derivedTool_replay: 'перерендер',
+    derivedTool_cover: 'кавер',
     originalGone: 'Оригинала больше нет в библиотеке',
     openOriginal: 'Открыть трек, из которого он сделан',
     assistantNoAnswer: 'Ответ ассистента не пришёл, попробуйте ещё раз.',

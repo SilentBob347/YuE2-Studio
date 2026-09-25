@@ -797,15 +797,20 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   }));
   useBridgeCommand('create_set', (args) => {
     const fields = (args.fields && typeof args.fields === 'object' ? args.fields : args) as Record<string, unknown>;
-    const unknown: string[] = [];
-    for (const [key, value] of Object.entries(fields)) {
-      if (key === 'mode' && (value === 'studio' || value === 'simple' || value === 'cover')) setMode(value);
-      else if (key === 'randomize_seed') setRandomizeSeed(Boolean(value));
-      else if (key === 'adapters' && Array.isArray(value)) setAdapters(value as AdapterUse[]);
-      else if (formFields[key]) formFields[key][1](value == null ? '' : String(value));
-      else unknown.push(key);
-    }
+    // every field is checked before any changes, so a refused call leaves the form as it was
+    const choices: Record<string, string[]> = { mode: ['studio', 'simple', 'cover'], cot: ['full', 'melody', 'off', ''], output_format: ['mp3', 'wav16', 'wav24', 'wav32'] };
+    const unknown = Object.keys(fields).filter(key => !formFields[key] && !['mode', 'randomize_seed', 'adapters'].includes(key));
     if (unknown.length) throw new Error(`Unknown fields: ${unknown.join(', ')}. The form has: ${[...Object.keys(formFields), 'mode', 'randomize_seed', 'adapters'].join(', ')}.`);
+    for (const [key, allowed] of Object.entries(choices)) {
+      if (key in fields && !allowed.includes(String(fields[key] ?? ''))) throw new Error(`${key} is one of: ${allowed.filter(Boolean).join(', ')}.`);
+    }
+    if ('adapters' in fields && !Array.isArray(fields.adapters)) throw new Error('adapters is a list of {id, scales}.');
+    for (const [key, value] of Object.entries(fields)) {
+      if (key === 'mode') setMode(value as 'studio' | 'simple' | 'cover');
+      else if (key === 'randomize_seed') setRandomizeSeed(Boolean(value));
+      else if (key === 'adapters') setAdapters(value as AdapterUse[]);
+      else formFields[key][1](value == null ? '' : String(value));
+    }
     return { text: 'Filled in; create_form_get shows the form, ui_screenshot shows it on screen.' };
   });
   useBridgeCommand('create_submit', () => {

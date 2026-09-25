@@ -1294,6 +1294,7 @@ export const ko = {
     derivedTool_stems: '스템',
     derivedTool_processing: '처리',
     derivedTool_replay: '재렌더',
+    derivedTool_cover: '커버',
     originalGone: '원곡이 더 이상 라이브러리에 없습니다',
     openOriginal: '원본 트랙 열기',
     assistantNoAnswer: '도우미의 답이 도착하지 않았습니다. 다시 시도하세요.',
