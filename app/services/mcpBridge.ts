@@ -97,6 +97,8 @@ function readPage(): string {
   if (dialog) lines.push('A dialog is open; its controls are listed first, then the page behind it.');
   const scope = dialog ? [dialog, document.body] : [document.body];
   const seen = new Set<Element>();
+  // a song row and its buttons read as one line, not six
+  const rows = new Map<string, { at: number; parts: string[] }>();
   for (const root of scope) {
     for (const element of Array.from(root.querySelectorAll(INTERACTIVE))) {
       if (seen.has(element) || !visible(element)) continue;
@@ -104,8 +106,16 @@ function readPage(): string {
       const tag = element.tagName.toLowerCase();
       const kind = element.getAttribute('role') || (tag === 'input' ? `input ${(element as HTMLInputElement).type}` : tag);
       const context = element.closest('[data-mcp-context]')?.getAttribute('data-mcp-context');
+      if (context) {
+        const row = rows.get(context) ?? { at: lines.length, parts: [] };
+        if (!rows.has(context)) {
+          rows.set(context, row);
+          lines.push('');
+        }
+        row.parts.push(`${refOf(element)} ${element.hasAttribute('data-mcp-context') ? 'open' : label(element)}${(element as HTMLButtonElement).disabled ? ' (disabled)' : ''}`);
+        continue;
+      }
       const parts = [refOf(element), kind, JSON.stringify(label(element))];
-      if (context) parts.push(`in ${JSON.stringify(context)}`);
       if (element instanceof HTMLInputElement && (element.type === 'checkbox' || element.type === 'radio')) {
         parts.push(element.checked ? 'checked' : 'unchecked');
       } else if (element instanceof HTMLInputElement && element.type === 'range') {
@@ -123,6 +133,7 @@ function readPage(): string {
       lines.push(parts.join(' '));
     }
   }
+  for (const [context, row] of rows) lines[row.at] = `${context}: ${row.parts.join(', ')}`;
   return lines.join('\n');
 }
 

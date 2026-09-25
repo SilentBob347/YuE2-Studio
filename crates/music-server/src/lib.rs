@@ -205,6 +205,10 @@ struct CreateMusicJobRequest {
     /// Installed adapters to merge for this song, in order.
     #[serde(default)]
     adapters: Vec<AdapterUse>,
+    /// The library song whose melody this song sings (a cover); the new song
+    /// names it as the track it was made from.
+    #[serde(default)]
+    cover_of: Option<String>,
 }
 
 /// One adapter of a request: its folder and a strength per engine slot. A slot
@@ -5270,10 +5274,18 @@ async fn create_music_job(
         Ok(value) => value,
         Err(error) => return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, error))),
     };
+    let derived = match request.cover_of.clone() {
+        Some(id) => match state.library.get_song(&id) {
+            Ok(Some(original)) => Some(derivation(&original, "cover", serde_json::json!({ "cot": request.cot, "style": request.style }))),
+            Ok(None) => return (StatusCode::BAD_REQUEST, Json(failed_request_job(request, engine_id, format!("cover_of names no library song: {id}")))),
+            Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(failed_request_job(request, engine_id, error.to_string()))),
+        },
+        None => None,
+    };
     match state.music_server.submit(engine_submission(&body)).await {
         Ok(remote) => {
             let job = MusicJob {
-                derived: None,
+                derived,
                 id: remote.id,
                 engine_id,
                 cover_prompt: request.cover_prompt.clone(),

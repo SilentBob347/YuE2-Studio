@@ -2259,7 +2259,7 @@ export const VideoGeneratorModal: React.FC<VideoGeneratorModalProps> = ({ isOpen
     },
     background: { type: backgroundType, image: customImage ? 'set' : null, video: videoUrl || null },
     album_art: customAlbumArt ? 'set' : 'the song cover',
-    playback: { playing: isPlaying, position_seconds: playbackTime, duration_seconds: playbackDuration },
+    playback: { playing: isPlaying, position_seconds: playbackTime, duration_seconds: playbackDuration || audioRef.current?.duration || 0 },
     export: { running: isExporting, progress: exportProgress, stage: exportStage, saved: savedVideo, error: agentExportError },
   });
   const requireOpen = () => {

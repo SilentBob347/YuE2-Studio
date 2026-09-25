@@ -41,7 +41,8 @@ connected and the address to paste.
 - **Start with `studio_status`.** It tells what runs now and whether the window is open.
 - **Long work is a job**: songs, scores, stems, karaoke, preparation, training. Start it,
   then `studio_wait` (a `job_id`, or `until: preparation | training | idle`) instead of
-  polling. It returns after at most 240 s with how far the work got; call it again.
+  polling. It returns within a minute (30 s by default, 55 at most) with how far the work got; call
+  it again.
 - **One heavy job holds the graphics card at a time.** While a LoRA trains no song is
   made; start training last.
 - **Answers are short by default**: a song job is its status and the songs it made, a
@@ -133,6 +134,9 @@ the local model would get; write the answer by them and send it with
 window logged, when a button did nothing.
 
 **A video clip**
+
+The editor works in the studio's window, which must be visible while you edit and render:
+a minimised window or a hidden tab holds the preview and the render.
 
 1. `video_open` with a song id, `video_get` to see the presets and settings.
 2. `video_set`: preset, aspect ratio, colours, effects, text layers, karaoke lyrics,

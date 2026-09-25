@@ -307,6 +307,8 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
   const [composing, setComposing] = useState(false);
   const composeRun = useRef<AbortController | null>(null);
   const [coverSource, setCoverSource] = useState<string>('');
+  // the library song a cover's melody was taken from, which the new song names
+  const [coverSongId, setCoverSongId] = useState<string | null>(null);
   // The recording being covered, so it can be listened to next to its score.
   const [coverAudio, setCoverAudio] = useState<string | null>(null);
   const coverPlayer = useRef<HTMLAudioElement | null>(null);
@@ -467,6 +469,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
       // words start the lyric sheet when there is nothing there yet
       const { song, melodyOnly } = request;
       setCoverSource(song.title);
+      setCoverSongId(song.id);
       setCoverAudio(song.audioUrl ?? null);
       if (song.lyrics?.trim()) setLyrics(current => (current.trim() ? current : song.lyrics));
       setMode('cover');
@@ -535,6 +538,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
     if (!forFile || pinned(lmSeedValue)) request.lm_seed = pinned(lmSeedValue) ? lmSeedValue : randomSeed();
     if (!forFile || pinned(seedValue)) request.seed = pinned(seedValue) ? seedValue : randomSeed();
     if (semanticTokens.trim()) request.semantic_tokens = semanticTokens.trim();
+    if (!forFile && mode === 'cover' && coverSongId && request.abc) request.cover_of = coverSongId;
     const abcPreset = samplingFrom(abcSampling);
     if (abcPreset) request.abc_sampling = abcPreset;
     const semanticPreset = samplingFrom(semanticSampling);
@@ -934,6 +938,7 @@ export const CreatePanel: React.FC<CreatePanelProps> = ({ onGenerate, isGenerati
                   event.target.value = '';
                   if (file) {
                     setCoverSource(file.name);
+                    setCoverSongId(null);
                     setCoverAudio(URL.createObjectURL(file));
                     void runTranscription({ file }, coverMelodyOnly);
                   }

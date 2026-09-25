@@ -115,6 +115,8 @@ export interface YueRequest {
   mp3_bitrate?: number;
   /** Library title only, never sent to the engine. */
   title?: string;
+  /** The library song whose melody this cover sings; the new song names it. */
+  cover_of?: string;
   cover_prompt?: string;
   /** LoRA adapters for this song, each with a strength per engine slot. */
   adapters?: { id: string; scales: Record<string, number> }[];
