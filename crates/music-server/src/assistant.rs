@@ -53,7 +53,7 @@ const SCORE_CONTRACT: &str = r#"abc: the complete revised ABC score in YuE2's na
 
 /// The topics `writing_guide` answers, each with what it covers.
 pub const GUIDE_TOPICS: &[(&str, &str)] = &[
-    ("song", "writing a whole song for create_song: style, lyrics, title, cover prompt"),
+    ("song", "writing a whole song for song_create: style, lyrics, title, cover prompt"),
     ("style", "the style sentence YuE2 reads, for a new song and for a dataset song from what MOSS heard"),
     ("lyrics", "lyrics: sections, density, diction, duets"),
     ("score", "editing an ABC score in YuE2's dialect"),

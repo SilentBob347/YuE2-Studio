@@ -42,10 +42,13 @@ fn examples() -> Vec<Reference> {
         .collect()
 }
 
+/// Words every style has, which say nothing about the genre.
+const FILLER: &[&str] = &["with", "and", "the", "for", "from", "into", "that", "this", "song", "music", "style", "like", "about"];
+
 fn words(text: &str) -> Vec<String> {
     text.to_lowercase()
         .split(|c: char| !c.is_alphanumeric() && c != '&' && c != '-')
-        .filter(|word| word.chars().count() > 2)
+        .filter(|word| word.chars().count() > 2 && !FILLER.contains(word))
         .map(str::to_owned)
         .collect()
 }
@@ -97,6 +100,12 @@ mod tests {
         assert!(!found.is_empty());
         assert!(found.len() <= MAX_REFERENCES);
         assert!(found[0].style.to_lowercase().contains("metal"), "{}", found[0].style);
+    }
+
+    #[test]
+    fn filler_words_do_not_match() {
+        let reference = Reference { title: "x".into(), style: "pop with piano and the strings".into(), lyrics: String::new() };
+        assert_eq!(score(&reference, &words("rock with the band and drums")), 0);
     }
 
     #[test]

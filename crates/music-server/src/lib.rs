@@ -1025,7 +1025,6 @@ struct SeparationRun {
     library_songs: Vec<String>,
 }
 
-/// Where a song's stems live: beside the track, named after it.
 /// What a track made by a tool says about where it came from: the track it
 /// was made from, the tool, and the settings the tool ran with.
 fn derivation(from: &library::Song, tool: &str, settings: Value) -> Value {
@@ -1050,19 +1049,19 @@ fn cover_like(state: &AppState, from: &library::Song, to: &str) -> anyhow::Resul
 /// Every stem of a song becomes a track of the library made from it: it
 /// plays, goes to the tools, makes a clip or a cover like any track, and
 /// wears the original's cover. Separating the song again replaces its stems
-/// in the library instead of adding more.
-fn stems_into_library(state: &AppState, song_id: &str, stems: &[String], overlap: f64) -> anyhow::Result<Vec<String>> {
+/// in the library instead of adding more: the new ones are in before the old
+/// ones go, so a stem file held open by a player costs nothing but itself.
+fn stems_into_library(state: &AppState, song_id: &str, stems: &[String], overlap: f64) -> anyhow::Result<(Vec<String>, Option<String>)> {
     let original = state.library.get_song(song_id)?.ok_or_else(|| anyhow::anyhow!("the song {song_id} is gone"))?;
-    for old in state.library.list_songs()? {
-        let stem = old.metadata.pointer("/derived/settings/stem").and_then(Value::as_str).unwrap_or_default();
-        if derived_from(&old) == Some((song_id, "stems")) && stems.iter().any(|name| name == stem) {
-            let files = song_files(state, &old);
-            state.library.delete_song(&old.id)?;
-            for path in files {
-                std::fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
-            }
-        }
-    }
+    let replaced: Vec<library::Song> = state
+        .library
+        .list_songs()?
+        .into_iter()
+        .filter(|old| {
+            let stem = old.metadata.pointer("/derived/settings/stem").and_then(Value::as_str).unwrap_or_default();
+            derived_from(old) == Some((song_id, "stems")) && stems.iter().any(|name| name == stem)
+        })
+        .collect();
     let mut added = Vec::new();
     for stem in stems {
         let audio = std::fs::read(stem_path(state, song_id, stem)).with_context(|| format!("read the {stem} stem"))?;
@@ -1086,9 +1085,21 @@ fn stems_into_library(state: &AppState, song_id: &str, stems: &[String], overlap
         cover_like(state, &original, &song.id)?;
         added.push(song.id);
     }
-    Ok(added)
+    let mut kept = Vec::new();
+    for old in replaced {
+        let files = song_files(state, &old);
+        state.library.delete_song(&old.id)?;
+        for path in files {
+            if let Err(error) = std::fs::remove_file(&path) {
+                kept.push(format!("{}: {error}", path.display()));
+            }
+        }
+    }
+    let problem = (!kept.is_empty()).then(|| format!("the new stems are in the library, but files of the old ones could not be removed: {}", kept.join("; ")));
+    Ok((added, problem))
 }
 
+/// Where a song's stems live: beside the track, named after it.
 fn stem_path(state: &AppState, song_id: &str, stem: &str) -> PathBuf {
     state.library.media_dir().join(format!("{song_id}-{stem}.wav"))
 }
@@ -1716,10 +1727,11 @@ async fn keep_processing(
     let recorded = (|| -> anyhow::Result<library::Song> {
         let original = state.library.get_song(&run.song_id)?.ok_or_else(|| anyhow::anyhow!("Song not found"))?;
         let audio = std::fs::read(&stored).with_context(|| format!("read {}", stored.display()))?;
+        let label = if input.label.trim().is_empty() { run.stages.join(" + ") } else { input.label.trim().to_string() };
         let mut settings = settings;
-        settings["label"] = Value::from(if input.label.trim().is_empty() { run.stages.join(" + ") } else { input.label.trim().to_string() });
+        settings["label"] = Value::from(label.clone());
         let song = state.library.create_song(library::SongInput {
-            title: format!("{} · {}", original.title, run.stages.join(" + ")),
+            title: format!("{} · {label}", original.title),
             audio_path: Some(stored.display().to_string()),
             caption: original.caption.clone(),
             lyrics: original.lyrics.clone(),
@@ -2447,6 +2459,8 @@ async fn start_separation(
             }
             Ok((written, ran_on_gpu))
         })();
+        // still on this thread: the stems are hundreds of megabytes to copy
+        let library = outcome.as_ref().ok().map(|(stems, _)| stems_into_library(&background, &song_id, stems, overlap));
 
         let handle = tokio::runtime::Handle::current();
         handle.spawn(async move {
@@ -2456,9 +2470,13 @@ async fn start_separation(
                     Ok((stems, ran_on_gpu)) => {
                         run.progress = 1.0;
                         run.used_gpu = Some(ran_on_gpu);
-                        match stems_into_library(&background, &song_id, &stems, overlap) {
-                            Ok(songs) => run.library_songs = songs,
-                            Err(error) => run.error = Some(format!("the stems are separated but did not reach the library: {error:#}")),
+                        match library {
+                            Some(Ok((songs, problem))) => {
+                                run.library_songs = songs;
+                                run.error = problem;
+                            }
+                            Some(Err(error)) => run.error = Some(format!("the stems are separated but did not reach the library: {error:#}")),
+                            None => {}
                         }
                         run.stems = stems;
                     }
