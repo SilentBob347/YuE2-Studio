@@ -25,6 +25,7 @@ mod request_log;
 mod resources;
 mod chunked;
 mod separation;
+mod midi;
 mod sizes;
 mod skill;
 mod library;
@@ -92,6 +93,12 @@ struct AppState {
     /// The separation run in progress, if any. One at a time: the model wants
     /// the whole machine for a minute, and two runs would only make both slow.
     separation_run: Arc<RwLock<Option<SeparationRun>>>,
+    /// Audio to MIDI: the transcriber and its weights, the run at work or the
+    /// last one, the notes it has heard so far, and the stop signal.
+    midi: Arc<midi::Transcriber>,
+    midi_run: Arc<RwLock<Option<midi::Run>>>,
+    midi_notes: Arc<RwLock<Vec<midi::Note>>>,
+    midi_stop: Arc<(std::sync::atomic::AtomicBool, tokio::sync::Notify)>,
     /// LoRA adapters for the local engine, and the example catalogue.
     adapters: Arc<adapters::AdapterLibrary>,
     /// The processing run in progress or the last one, with its preview.
@@ -626,6 +633,10 @@ pub async fn serve() -> anyhow::Result<()> {
             &studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")),
         )),
         separation_run: Arc::new(RwLock::new(None)),
+        midi: Arc::new(midi::Transcriber::new(&studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")))),
+        midi_run: Arc::new(RwLock::new(None)),
+        midi_notes: Arc::new(RwLock::new(Vec::new())),
+        midi_stop: Arc::new((std::sync::atomic::AtomicBool::new(false), tokio::sync::Notify::new())),
         adapters: Arc::new(adapters::AdapterLibrary::new(
             &studio_data_root().unwrap_or_else(|| std::path::PathBuf::from(".")),
             PRIMARY_MUSIC_ENGINE_ID,
@@ -740,6 +751,14 @@ pub async fn serve() -> anyhow::Result<()> {
         .route("/v1/writing/guide", get(writing_guide))
         .route("/v1/writing/examples", get(writing_examples))
         .route("/v1/library/songs/{id}/files", get(library_song_files))
+        .route("/v1/midi", get(midi_status))
+        .route("/v1/midi/notes", get(midi_live_notes))
+        .route("/v1/midi/install", post(install_midi))
+        .route("/v1/midi/remove", post(remove_midi_model))
+        .route("/v1/midi/cancel", post(cancel_midi))
+        .route("/v1/midi/transcribe", post(start_midi))
+        .route("/v1/library/songs/{id}/midi", get(read_song_midi).delete(delete_song_midi))
+        .route("/v1/library/songs/{id}/midi/file", get(song_midi_file))
         .route("/v1/training/datasets/{id}/items/{item}/files", get(dataset_song_files))
         .route("/v1/training/prepare/cancel", post(prepare::cancel))
         .route("/v1/training/prepare/train-after", post(prepare::set_train_after))
@@ -2969,6 +2988,8 @@ fn song_files(state: &AppState, song: &library::Song) -> Vec<PathBuf> {
             files.push(media.join(file));
         }
     }
+    files.push(midi_path(state, &song.id));
+    files.push(midi_sidecar(&midi_path(state, &song.id)));
     files.sort();
     files.dedup();
     if let Some((cover, _)) = state.library.cover_path_for_song(song) {
@@ -4814,6 +4835,334 @@ async fn release_assistant_unless_kept(state: &AppState) {
     }
 }
 
+/// Where a library song's MIDI lives: beside its audio, named after it.
+fn midi_path(state: &AppState, song_id: &str) -> PathBuf {
+    state.library.media_dir().join(format!("{song_id}.mid"))
+}
+
+/// What a MIDI file says about itself: its model, its instruments and notes.
+fn midi_sidecar(midi: &std::path::Path) -> PathBuf {
+    PathBuf::from(format!("{}.json", midi.display()))
+}
+
+fn midi_size(asked: Option<&str>) -> Result<&'static midi::Size, (StatusCode, Json<ApiError>)> {
+    let id = asked.map(str::trim).filter(|id| !id.is_empty()).unwrap_or(midi::DEFAULT_SIZE);
+    midi::size(id).ok_or_else(|| api_error(StatusCode::BAD_REQUEST, format!("no model size {id}; the sizes are small, medium and large")))
+}
+
+/// The transcriber, its model sizes, the download and the run.
+async fn midi_status(State(state): State<AppState>) -> Json<Value> {
+    let sizes: Vec<Value> = midi::SIZES
+        .iter()
+        .map(|size| serde_json::json!({ "id": size.id, "params": size.params, "bytes": size.bytes, "installed": state.midi.model_installed(size), "missing_bytes": state.midi.missing_bytes(size) }))
+        .collect();
+    let run = state.midi_run.read().await.clone().map(|run| {
+        let progress = run.progress();
+        let mut value = serde_json::to_value(run).unwrap_or(Value::Null);
+        value["progress"] = progress.into();
+        value
+    });
+    Json(serde_json::json!({
+        "tool_installed": state.midi.tool_installed(),
+        "sizes": sizes,
+        "default_size": midi::DEFAULT_SIZE,
+        "download": state.midi.downloader().active().await,
+        "run": run,
+        "license": "MuScriptor by Kyutai & Mirelo (arXiv:2607.08168): code MIT, weights CC BY-NC 4.0 - non-commercial use. Native port: HOT-Step-CPP ace-midi.",
+    }))
+}
+
+/// The notes the run at work has heard so far, for the live piano roll.
+async fn midi_live_notes(State(state): State<AppState>) -> Json<Value> {
+    Json(serde_json::json!({ "notes": state.midi_notes.read().await.clone() }))
+}
+
+#[derive(Debug, Deserialize)]
+struct MidiSizeRequest {
+    #[serde(default)]
+    size: Option<String>,
+}
+
+/// Downloads the transcriber and a model size ahead of the first use.
+async fn install_midi(State(state): State<AppState>, Json(input): Json<MidiSizeRequest>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let size = midi_size(input.size.as_deref())?;
+    let missing = state.midi.missing(size);
+    if missing.is_empty() {
+        return Ok(Json(serde_json::json!({ "installed": true, "size": size.id })));
+    }
+    let transcriber = state.midi.clone();
+    tokio::spawn(async move {
+        if let Err(error) = transcriber.downloader().install_all("midi", &missing).await {
+            eprintln!("[ERROR] midi: download failed: {error:#}");
+        }
+    });
+    Ok(Json(serde_json::json!({ "started": true, "size": size.id })))
+}
+
+async fn remove_midi_model(State(state): State<AppState>, Json(input): Json<MidiSizeRequest>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let size = midi_size(input.size.as_deref())?;
+    let freed = state.midi.remove(size).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")))?;
+    Ok(Json(serde_json::json!({ "removed": size.id, "freed_bytes": freed })))
+}
+
+/// Stops the transcription at work, or the download it waits for.
+async fn cancel_midi(State(state): State<AppState>) -> Json<Value> {
+    state.midi_stop.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    state.midi_stop.1.notify_waiters();
+    state.midi.downloader().cancel();
+    Json(serde_json::json!({ "cancelled": true }))
+}
+
+#[derive(Debug, Deserialize)]
+struct MidiRequest {
+    /// A library track: its MIDI is kept beside it.
+    #[serde(default)]
+    song_id: Option<String>,
+    /// Or any audio file on this computer: its MIDI goes to the studio's folder.
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    size: Option<String>,
+}
+
+/// Turns a track, a stem or any audio file into MIDI. What the transcriber
+/// needs is downloaded first if it is not here yet.
+async fn start_midi(State(state): State<AppState>, Json(input): Json<MidiRequest>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    card_free_of_training(&state, "turn tracks into MIDI").await?;
+    if state.midi_run.read().await.as_ref().is_some_and(|run| !run.done) {
+        return Err(api_error(StatusCode::CONFLICT, "a track is already being turned into MIDI".into()));
+    }
+    let size = midi_size(input.size.as_deref())?;
+    let (song_id, title, audio, output) = match (input.song_id.filter(|id| !id.trim().is_empty()), input.path.filter(|path| !path.trim().is_empty())) {
+        (Some(id), _) => {
+            let song = state
+                .library
+                .get_song(&id)
+                .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+                .ok_or_else(|| api_error(StatusCode::NOT_FOUND, "Song not found".into()))?;
+            let audio = state.library.media_path_for_song(&song).ok_or_else(|| api_error(StatusCode::BAD_REQUEST, "this track has no stored audio".into()))?;
+            (Some(id.clone()), song.title.clone(), audio, midi_path(&state, &id))
+        }
+        (None, Some(path)) => {
+            let audio = PathBuf::from(path.trim());
+            if !audio.is_file() {
+                return Err(api_error(StatusCode::BAD_REQUEST, format!("no audio file at {}", audio.display())));
+            }
+            let title = audio.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+            let output = state.midi.loose_output(&audio);
+            (None, title, audio, output)
+        }
+        _ => return Err(api_error(StatusCode::BAD_REQUEST, "song_id or path is required".into())),
+    };
+    state.midi_stop.0.store(false, std::sync::atomic::Ordering::Relaxed);
+    state.midi_notes.write().await.clear();
+    *state.midi_run.write().await = Some(midi::Run { song_id: song_id.clone(), title, size: size.id, stage: "preparing", chunks_done: 0, chunks_total: 0, notes: 0, done: false, error: None, file: None });
+    let background = state.clone();
+    tokio::spawn(async move {
+        let outcome = transcribe_to_midi(&background, size, &audio, &output).await;
+        if let Some(run) = background.midi_run.write().await.as_mut() {
+            run.done = true;
+            match outcome {
+                Ok(notes) => {
+                    run.stage = "done";
+                    run.notes = notes;
+                    run.file = Some(plain_path(&output));
+                }
+                Err(error) => run.error = Some(format!("{error:#}")),
+            }
+        }
+    });
+    Ok(Json(serde_json::json!({ "started": true, "song_id": song_id, "size": size.id })))
+}
+
+async fn set_midi_stage(state: &AppState, stage: &'static str) {
+    if let Some(run) = state.midi_run.write().await.as_mut() {
+        run.stage = stage;
+    }
+}
+
+fn midi_stopped(state: &AppState) -> bool {
+    state.midi_stop.0.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Fetches what is missing, reads the audio as the transcriber wants it and
+/// runs it, following its notes as they come. Returns how many it heard.
+async fn transcribe_to_midi(state: &AppState, size: &'static midi::Size, audio: &std::path::Path, output: &std::path::Path) -> anyhow::Result<usize> {
+    use tokio::io::AsyncBufReadExt;
+    let missing = state.midi.missing(size);
+    if !missing.is_empty() {
+        // the first use fetches what the tool needs, as the karaoke recogniser does
+        set_midi_stage(state, "downloading").await;
+        state.midi.downloader().install_all("midi", &missing).await.context("download the MIDI transcriber")?;
+        if midi_stopped(state) || !state.midi.missing(size).is_empty() {
+            anyhow::bail!("stopped before everything the transcriber needs had arrived");
+        }
+    }
+
+    // WAV and MP3 go to the transcriber as they are: its own decoder is the
+    // one its port was checked against, and the model hears the difference.
+    // Anything else is decoded here to the 16 kHz mono it reads raw.
+    let native = audio.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| ["wav", "mp3"].contains(&extension.to_ascii_lowercase().as_str()));
+    let raw = if native {
+        None
+    } else {
+        set_midi_stage(state, "reading").await;
+        let work = state.midi.work_dir();
+        std::fs::create_dir_all(&work).with_context(|| format!("create {}", work.display()))?;
+        let raw = work.join(format!("{}.f32", uuid::Uuid::now_v7().simple()));
+        let (from, to) = (audio.to_path_buf(), raw.clone());
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let samples = audio_pcm::decode_mono_16k(&from)?;
+            let bytes: Vec<u8> = samples.iter().flat_map(|sample| sample.to_le_bytes()).collect();
+            std::fs::write(&to, bytes).with_context(|| format!("write {}", to.display()))
+        })
+        .await??;
+        Some(raw)
+    };
+
+    set_midi_stage(state, "transcribing").await;
+    let partial = PathBuf::from(format!("{}.part", output.display()));
+    if let Some(folder) = output.parent() {
+        std::fs::create_dir_all(folder).with_context(|| format!("create {}", folder.display()))?;
+    }
+    let tool = state.midi.tool();
+    let mut command = tokio::process::Command::new(&tool);
+    command
+        .arg("--model")
+        .arg(state.midi.model_dir(size))
+        .arg(if raw.is_some() { "--transcribe-raw" } else { "--transcribe" })
+        .arg(raw.as_deref().unwrap_or(audio))
+        .arg("--out")
+        .arg(&partial)
+        .arg("--jsonl")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    // the CUDA runtime it imports lives beside the engine, as for the trainer
+    let mut path = std::ffi::OsString::from(engine_bundle_root().as_os_str());
+    if let Some(existing) = std::env::var_os("PATH") {
+        path.push(";");
+        path.push(existing);
+    }
+    command.env("PATH", path);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    let mut child = command.spawn().with_context(|| format!("start {}", tool.display()))?;
+    let stdout = child.stdout.take().context("the transcriber's output")?;
+    let stderr = child.stderr.take().context("the transcriber's errors")?;
+    let said = Arc::new(std::sync::Mutex::new(std::collections::VecDeque::<String>::new()));
+    let listener = {
+        let said = said.clone();
+        tokio::spawn(async move {
+            let mut lines = tokio::io::BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let mut said = said.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                said.push_back(line);
+                if said.len() > 20 {
+                    said.pop_front();
+                }
+            }
+        })
+    };
+
+    let mut events = midi::Events::default();
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
+    let outcome: anyhow::Result<()> = loop {
+        if midi_stopped(state) {
+            break Err(anyhow::anyhow!("stopped"));
+        }
+        tokio::select! {
+            line = lines.next_line() => match line {
+                Ok(Some(line)) => {
+                    let chunks = events.chunks_done;
+                    events.take(&line);
+                    // the notes are handed on a piece at a time: every note of
+                    // a piece is closed by the time the next one starts
+                    if events.chunks_done != chunks || events.finished {
+                        *state.midi_notes.write().await = events.notes.clone();
+                        if let Some(run) = state.midi_run.write().await.as_mut() {
+                            run.chunks_done = events.chunks_done;
+                            run.chunks_total = events.chunks_total;
+                            run.notes = events.notes.len();
+                        }
+                    }
+                }
+                Ok(None) => break Ok(()),
+                Err(error) => break Err(error.into()),
+            },
+            _ = state.midi_stop.1.notified() => break Err(anyhow::anyhow!("stopped")),
+        }
+    };
+    if outcome.is_err() {
+        let _ = child.kill().await;
+    }
+    let status = child.wait().await.context("wait for the transcriber")?;
+    let _ = listener.await;
+    if let Some(raw) = &raw {
+        let _ = std::fs::remove_file(raw);
+    }
+    if let Err(error) = outcome {
+        let _ = std::fs::remove_file(&partial);
+        return Err(error);
+    }
+    if !status.success() || !events.finished {
+        let _ = std::fs::remove_file(&partial);
+        let said = said.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().cloned().collect::<Vec<_>>().join("\n");
+        anyhow::bail!("the transcriber stopped with {status}: {said}");
+    }
+    std::fs::rename(&partial, output).with_context(|| format!("keep {}", output.display()))?;
+    let sidecar = midi::Sidecar { size: size.id.to_string(), made_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|since| since.as_secs().to_string()).unwrap_or_default(), instruments: events.instruments(), notes: events.notes.clone() };
+    std::fs::write(midi_sidecar(output), serde_json::to_vec(&sidecar)?).with_context(|| format!("write {}", midi_sidecar(output).display()))?;
+    let heard = events.notes.len();
+    *state.midi_notes.write().await = events.notes;
+    Ok(heard)
+}
+
+/// A library song's MIDI: where it is, the model, its instruments and notes.
+async fn read_song_midi(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
+    let file = midi_path(&state, &id);
+    if !file.is_file() {
+        return Err(api_error(StatusCode::NOT_FOUND, "this track has no MIDI yet".into()));
+    }
+    let sidecar: Option<midi::Sidecar> = std::fs::read(midi_sidecar(&file)).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok());
+    Ok(Json(serde_json::json!({
+        "song_id": id,
+        "file": plain_path(&file),
+        "size": sidecar.as_ref().map(|sidecar| sidecar.size.clone()),
+        "made_at": sidecar.as_ref().map(|sidecar| sidecar.made_at.clone()),
+        "instruments": sidecar.as_ref().map(|sidecar| sidecar.instruments.clone()).unwrap_or_default(),
+        "notes": sidecar.map(|sidecar| sidecar.notes).unwrap_or_default(),
+    })))
+}
+
+/// The .mid itself, named after the song, to save or open elsewhere.
+async fn song_midi_file(State(state): State<AppState>, Path(id): Path<String>) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
+    let file = midi_path(&state, &id);
+    let bytes = tokio::fs::read(&file).await.map_err(|_| api_error(StatusCode::NOT_FOUND, "this track has no MIDI yet".into()))?;
+    let title = state.library.get_song(&id).ok().flatten().map(|song| song.title).unwrap_or_else(|| id.clone());
+    let name: String = title.chars().map(|c| if "\\/:*?\"<>|".contains(c) || c.is_control() { '_' } else { c }).collect();
+    let disposition = format!("attachment; filename=\"midi.mid\"; filename*=UTF-8''{}", mcp::segment(&format!("{name}.mid")));
+    Ok(axum::response::Response::builder()
+        .header(header::CONTENT_TYPE, "audio/midi")
+        .header(header::CONTENT_DISPOSITION, disposition)
+        .body(axum::body::Body::from(bytes))
+        .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?)
+}
+
+async fn delete_song_midi(State(state): State<AppState>, Path(id): Path<String>) -> Result<StatusCode, (StatusCode, Json<ApiError>)> {
+    let file = midi_path(&state, &id);
+    if !file.is_file() {
+        return Err(api_error(StatusCode::NOT_FOUND, "this track has no MIDI".into()));
+    }
+    for path in [file.clone(), midi_sidecar(&file)] {
+        if path.is_file() {
+            std::fs::remove_file(&path).map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, format!("remove {}: {error}", path.display())))?;
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// A path as other programs take it, without the `\\?\` prefix a
 /// canonical Windows path carries.
 fn plain_path(path: &std::path::Path) -> String {
@@ -4833,6 +5182,7 @@ async fn library_song_files(State(state): State<AppState>, Path(id): Path<String
         "audio": state.library.media_path_for_song(&song).map(|path| plain_path(&path)),
         "cover": state.library.cover_path_for_song(&song).map(|(path, _)| plain_path(&path)),
         "stems": stems,
+        "midi": Some(midi_path(&state, &id)).filter(|path| path.is_file()).map(|path| plain_path(&path)),
     })))
 }
 

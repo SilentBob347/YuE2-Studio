@@ -218,6 +218,12 @@ fn shape(name: &str, args: &Value, value: Value) -> Value {
         "song_jobs_list" if !detailed => Value::Array(value.as_array().into_iter().flatten().map(compact_job).collect()),
         "library_song_get" if !detailed => compact_song(&value),
         "lora_list" if !detailed => compact_loras(&value),
+        "midi_get" if !detailed => {
+            let mut value = value;
+            let notes = value.as_object_mut().and_then(|fields| fields.remove("notes")).and_then(|notes| notes.as_array().map(Vec::len)).unwrap_or(0);
+            value["notes_count"] = notes.into();
+            value
+        }
         "karaoke_settings_get" if !detailed => compact_karaoke(&value),
         // any other answer that is a whole library song
         _ if !detailed && value.get("audio_codes").is_some() && value.get("replay_request").is_some() => compact_song(&value),
@@ -261,6 +267,7 @@ fn shape(name: &str, args: &Value, value: Value) -> Value {
 
 async fn status_summary() -> Value {
     let (jobs, activity, training, processing, separation) = tokio::join!(fetch("/v1/music/jobs"), fetch("/v1/activity"), fetch("/v1/training"), fetch("/v1/processing"), fetch("/v1/separation/status"));
+    let midi = fetch("/v1/midi").await;
     let running_activity: Vec<Value> = activity["activity"].as_array().into_iter().flatten().filter(|entry| entry["state"] == "running").cloned().collect();
     let active_run = training["runs"].as_array().into_iter().flatten().find(|run| Some(run["id"].as_str().unwrap_or_default()) == training["active"].as_str()).map(compact_run);
     json!({
@@ -269,6 +276,7 @@ async fn status_summary() -> Value {
         "song_jobs": Value::Array(jobs.as_array().into_iter().flatten().map(compact_job).collect()),
         "covers_and_karaoke": running_activity,
         "stems": separation["run"],
+        "midi": midi["run"],
         "preparation": compact_preparation(&training["prepare"]),
         "training": active_run,
         "processing": processing["run"],
@@ -283,6 +291,7 @@ fn busy(summary: &Value) -> Vec<&'static str> {
         ("covers_and_karaoke", summary["covers_and_karaoke"].as_array().is_some_and(|entries| !entries.is_empty())),
         ("stems", unfinished(&summary["stems"])),
         ("processing", unfinished(&summary["processing"])),
+        ("midi", unfinished(&summary["midi"])),
         ("preparation", summary["preparation"].is_object() && summary["preparation"]["finished"] != true),
         ("training", !summary["training"].is_null()),
     ]
@@ -580,7 +589,7 @@ fn text(args: &Value, name: &str) -> Result<String, String> {
 }
 
 /// A path segment, escaped.
-fn segment(value: &str) -> String {
+pub(crate) fn segment(value: &str) -> String {
     value.bytes().map(|byte| if byte.is_ascii_alphanumeric() || b"-_.~".contains(&byte) { (byte as char).to_string() } else { format!("%{byte:02X}") }).collect()
 }
 
@@ -657,14 +666,14 @@ fn tools() -> &'static [Tool] {
             // ---------------------------------------------------------------- the studio
             Tool {
                 name: "studio_status",
-                description: "What the studio is doing now, in one short summary: song jobs, covers and karaoke, the stem split, audio processing, the dataset preparation and its stages, the training run with its step, loss and KL, and whether the studio's window is open. Call it first, and use studio_wait to wait.",
+                description: "What the studio is doing now, in one short summary: song jobs, covers and karaoke, the stem split, the MIDI transcription, audio processing, the dataset preparation and its stages, the training run with its step, loss and KL, and whether the studio's window is open. Call it first, and use studio_wait to wait.",
                 schema: nothing,
                 call: |_| composite("status"),
             },
             Tool {
                 name: "studio_wait",
-                description: "Wait for work to finish instead of polling: a song or score job (job_id), or until one kind of work is over - song_jobs, covers_and_karaoke, stems, processing, preparation, training - or everything (until: idle, the default). Returns when it is done or after seconds (30 by default, at most 55, under the minute clients allow a call) with how far it got; call it again to keep waiting.",
-                schema: || object(json!({ "job_id": { "type": "string" }, "until": { "type": "string", "enum": ["idle", "song_jobs", "covers_and_karaoke", "stems", "processing", "preparation", "training"] }, "seconds": { "type": "integer" } }), &[]),
+                description: "Wait for work to finish instead of polling: a song or score job (job_id), or until one kind of work is over - song_jobs, covers_and_karaoke, stems, midi, processing, preparation, training - or everything (until: idle, the default). Returns when it is done or after seconds (30 by default, at most 55, under the minute clients allow a call) with how far it got; call it again to keep waiting.",
+                schema: || object(json!({ "job_id": { "type": "string" }, "until": { "type": "string", "enum": ["idle", "song_jobs", "covers_and_karaoke", "stems", "midi", "processing", "preparation", "training"] }, "seconds": { "type": "integer" } }), &[]),
                 call: |_| composite("wait"),
             },
             Tool {
@@ -1186,6 +1195,49 @@ fn tools() -> &'static [Tool] {
                 schema: || id_only("song_id", "library song id"),
                 call: |args| get(format!("/v1/library/songs/{}/stems", segment(&text(args, "song_id")?))),
             },
+            // ---------------------------------------------------------------- audio to MIDI
+            Tool {
+                name: "midi_status",
+                description: "Audio to MIDI (MuScriptor, weights CC BY-NC 4.0 - non-commercial): whether the transcriber is installed, the model sizes (small 103M, medium 307M, large 1.4B) with what each still has to download, the download at work, and the transcription at work or the last one with its progress and file.",
+                schema: nothing,
+                call: |_| get("/v1/midi".into()),
+            },
+            Tool {
+                name: "midi_transcribe",
+                description: "Turn a library track - a song, a stem, a processed take - or any audio file on this computer into multi-instrument MIDI (34 instrument groups and drums). Give song_id or path; size small, medium (default) or large. What the transcriber needs is downloaded first when it is missing. Wait with studio_wait until midi; a track's MIDI is then kept beside it (midi_get, library_song_files), a file's in the studio's midi folder (midi_status run.file).",
+                schema: || object(json!({ "song_id": { "type": "string" }, "path": { "type": "string", "description": "an audio file on this computer, instead of song_id" }, "size": { "type": "string", "enum": ["small", "medium", "large"] } }), &[]),
+                call: |args| post("/v1/midi/transcribe".into(), args.clone()),
+            },
+            Tool {
+                name: "midi_get",
+                description: "A library track's MIDI: the file on this computer, the model size, when it was made, its instruments and how many notes. response_format detailed adds every note (pitch, start and end in seconds, instrument).",
+                schema: || object(json!({ "song_id": { "type": "string" }, "response_format": { "type": "string", "enum": ["concise", "detailed"], "description": "detailed gives every note" } }), &["song_id"]),
+                call: |args| get(format!("/v1/library/songs/{}/midi", segment(&text(args, "song_id")?))),
+            },
+            Tool {
+                name: "midi_delete",
+                description: "Remove a library track's MIDI.",
+                schema: || id_only("song_id", "library song id"),
+                call: |args| send(Method::DELETE, format!("/v1/library/songs/{}/midi", segment(&text(args, "song_id")?)), json!({})),
+            },
+            Tool {
+                name: "midi_install",
+                description: "Download the transcriber and a model size ahead of the first transcription (it also happens by itself on first use). midi_status shows the progress.",
+                schema: || object(json!({ "size": { "type": "string", "enum": ["small", "medium", "large"] } }), &[]),
+                call: |args| post("/v1/midi/install".into(), args.clone()),
+            },
+            Tool {
+                name: "midi_remove",
+                description: "Delete a model size's weights; the transcriber and the MIDI files stay.",
+                schema: || object(json!({ "size": { "type": "string", "enum": ["small", "medium", "large"] } }), &["size"]),
+                call: |args| post("/v1/midi/remove".into(), args.clone()),
+            },
+            Tool {
+                name: "midi_cancel",
+                description: "Stop the transcription at work, or the download it waits for.",
+                schema: nothing,
+                call: |_| post("/v1/midi/cancel".into(), json!({})),
+            },
             Tool {
                 name: "processing_start",
                 description: "Run audio processing on a library song: any of denoise, lifter (Spectral Lifter), naturalize (vocal naturaliser), vst (plugin chain), master (to a reference). Each is an object of its settings; processing_get shows the result, then processing_keep or processing_discard.",
@@ -1430,7 +1482,7 @@ fn tools() -> &'static [Tool] {
             },
             Tool {
                 name: "library_song_files",
-                description: "Where a library song's files are on this computer: its audio, its cover and each stem; read or open them directly.",
+                description: "Where a library song's files are on this computer: its audio, its cover, each stem and its MIDI; read or open them directly.",
                 schema: || id_only("song_id", "library song id"),
                 call: |args| get(format!("/v1/library/songs/{}/files", segment(&text(args, "song_id")?))),
             },

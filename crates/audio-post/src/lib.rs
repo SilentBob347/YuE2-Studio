@@ -16,7 +16,7 @@ pub mod quality;
 mod convolve;
 mod limiter;
 mod lowess;
-mod resample;
+pub mod resample;
 mod spline;
 mod stft;
 

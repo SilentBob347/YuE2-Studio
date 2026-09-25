@@ -3,19 +3,23 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$OutputDirectory,
     [ValidateSet('universal', 'sm_89')]
-    [string]$CudaArchitecture = 'universal'
+    [string]$CudaArchitecture = 'universal',
+    # Which HOT-Step tool: the trainer, or the audio-to-MIDI transcriber.
+    [ValidateSet('music-train', 'music-midi')]
+    [string]$Tool = 'music-train'
 )
 
-# Builds the adapter trainer, HOT-Step's ace-train at the pinned commit, and
-# stages it as music-train.exe with its own ggml libraries and a zip for the
-# release asset the training page downloads. Its ggml carries HOT-Step's
-# training patches, so it never shares a folder with the engine's.
+# Builds a HOT-Step tool at the pinned commit - the adapter trainer (ace-train,
+# staged as music-train.exe) or the audio-to-MIDI transcriber (ace-midi, staged
+# as music-midi.exe) - with its own ggml libraries and a zip for the release
+# asset the studio downloads. Its ggml carries HOT-Step's patches, so it never
+# shares a folder with the engine's.
 
 $PSDefaultParameterValues['*:ErrorAction'] = 'Stop'
 $ErrorActionPreference = 'Continue'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$source = Get-Content -Raw (Join-Path $repoRoot 'engines\music-train-source.json') | ConvertFrom-Json
+$source = Get-Content -Raw (Join-Path $repoRoot "engines\$Tool-source.json") | ConvertFrom-Json
 $buildRoot = if ($env:YUE_ENGINE_BUILD_ROOT) { $env:YUE_ENGINE_BUILD_ROOT } else { $env:TEMP }
 $worktree = Join-Path $buildRoot "hotstep-$($source.commit.Substring(0, 8))"
 
@@ -45,18 +49,19 @@ if ($LASTEXITCODE -ne 0) { throw "Could not check out HOT-Step-CPP commit $($sou
 git -C $worktree submodule update --init --recursive engine/ggml engine/vendor/vst3sdk
 if ($LASTEXITCODE -ne 0) { throw 'Could not initialise the HOT-Step submodules.' }
 
-# BF16 training needs Ampere or newer, so older cards are not built for.
+# BF16 training needs Ampere or newer; transcription runs on Turing too.
+$universal = if ($source.cuda_architectures) { $source.cuda_architectures } else { '80-real;86-real;89-real;90-real;120a-real;120-virtual' }
 $cudaArch = switch ($CudaArchitecture) {
-    'universal' { '"-DCMAKE_CUDA_ARCHITECTURES=80-real;86-real;89-real;90-real;120a-real;120-virtual"' }
+    'universal' { "`"-DCMAKE_CUDA_ARCHITECTURES=$universal`"" }
     'sm_89' { '-DCMAKE_CUDA_ARCHITECTURES=89' }
 }
-$buildDirectory = "build-train-$CudaArchitecture"
+$buildDirectory = "build-$($source.target)-$CudaArchitecture"
 $symbols = '-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=ProgramDatabase -DCMAKE_EXE_LINKER_FLAGS=/DEBUG -DCMAKE_SHARED_LINKER_FLAGS=/DEBUG'
 $parallelism = [Math]::Max(1, [Environment]::ProcessorCount)
 $command = "call `"$(Get-VcVars64)`" >nul && cmake -S . -B `"$buildDirectory`" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF -DGGML_CUDA=ON -DGGML_CCACHE=OFF $symbols $cudaArch && cmake --build `"$buildDirectory`" --target $($source.target) --parallel $parallelism"
 Push-Location (Join-Path $worktree $source.source_dir)
 try { & cmd.exe /d /s /c $command | Out-Host } finally { Pop-Location }
-if ($LASTEXITCODE -ne 0) { throw 'The trainer build failed.' }
+if ($LASTEXITCODE -ne 0) { throw "The $($source.target) build failed." }
 
 $binDirectory = Join-Path $worktree "$($source.source_dir)\$buildDirectory"
 $built = Join-Path $binDirectory "$($source.target).exe"

@@ -25,7 +25,7 @@ pub fn decode_mono_16k(input: &Path) -> Result<Vec<f32>> {
     if samples.is_empty() {
         bail!("{} decoded to no audio", input.display());
     }
-    Ok(resample(&samples, rate, TARGET_RATE))
+    resample(&samples, rate, TARGET_RATE)
 }
 
 /// Decodes `input`, mixes it to mono, resamples to 16 kHz and writes a WAV.
@@ -41,9 +41,9 @@ pub fn decode_stereo_44k(input: &Path) -> Result<Vec<f32>> {
     if channels.is_empty() || channels[0].is_empty() {
         bail!("{} decoded to no audio", input.display());
     }
-    let left = resample(&channels[0], rate, 44_100);
+    let left = resample(&channels[0], rate, 44_100)?;
     let right = match channels.get(1) {
-        Some(samples) => resample(samples, rate, 44_100),
+        Some(samples) => resample(samples, rate, 44_100)?,
         None => left.clone(),
     };
     let frames = left.len().min(right.len());
@@ -318,21 +318,14 @@ fn decode_mono(path: &Path) -> Result<(Vec<f32>, u32)> {
 
 /// Linear resampling. The recogniser mel-filters everything down to 80 bands
 /// anyway, so a sharper filter would buy nothing here.
-fn resample(samples: &[f32], from: u32, to: u32) -> Vec<f32> {
+/// Band-limited: interpolating between samples folded everything above the
+/// new Nyquist back into the band as noise, which recognisers heard as
+/// distortion - MuScriptor transcribed a clean vocal as guitar and drums.
+fn resample(samples: &[f32], from: u32, to: u32) -> Result<Vec<f32>> {
     if from == to || samples.len() < 2 {
-        return samples.to_vec();
+        return Ok(samples.to_vec());
     }
-    let ratio = from as f64 / to as f64;
-    let length = ((samples.len() as f64) / ratio).floor() as usize;
-    let mut out = Vec::with_capacity(length);
-    for index in 0..length {
-        let position = index as f64 * ratio;
-        let left = position.floor() as usize;
-        let right = (left + 1).min(samples.len() - 1);
-        let weight = (position - left as f64) as f32;
-        out.push(samples[left] * (1.0 - weight) + samples[right] * weight);
-    }
-    out
+    audio_post::resample::mono(samples, from, to)
 }
 
 fn write_wav(path: &Path, samples: &[f32]) -> Result<()> {
@@ -365,11 +358,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resampling_halves_the_length_when_the_rate_halves() {
-        let input: Vec<f32> = (0..1000).map(|index| (index as f32 / 100.0).sin()).collect();
-        let out = resample(&input, 32_000, 16_000);
-        assert_eq!(out.len(), 500);
-        assert!((out[0] - input[0]).abs() < 1e-6);
+    fn resampling_keeps_the_band_and_drops_what_lies_above_it() {
+        let tone = |hz: f32| -> Vec<f32> { (0..44_100).map(|index| (2.0 * std::f32::consts::PI * hz * index as f32 / 44_100.0).sin() * 0.5).collect() };
+        let rms = |samples: &[f32]| (samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len() as f32).sqrt();
+        let kept = resample(&tone(1_000.0), 44_100, 16_000).unwrap();
+        assert!((kept.len() as i64 - 16_000).abs() <= 1, "{}", kept.len());
+        assert!((rms(&kept[1000..15000]) - 0.3535).abs() < 0.02, "a tone in the band keeps its level: {}", rms(&kept));
+        // 12 kHz is above 16 kHz's Nyquist: it must not fold back to 4 kHz
+        let folded = resample(&tone(12_000.0), 44_100, 16_000).unwrap();
+        assert!(rms(&folded[1000..15000]) < 0.01, "a tone above the band is filtered out: {}", rms(&folded));
     }
 
     #[test]
