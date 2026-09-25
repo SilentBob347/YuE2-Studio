@@ -15,9 +15,6 @@ interface LibraryViewProps {
   onPlaySong: (song: Song, list?: Song[]) => void;
   onCreatePlaylist: () => void;
   onSelectPlaylist: (playlist: Playlist) => void;
-  onAddToPlaylist: (song: Song) => void;
-  onReusePrompt?: (song: Song) => void;
-  onDeleteSong?: (song: Song) => void;
   onImported?: () => void;
   isNativeLibrary?: boolean;
 }
@@ -29,9 +26,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
     onPlaySong, 
     onCreatePlaylist,
     onSelectPlaylist,
-    onAddToPlaylist,
-    onReusePrompt,
-    onDeleteSong,
     onImported,
     isNativeLibrary = false,
 }) => {

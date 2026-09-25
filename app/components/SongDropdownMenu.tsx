@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { hasSungLines, karaokeReason } from '../services/karaoke';
 import { Song } from '../types';
 import { useI18n } from '../context/I18nContext';
@@ -117,6 +117,29 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
     const actions = useSongActions();
     const isOwner = Boolean(user && user.id === song.userId);
     const menuRef = useRef<HTMLDivElement>(null);
+    // Near the bottom of its panel the menu opens upward; when it fits neither
+    // way, the panel scrolls it into view instead of hiding it under the edge.
+    const [up, setUp] = useState(direction === 'up');
+    useLayoutEffect(() => {
+        const node = menuRef.current;
+        if (!isOpen) {
+            setUp(direction === 'up');
+            return;
+        }
+        if (direction === 'up' || !node) return;
+        const menu = node.getBoundingClientRect();
+        let panel = { top: 0, bottom: window.innerHeight };
+        for (let element = node.parentElement; element; element = element.parentElement) {
+            if (/(auto|scroll|hidden)/.test(getComputedStyle(element).overflowY)) {
+                const box = element.getBoundingClientRect();
+                panel = { top: Math.max(0, box.top), bottom: Math.min(window.innerHeight, box.bottom) };
+                break;
+            }
+        }
+        if (menu.bottom <= panel.bottom) return;
+        if (menu.top - menu.height - 8 >= panel.top) setUp(true);
+        else node.scrollIntoView({ block: 'nearest' });
+    }, [isOpen, direction]);
     const { ready: karaokeReady, busy: karaokeBusy, make: makeKaraoke, failed: karaokeFailed } = useKaraoke(song, actions.update);
 
     useEffect(() => {
@@ -174,10 +197,10 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
     };
 
     const positionClasses = position === 'left' ? 'left-0' : 'right-0';
-    const directionClasses = direction === 'up'
+    const directionClasses = up
         ? 'bottom-full mb-2'
         : 'top-full mt-2';
-    const animationClasses = direction === 'up'
+    const animationClasses = up
         ? 'animate-in fade-in slide-in-from-bottom-2'
         : 'animate-in fade-in slide-in-from-top-2';
 

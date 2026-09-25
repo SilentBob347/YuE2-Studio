@@ -25,9 +25,6 @@ interface SongListProps {
     onOpenCoverRegen?: (song: Song) => void;
     onShowDetails?: (song: Song) => void;
     onNavigateToProfile?: (username: string) => void;
-    onReusePrompt?: (song: Song) => void;
-    onReplayMusic?: (song: Song) => void;
-    onDelete?: (song: Song) => void;
     onSongUpdate?: (updatedSong: Song) => void;
     onDeleteMany?: (songs: Song[]) => void;
     onCancelJob?: (jobId: string) => void;
@@ -105,9 +102,6 @@ export const SongList: React.FC<SongListProps> = ({
     onOpenCoverRegen,
     onShowDetails,
     onNavigateToProfile,
-    onReusePrompt,
-    onReplayMusic,
-    onDelete,
     onSongUpdate,
     onDeleteMany,
     onCancelJob,
@@ -425,9 +419,6 @@ export const SongList: React.FC<SongListProps> = ({
                                     onOpenCoverRegen={() => onOpenCoverRegen && onOpenCoverRegen(item.song)}
                                     onShowDetails={() => onShowDetails && onShowDetails(item.song)}
                                     onNavigateToProfile={onNavigateToProfile}
-                                    onReusePrompt={() => onReusePrompt?.(item.song)}
-                                    onReplayMusic={item.song.nativeReplayAvailable ? () => onReplayMusic?.(item.song) : undefined}
-                                    onDelete={() => onDelete?.(item.song)}
                                     onSongUpdate={onSongUpdate}
                                     // Cancel button is also available during pre-flight (placeholder
                                     // card with no jobId yet) — pass `song.id` (= tempId) and the
@@ -491,9 +482,6 @@ interface SongItemProps {
     onOpenCoverRegen?: () => void;
     onShowDetails?: () => void;
     onNavigateToProfile?: (username: string) => void;
-    onReusePrompt?: () => void;
-    onReplayMusic?: () => void;
-    onDelete?: () => void;
     onSongUpdate?: (updatedSong: Song) => void;
     onCancelJob?: () => void;
     onResetJob?: () => void;
@@ -518,9 +506,6 @@ const SongItem: React.FC<SongItemProps> = ({
     onOpenCoverRegen,
     onShowDetails,
     onNavigateToProfile,
-    onReusePrompt,
-    onReplayMusic,
-    onDelete,
     onSongUpdate,
     onCancelJob,
     onResetJob,
@@ -917,8 +902,6 @@ const UploadItem: React.FC<{
             onAddToPlaylist={() => undefined}
             onShowDetails={() => undefined}
             onNavigateToProfile={() => undefined}
-            onReusePrompt={undefined}
-            onDelete={() => undefined}
         />
     );
 };

@@ -32,9 +32,6 @@ interface PlayerProps {
     onToggleRepeat: () => void;
     isLiked: boolean;
     onToggleLike: () => void;
-    onReusePrompt?: () => void;
-    onAddToPlaylist?: () => void;
-    onDelete?: () => void;
     onPlayFirst?: () => void;
 }
 
@@ -58,9 +55,6 @@ export const Player: React.FC<PlayerProps> = ({
     onToggleRepeat,
     isLiked,
     onToggleLike,
-    onReusePrompt,
-    onAddToPlaylist,
-    onDelete,
     onPlayFirst,
 }) => {
     const { user } = useAuth();
