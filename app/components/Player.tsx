@@ -61,7 +61,7 @@ export const Player: React.FC<PlayerProps> = ({
     onReusePrompt,
     onAddToPlaylist,
     onDelete,
-    onPlayFirst
+    onPlayFirst,
 }) => {
     const { user } = useAuth();
     const { isMobile } = useResponsive();
@@ -313,13 +313,8 @@ export const Player: React.FC<PlayerProps> = ({
                                 song={currentSong}
                                 isOpen={showDropdown}
                                 onClose={() => setShowDropdown(false)}
-                                isOwner={user?.id === currentSong.userId}
                                 position="center"
                                 direction="up"
-                                onReusePrompt={onReusePrompt}
-                                onSeparateStems={() => openStems(currentSong)}
-                                onAddToPlaylist={onAddToPlaylist}
-                                onDelete={onDelete}
                             />
                         </div>
                     )}
@@ -592,13 +587,8 @@ export const Player: React.FC<PlayerProps> = ({
                                             song={currentSong}
                                             isOpen={showDropdown}
                                             onClose={() => setShowDropdown(false)}
-                                            isOwner={user?.id === currentSong.userId}
                                             position="center"
                                             direction="up"
-                                            onReusePrompt={onReusePrompt}
-                                            onSeparateStems={() => openStems(currentSong)}
-                                            onAddToPlaylist={onAddToPlaylist}
-                                            onDelete={onDelete}
                                         />
                                     )}
                                 </div>
@@ -795,13 +785,8 @@ export const Player: React.FC<PlayerProps> = ({
                             song={currentSong}
                             isOpen={showDropdown}
                             onClose={() => setShowDropdown(false)}
-                            isOwner={user?.id === currentSong.userId}
                             position="right"
                             direction="up"
-                            onReusePrompt={onReusePrompt}
-                            onSeparateStems={() => openStems(currentSong)}
-                            onAddToPlaylist={onAddToPlaylist}
-                            onDelete={onDelete}
                         />
                     </div>
                 </div>

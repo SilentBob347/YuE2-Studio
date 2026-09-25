@@ -5,7 +5,9 @@ import { useI18n } from '../context/I18nContext';
 import { openExternal } from '../services/externalLinks';
 import { apiUrl } from '../services/apiBase';
 import { downloadSongAudio } from '../services/songDownload';
-import { openMidi } from '../services/openStems';
+import { openMidi, openStems } from '../services/openStems';
+import { useAuth } from '../context/AuthContext';
+import { useSongActions } from '../context/SongActionsContext';
 import {
     Clapperboard,
     Edit3,
@@ -22,23 +24,14 @@ import {
     Piano,
 } from 'lucide-react';
 
+/** The one menu of a song. Its actions come from the app through
+ *  SongActionsContext, so every place that opens it offers the same items. */
 interface SongDropdownMenuProps {
     song: Song;
     isOpen: boolean;
     onClose: () => void;
-    isOwner?: boolean;
-    position?: 'left' | 'right';
+    position?: 'left' | 'right' | 'center';
     direction?: 'up' | 'down';
-    onEditAudio?: () => void;
-    onReusePrompt?: () => void;
-    onReplayMusic?: () => void;
-    onExportVideo?: () => void;
-    onSeparateStems?: () => void;
-    onAddToPlaylist?: () => void;
-    onDownload?: () => void;
-    /// Called with the track carrying its new karaoke timings.
-    onSongUpdate?: (song: Song) => void;
-    onDelete?: () => void;
 }
 
 interface MenuItemProps {
@@ -116,22 +109,15 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
     song,
     isOpen,
     onClose,
-    isOwner = false,
     position = 'right',
     direction = 'down',
-    onEditAudio,
-    onReusePrompt,
-    onReplayMusic,
-    onExportVideo,
-    onSeparateStems,
-    onAddToPlaylist,
-    onDownload,
-    onDelete,
-    onSongUpdate,
 }) => {
     const { t } = useI18n();
+    const { user } = useAuth();
+    const actions = useSongActions();
+    const isOwner = Boolean(user && user.id === song.userId);
     const menuRef = useRef<HTMLDivElement>(null);
-    const { ready: karaokeReady, busy: karaokeBusy, make: makeKaraoke, failed: karaokeFailed } = useKaraoke(song, onSongUpdate);
+    const { ready: karaokeReady, busy: karaokeBusy, make: makeKaraoke, failed: karaokeFailed } = useKaraoke(song, actions.update);
 
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -208,25 +194,23 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                 <MenuItem
                     icon={<Edit3 size={14} />}
                     label={t('editAudio')}
-                    onClick={onEditAudio ? () => handleAction(onEditAudio) : handleEditAudio}
+                    onClick={handleEditAudio}
                 />
             )}
-            {onExportVideo && (
+            {actions.exportVideo && (
                 <MenuItem
                     icon={<Clapperboard size={14} />}
                     label={t('videoExport')}
-                    onClick={() => handleAction(onExportVideo)}
+                    onClick={() => handleAction(() => actions.exportVideo?.(song))}
                     disabled={!song.audioUrl}
                 />
             )}
-            {onSeparateStems && (
-                <MenuItem
-                    icon={<Scissors size={14} />}
-                    label={t('stemsTitle')}
-                    onClick={() => handleAction(onSeparateStems)}
-                    disabled={!song.audioUrl}
-                />
-            )}
+            <MenuItem
+                icon={<Scissors size={14} />}
+                label={t('stemsTitle')}
+                onClick={() => handleAction(() => openStems(song))}
+                disabled={!song.audioUrl}
+            />
             {song.audioUrl && (
                 <>
                     <MenuItem
@@ -251,18 +235,18 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                     />
                 </>
             )}
-            {onReusePrompt && (
+            {actions.reusePrompt && (
                 <MenuItem
                     icon={<Repeat size={14} />}
                     label={t('reusePrompt')}
-                    onClick={() => handleAction(onReusePrompt)}
+                    onClick={() => handleAction(() => actions.reusePrompt?.(song))}
                 />
             )}
-            {onReplayMusic && (
+            {actions.replay && song.nativeReplayAvailable && (
                 <MenuItem
                     icon={<Repeat size={14} />}
                     label={t('replayTitle')}
-                    onClick={() => handleAction(onReplayMusic)}
+                    onClick={() => handleAction(() => actions.replay?.(song))}
                 />
             )}
 
@@ -286,12 +270,12 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
             <MenuItem
                 icon={<ListPlus size={14} />}
                 label={t('addToPlaylist')}
-                onClick={() => handleAction(onAddToPlaylist)}
+                onClick={() => handleAction(() => actions.addToPlaylist?.(song))}
             />
             <MenuItem
                 icon={<Download size={14} />}
                 label={t('download')}
-                onClick={onDownload ? () => handleAction(onDownload) : handleDownload}
+                onClick={handleDownload}
             />
 
             {/* Owner-only Actions */}
@@ -301,7 +285,7 @@ export const SongDropdownMenu: React.FC<SongDropdownMenuProps> = ({
                     <MenuItem
                         icon={<Trash2 size={14} />}
                         label={t('deleteSong')}
-                        onClick={() => handleAction(onDelete)}
+                        onClick={() => handleAction(() => actions.remove?.(song))}
                         danger
                     />
                 </>

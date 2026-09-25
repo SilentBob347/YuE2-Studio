@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { TRACK_ARTIST } from '../services/studio';
 import { Song } from '../types';
-import { Heart, Share2, Play, Pause, MoreHorizontal, X, Copy, Wand2, MoreVertical, Download, Repeat, Video, Music, Link as LinkIcon, Sparkles, Globe, Lock, Trash2, Edit3, Layers, ChevronDown, ClipboardCopy, ImagePlus, Loader2, Mic2, FileMusic } from 'lucide-react';
+import { Heart, Share2, Play, Pause, MoreHorizontal, X, Copy, Wand2, MoreVertical, Download, Repeat, Video, Music, Link as LinkIcon, Sparkles, Globe, Lock, Trash2, Edit3, Layers, ChevronDown, ClipboardCopy, ImagePlus, Loader2, Mic2, FileMusic, Clapperboard } from 'lucide-react';
 import { mapNativeLibrarySong, updateNativeSong } from '../services/nativeLibrary';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
@@ -12,6 +12,7 @@ import { AlbumCover } from './AlbumCover';
 import { openStems } from '../services/openStems';
 import { ScoreView } from './ScoreView';
 import { localized, useAdapterLibrary, usesFromSettings } from '../services/adapters';
+import { useSongActions } from '../context/SongActionsContext';
 import { downloadSongAudio } from '../services/songDownload';
 
 interface RightSidebarProps {
@@ -146,6 +147,7 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
     const { user } = useAuth();
     const { t, language } = useI18n();
     const adapterLibrary = useAdapterLibrary();
+    const songActions = useSongActions();
     const [showMenu, setShowMenu] = useState(false);
     const [isOwner, setIsOwner] = useState(false);
     const [tagsExpanded, setTagsExpanded] = useState(false);
@@ -374,12 +376,6 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                                     song={song}
                                     isOpen={showMenu}
                                     onClose={() => setShowMenu(false)}
-                                    isOwner={isOwner}
-                                    onReusePrompt={() => onReuse?.(song)}
-                                    onSeparateStems={() => openStems(song)}
-                                    onReplayMusic={song.nativeReplayAvailable ? () => onReplayMusic?.(song) : undefined}
-                                    onDelete={() => onDelete?.(song)}
-                                    onAddToPlaylist={() => onAddToPlaylist?.(song)}
                                 />
                             </div>
                         </div>
@@ -407,6 +403,15 @@ export const RightSidebar: React.FC<RightSidebarProps> = ({ song, onClose, onOpe
                                 className="p-3 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-300/50 dark:hover:bg-white/10 rounded-xl transition-all duration-200"
                             >
                                 <ImagePlus size={18} strokeWidth={1.5} />
+                            </button>
+                        )}
+                        {songActions.exportVideo && song.audioUrl && (
+                            <button
+                                onClick={() => songActions.exportVideo?.(song)}
+                                title={t('videoExport')}
+                                className="p-3 text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-300/50 dark:hover:bg-white/10 rounded-xl transition-all duration-200"
+                            >
+                                <Clapperboard size={18} strokeWidth={1.5} />
                             </button>
                         )}
                         <button

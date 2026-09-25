@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Song } from '../types';
-import { Play, MoreHorizontal, Heart, ThumbsDown, ListPlus, Pause, Search, Filter, Check, Globe, Lock, Loader2, ThumbsUp, Share2, Video, Info, Clock, Timer, ImagePlus, Pencil } from 'lucide-react';
+import { Play, MoreHorizontal, Heart, ThumbsDown, ListPlus, Pause, Search, Filter, Check, Globe, Lock, Loader2, ThumbsUp, Share2, Video, Info, Clock, Timer, ImagePlus, Pencil, Clapperboard } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useI18n } from '../context/I18nContext';
 import type { TranslationKey } from '../i18n/translations';
@@ -8,6 +8,7 @@ import { SongDropdownMenu } from './SongDropdownMenu';
 import { AlbumCover } from './AlbumCover';
 import { openStems } from '../services/openStems';
 import { updateNativeSong } from '../services/nativeLibrary';
+import { useSongActions } from '../context/SongActionsContext';
 import { captionSummary } from '../services/examples';
 
 interface SongListProps {
@@ -26,7 +27,6 @@ interface SongListProps {
     onNavigateToProfile?: (username: string) => void;
     onReusePrompt?: (song: Song) => void;
     onReplayMusic?: (song: Song) => void;
-    onExportVideo?: (song: Song) => void;
     onDelete?: (song: Song) => void;
     onSongUpdate?: (updatedSong: Song) => void;
     onDeleteMany?: (songs: Song[]) => void;
@@ -107,7 +107,6 @@ export const SongList: React.FC<SongListProps> = ({
     onNavigateToProfile,
     onReusePrompt,
     onReplayMusic,
-    onExportVideo,
     onDelete,
     onSongUpdate,
     onDeleteMany,
@@ -428,7 +427,6 @@ export const SongList: React.FC<SongListProps> = ({
                                     onNavigateToProfile={onNavigateToProfile}
                                     onReusePrompt={() => onReusePrompt?.(item.song)}
                                     onReplayMusic={item.song.nativeReplayAvailable ? () => onReplayMusic?.(item.song) : undefined}
-                                    onExportVideo={item.song.audioUrl ? () => onExportVideo?.(item.song) : undefined}
                                     onDelete={() => onDelete?.(item.song)}
                                     onSongUpdate={onSongUpdate}
                                     // Cancel button is also available during pre-flight (placeholder
@@ -495,7 +493,6 @@ interface SongItemProps {
     onNavigateToProfile?: (username: string) => void;
     onReusePrompt?: () => void;
     onReplayMusic?: () => void;
-    onExportVideo?: () => void;
     onDelete?: () => void;
     onSongUpdate?: (updatedSong: Song) => void;
     onCancelJob?: () => void;
@@ -523,7 +520,6 @@ const SongItem: React.FC<SongItemProps> = ({
     onNavigateToProfile,
     onReusePrompt,
     onReplayMusic,
-    onExportVideo,
     onDelete,
     onSongUpdate,
     onCancelJob,
@@ -534,6 +530,7 @@ const SongItem: React.FC<SongItemProps> = ({
     const [showDropdown, setShowDropdown] = useState(false);
     const [imageError, setImageError] = useState(false);
     const [isEditingTitle, setIsEditingTitle] = useState(false);
+    const songActions = useSongActions();
     const [editedTitle, setEditedTitle] = useState(song.title);
     const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -804,6 +801,16 @@ const SongItem: React.FC<SongItemProps> = ({
                             </button>
                         )}
 
+                        {songActions.exportVideo && song.audioUrl && !song.isGenerating && (
+                            <button
+                                className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors"
+                                onClick={(e) => { e.stopPropagation(); songActions.exportVideo?.(song); }}
+                                title={t('videoExport')}
+                            >
+                                <Clapperboard size={16} />
+                            </button>
+                        )}
+
                         <button
                             className="p-2 rounded-full hover:bg-zinc-200 dark:hover:bg-white/5 text-zinc-400 hover:text-black dark:hover:text-white transition-colors ml-auto"
                             onClick={(e) => { e.stopPropagation(); onAddToPlaylist(); }}
@@ -835,13 +842,6 @@ const SongItem: React.FC<SongItemProps> = ({
                                 song={song}
                                 isOpen={showDropdown}
                                 onClose={() => setShowDropdown(false)}
-                                isOwner={isOwner}
-                                onReusePrompt={onReusePrompt ? () => onReusePrompt?.(song) : undefined}
-                                onReplayMusic={onReplayMusic}
-                                onExportVideo={onExportVideo}
-                                onSeparateStems={() => openStems(song)}
-                                onAddToPlaylist={() => onAddToPlaylist?.(song)}
-                                onDelete={() => onDelete?.(song)}
                             />
                         </div>
                     </div>

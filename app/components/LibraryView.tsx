@@ -163,11 +163,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                                         song={song}
                                         isOpen={openMenuSong?.id === song.id}
                                         onClose={() => setOpenMenuSong(null)}
-                                        isOwner={isNativeLibrary || (user ? song.userId === user.id : false)}
-                                        onReusePrompt={() => onReusePrompt?.(song)}
-                                        onSeparateStems={() => openStems(song)}
-                                        onAddToPlaylist={() => onAddToPlaylist(song)}
-                                        onDelete={() => onDeleteSong?.(song)}
                                     />
                                 </div>
                             </div>
@@ -228,11 +223,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                                         song={song}
                                         isOpen={openMenuSong?.id === song.id}
                                         onClose={() => setOpenMenuSong(null)}
-                                        isOwner={isNativeLibrary || (user ? song.userId === user.id : false)}
-                                        onReusePrompt={() => onReusePrompt?.(song)}
-                                        onSeparateStems={() => openStems(song)}
-                                        onAddToPlaylist={() => onAddToPlaylist(song)}
-                                        onDelete={() => onDeleteSong?.(song)}
                                     />
                                 </div>
                             </div>
