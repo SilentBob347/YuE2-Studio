@@ -2933,19 +2933,23 @@ async fn update_library_song(State(state):State<AppState>,Path(id):Path<String>,
     tag_stored_song(&state, &id).await;
     Ok(Json(song))
 }
-async fn delete_library_song(State(state):State<AppState>,Path(id):Path<String>)->Result<StatusCode,(StatusCode,Json<ApiError>)>{
+/// Removes a song and its files; a file that cannot go (a player holds it)
+/// is named in the answer instead of only in the log.
+async fn delete_library_song(State(state): State<AppState>, Path(id): Path<String>) -> Result<Json<Value>, (StatusCode, Json<ApiError>)> {
     let song = state.library.get_song(&id).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     if !state.library.delete_song(&id).map_err(|e| api_error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))? {
         return Err(api_error(StatusCode::NOT_FOUND, "Song not found".into()));
     }
+    let mut left = Vec::new();
     if let Some(song) = song {
         for path in song_files(&state, &song) {
             if let Err(error) = std::fs::remove_file(&path) {
                 eprintln!("[ERROR] delete song {id}: could not remove {}: {error}", path.display());
+                left.push(format!("{}: {error}", plain_path(&path)));
             }
         }
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok(Json(serde_json::json!({ "deleted": true, "files_left": left })))
 }
 
 /// The files in the media folder that belong to one song: its audio, its

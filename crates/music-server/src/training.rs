@@ -1296,8 +1296,8 @@ fn dash_split(text: &str) -> Vec<String> {
 /// keeps its own: a number followed by a bare space is a track number only
 /// when it is zero-padded or three digits (disc and track).
 fn without_track_number(text: &str) -> String {
-    let number = regex::Regex::new(r"^\s*(?:[A-Da-d]?\d{1,3}\s*[.)_\-–]\s*|[A-Da-d]?0\d\s+|\d{3}\s+)").expect("valid regex");
-    let stripped = number.replace(text, "").trim().to_string();
+    static NUMBER: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"^\s*(?:[A-Da-d]?\d{1,3}\s*[.)_\-–]\s*|[A-Da-d]?0\d\s+|\d{3}\s+)").expect("valid regex"));
+    let stripped = NUMBER.replace(text, "").trim().to_string();
     if stripped.is_empty() { text.trim().to_string() } else { stripped }
 }
 

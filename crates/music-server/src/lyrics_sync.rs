@@ -1084,10 +1084,13 @@ impl LyricsSync {
             take(&mut answered);
             let refused = outcome.unwrap_err();
             let left: Vec<PathBuf> = wavs.iter().filter(|(index, _)| !answered[*index]).map(|(_, wav)| wav.clone()).collect();
-            recognised = Recognised::OnProcessor;
-            outcome = self
-                .run_whisper_many(&binary, size, &left, &out_dir, language, false, &mut || take(&mut answered), cancel)
-                .with_context(|| format!("the card was tried first and refused: {refused}"));
+            outcome = if left.is_empty() {
+                Ok(())
+            } else {
+                recognised = Recognised::OnProcessor;
+                self.run_whisper_many(&binary, size, &left, &out_dir, language, false, &mut || take(&mut answered), cancel)
+                    .with_context(|| format!("the card was tried first and refused: {refused}"))
+            };
         }
         take(&mut answered);
         let run_error = outcome.err().map(|error| format!("{error:#}"));
