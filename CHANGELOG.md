@@ -3,7 +3,7 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
-## Unreleased
+## 2026-09-25 — 2.1.0
 
 ### Added
 
