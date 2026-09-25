@@ -40,7 +40,8 @@ connected and the address to paste.
 
 - **Start with `studio_status`.** It tells what runs now and whether the window is open.
 - **Long work is a job**: songs, scores, stems, karaoke, preparation, training. Start it,
-  then `studio_wait` (a `job_id`, or `until: preparation | training | idle`) instead of
+  then `studio_wait` (a `job_id`, or `until: stems | processing | covers_and_karaoke |
+  song_jobs | preparation | training | idle`) instead of
   polling. It returns within a minute (30 s by default, 55 at most) with how far the work got; call
   it again.
 - **One heavy job holds the graphics card at a time.** While a LoRA trains no song is

@@ -260,7 +260,7 @@ fn shape(name: &str, args: &Value, value: Value) -> Value {
 }
 
 async fn status_summary() -> Value {
-    let (jobs, activity, training, processing) = tokio::join!(fetch("/v1/music/jobs"), fetch("/v1/activity"), fetch("/v1/training"), fetch("/v1/processing"));
+    let (jobs, activity, training, processing, separation) = tokio::join!(fetch("/v1/music/jobs"), fetch("/v1/activity"), fetch("/v1/training"), fetch("/v1/processing"), fetch("/v1/separation/status"));
     let running_activity: Vec<Value> = activity["activity"].as_array().into_iter().flatten().filter(|entry| entry["state"] == "running").cloned().collect();
     let active_run = training["runs"].as_array().into_iter().flatten().find(|run| Some(run["id"].as_str().unwrap_or_default()) == training["active"].as_str()).map(compact_run);
     json!({
@@ -268,10 +268,27 @@ async fn status_summary() -> Value {
         "assistant_requests_waiting": open_questions().len(),
         "song_jobs": Value::Array(jobs.as_array().into_iter().flatten().map(compact_job).collect()),
         "covers_and_karaoke": running_activity,
+        "stems": separation["run"],
         "preparation": compact_preparation(&training["prepare"]),
         "training": active_run,
-        "processing": processing,
+        "processing": processing["run"],
     })
+}
+
+/// Whether anything in a status summary is still at work.
+fn busy(summary: &Value) -> Vec<&'static str> {
+    let unfinished = |run: &Value| run.is_object() && run["done"] != true;
+    [
+        ("song_jobs", summary["song_jobs"].as_array().is_some_and(|jobs| !jobs.is_empty())),
+        ("covers_and_karaoke", summary["covers_and_karaoke"].as_array().is_some_and(|entries| !entries.is_empty())),
+        ("stems", unfinished(&summary["stems"])),
+        ("processing", unfinished(&summary["processing"])),
+        ("preparation", summary["preparation"].is_object() && summary["preparation"]["finished"] != true),
+        ("training", !summary["training"].is_null()),
+    ]
+    .into_iter()
+    .filter_map(|(what, working)| working.then_some(what))
+    .collect()
 }
 
 /// How long one wait holds a call: clients give up on a tool call after about
@@ -280,7 +297,7 @@ const WAIT_DEFAULT: u64 = 30;
 const WAIT_LONGEST: u64 = 55;
 
 /// Waits for a job, the preparation, training or everything, a slice at a time.
-async fn wait_for(args: &Value) -> Value {
+async fn wait_for(args: &Value) -> Result<Value, String> {
     let seconds = args.get("seconds").and_then(Value::as_u64).unwrap_or(WAIT_DEFAULT).clamp(2, WAIT_LONGEST);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(seconds);
     let job = args.get("job_id").and_then(Value::as_str).map(str::to_string);
@@ -292,6 +309,10 @@ async fn wait_for(args: &Value) -> Value {
                 if state.get("error").is_some() || state.get("status").is_none() {
                     state = fetch(&format!("/v1/scores/{}", segment(job))).await;
                 }
+                if state.get("status").is_none() {
+                    let why = state["error"].as_str().or(state.as_str()).unwrap_or("not found");
+                    return Err(format!("No song or score job {job} ({why}): job_id is what song_create, song_replay, score_compose or score_transcribe returned. Wait for other work with until."));
+                }
                 let status = state["status"].as_str().unwrap_or_default().to_string();
                 // a score job's state is its score; a song job's is summed up
                 if state.get("generation_settings").is_some() {
@@ -301,22 +322,16 @@ async fn wait_for(args: &Value) -> Value {
             }
             None => {
                 let summary = status_summary().await;
-                let preparing = summary["preparation"].is_object() && summary["preparation"]["finished"] != true;
-                let training = !summary["training"].is_null();
-                let songs = summary["song_jobs"].as_array().is_some_and(|jobs| !jobs.is_empty());
-                let done = match until.as_str() {
-                    "preparation" => !preparing,
-                    "training" => !training,
-                    _ => !preparing && !training && !songs,
-                };
+                let working = busy(&summary);
+                let done = if until == "idle" { working.is_empty() } else { !working.contains(&until.as_str()) };
                 (done, summary)
             }
         };
         if done {
-            return json!({ "done": true, "state": now });
+            return Ok(json!({ "done": true, "state": now }));
         }
         if tokio::time::Instant::now() >= deadline {
-            return json!({ "done": false, "note": "still running; call studio_wait again to keep waiting", "state": now });
+            return Ok(json!({ "done": false, "note": "still running; call studio_wait again to keep waiting", "state": now }));
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
@@ -327,11 +342,15 @@ fn annotations(name: &str) -> Value {
     const READS: &[&str] = &["_get", "_status", "_list", "_catalog", "_files", "_logs", "_log", "_runtime", "_local_models", "_hf_files", "_search_hf", "_capabilities", "_system", "_state", "_read_page", "_screenshot"];
     // a verb that changes something outweighs a noun that reads
     const CHANGES: &[&str] = &["install", "import", "remove", "delete", "refresh", "create", "update", "start", "cancel", "select", "download", "apply", "restart"];
+    // reads whose names the rules above miss: create_form names the create page
+    const READ_NAMES: &[&str] = &["lyrics_find", "cover_prompt_render", "studio_wait", "engine_presets_get", "assistant_requests_wait", "ui_console", "song_defaults", "create_form_get"];
     let changes = CHANGES.iter().any(|verb| name.split('_').any(|word| word == *verb));
-    let read_only = !changes && (READS.iter().any(|part| name.ends_with(part) || name.contains(&format!("{part}_"))) || name.starts_with("writing_") || name == "lyrics_find" || name == "cover_prompt_render" || name == "studio_wait" || name == "engine_presets_get" || name == "assistant_requests_wait" || name == "ui_console");
+    let read_only = READ_NAMES.contains(&name) || !changes && (READS.iter().any(|part| name.ends_with(part) || name.contains(&format!("{part}_"))) || name.starts_with("writing_"));
     let destructive = name.ends_with("_delete") || name.ends_with("_remove") || name == "processing_discard" || name.ends_with("_cancel") || name.contains("_cancel_");
+    // what reaches the internet: OpenRouter, Hugging Face, the lyric databases and every download
+    let open_world = name.starts_with("openrouter_") || name.contains("_hf") || name == "lyrics_find" || name == "models_download" || name == "lora_install_catalog" || name.ends_with("_install") && name != "training_checkpoint_install";
     let title = name.replace('_', " ");
-    json!({ "title": title, "readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": read_only || name.ends_with("_set") || name.contains("_select"), "openWorldHint": name.starts_with("openrouter_") || name.contains("_hf") || name == "lyrics_find" })
+    json!({ "title": title, "readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": read_only || name.ends_with("_set") || name.contains("_select"), "openWorldHint": open_world })
 }
 
 /// The window's side of the bridge: the page subscribes to the commands and
@@ -586,22 +605,24 @@ fn nothing() -> Value {
     json!({ "type": "object", "additionalProperties": false })
 }
 
-/// Audio, lyrics and cue files under a folder, with their path inside it:
-/// the folders a song sits in name its artist when its tags do not.
-fn folder_files(folder: &Path) -> Result<Vec<(String, PathBuf, String)>, String> {
+/// The files under a folder that `keep` takes, with their path inside it: the
+/// folders a song sits in name its artist when its tags do not. A folder
+/// linked from inside itself is walked once.
+fn folder_files(folder: &Path, keep: fn(&Path) -> bool, what: &str) -> Result<Vec<(String, PathBuf, String)>, String> {
     let root = folder.parent().unwrap_or(folder);
     let mut found = Vec::new();
+    let mut walked = std::collections::HashSet::new();
     let mut stack = vec![folder.to_path_buf()];
     while let Some(dir) = stack.pop() {
+        if !walked.insert(std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone())) {
+            continue;
+        }
         let entries = std::fs::read_dir(&dir).map_err(|error| format!("read {}: {error}", dir.display()))?;
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-                continue;
-            }
-            let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_lowercase();
-            if ["wav", "mp3", "flac", "ogg", "m4a", "txt", "lrc", "cue"].contains(&extension.as_str()) {
+            } else if keep(&path) {
                 let relative = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
                 found.push(("files".to_string(), path, relative));
             }
@@ -609,9 +630,20 @@ fn folder_files(folder: &Path) -> Result<Vec<(String, PathBuf, String)>, String>
     }
     found.sort_by(|a, b| a.2.cmp(&b.2));
     if found.is_empty() {
-        return Err(format!("no audio in {}", folder.display()));
+        return Err(format!("no {what} in {}", folder.display()));
     }
     Ok(found)
+}
+
+/// Audio, lyrics and cue files: what a dropped folder of songs brings.
+fn song_file(path: &Path) -> bool {
+    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default().to_lowercase();
+    ["wav", "mp3", "flac", "ogg", "m4a", "txt", "lrc", "cue"].contains(&extension.as_str())
+}
+
+/// A dataset folder of the studio family: its dataset.json and WAV files.
+fn dataset_file(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| name == "dataset.json") || path.extension().is_some_and(|value| value.eq_ignore_ascii_case("wav"))
 }
 
 fn file_name(path: &Path) -> String {
@@ -625,14 +657,14 @@ fn tools() -> &'static [Tool] {
             // ---------------------------------------------------------------- the studio
             Tool {
                 name: "studio_status",
-                description: "What the studio is doing now, in one short summary: song jobs, covers and karaoke, the dataset preparation and its stages, the training run with its step, loss and KL, audio processing, and whether the studio's window is open. Call it first, and use studio_wait to wait.",
+                description: "What the studio is doing now, in one short summary: song jobs, covers and karaoke, the stem split, audio processing, the dataset preparation and its stages, the training run with its step, loss and KL, and whether the studio's window is open. Call it first, and use studio_wait to wait.",
                 schema: nothing,
                 call: |_| composite("status"),
             },
             Tool {
                 name: "studio_wait",
-                description: "Wait for work to finish instead of polling: a song or score job (job_id), the dataset preparation (until: preparation), the training run (until: training), or everything (until: idle). Returns when it is done or after seconds (30 by default, at most 55, under the minute clients allow a call) with how far it got; call it again to keep waiting.",
-                schema: || object(json!({ "job_id": { "type": "string" }, "until": { "type": "string", "enum": ["preparation", "training", "idle"] }, "seconds": { "type": "integer" } }), &[]),
+                description: "Wait for work to finish instead of polling: a song or score job (job_id), or until one kind of work is over - song_jobs, covers_and_karaoke, stems, processing, preparation, training - or everything (until: idle, the default). Returns when it is done or after seconds (30 by default, at most 55, under the minute clients allow a call) with how far it got; call it again to keep waiting.",
+                schema: || object(json!({ "job_id": { "type": "string" }, "until": { "type": "string", "enum": ["idle", "song_jobs", "covers_and_karaoke", "stems", "processing", "preparation", "training"] }, "seconds": { "type": "integer" } }), &[]),
                 call: |_| composite("wait"),
             },
             Tool {
@@ -1144,7 +1176,7 @@ fn tools() -> &'static [Tool] {
             },
             Tool {
                 name: "stems_split",
-                description: "Split a library song into six stems (drums, bass, other, vocals, guitar, piano) with HT-Demucs. Each stem becomes a track of the library made from the song (made_from, made_by stems), replacing the stems of an earlier split; stems_get names them. Wait with studio_wait until idle or poll stems_get.",
+                description: "Split a library song into six stems (drums, bass, other, vocals, guitar, piano) with HT-Demucs. Each stem becomes a track of the library made from the song (made_from, made_by stems), replacing the stems of an earlier split; stems_get names them. Wait with studio_wait until stems.",
                 schema: || id_only("song_id", "library song id"),
                 call: |args| post(format!("/v1/library/songs/{}/stems", segment(&text(args, "song_id")?)), json!({})),
             },
@@ -1542,20 +1574,7 @@ fn tools() -> &'static [Tool] {
                 description: "Take a dataset folder another studio of the family wrote (its dataset.json and WAV files).",
                 schema: || id_only("path", "the dataset folder"),
                 call: |args| {
-                    let folder = PathBuf::from(text(args, "path")?);
-                    let mut files = Vec::new();
-                    let mut stack = vec![folder.clone()];
-                    while let Some(dir) = stack.pop() {
-                        for entry in std::fs::read_dir(&dir).map_err(|error| format!("read {}: {error}", dir.display()))?.flatten() {
-                            let path = entry.path();
-                            if path.is_dir() {
-                                stack.push(path);
-                            } else if path.file_name().is_some_and(|name| name == "dataset.json") || path.extension().is_some_and(|value| value.eq_ignore_ascii_case("wav")) {
-                                let relative = path.strip_prefix(folder.parent().unwrap_or(&folder)).unwrap_or(&path).to_string_lossy().replace('\\', "/");
-                                files.push(("files".to_string(), path, relative));
-                            }
-                        }
-                    }
+                    let files = folder_files(&PathBuf::from(text(args, "path")?), dataset_file, "dataset.json or WAV files")?;
                     Ok(Call { method: Method::POST, path: "/v1/training/datasets/import".into(), payload: Payload::Form { fields: Vec::new(), files } })
                 },
             },
@@ -1620,7 +1639,7 @@ fn tools() -> &'static [Tool] {
                 schema: || object(json!({ "dataset_id": { "type": "string" }, "path": { "type": "string", "description": "folder or single audio file" } }), &["dataset_id", "path"]),
                 call: |args| {
                     let path = PathBuf::from(text(args, "path")?);
-                    let files = if path.is_dir() { folder_files(&path)? } else { vec![("files".to_string(), path.clone(), file_name(&path))] };
+                    let files = if path.is_dir() { folder_files(&path, song_file, "audio")? } else { vec![("files".to_string(), path.clone(), file_name(&path))] };
                     Ok(Call { method: Method::POST, path: format!("/v1/training/datasets/{}/files", segment(&text(args, "dataset_id")?)), payload: Payload::Form { fields: Vec::new(), files } })
                 },
             },
@@ -2002,7 +2021,13 @@ pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
             let Some(tool) = tools().iter().find(|tool| tool.name == name) else {
                 return rpc_error(id, -32602, format!("Unknown tool: {name}; tools/list names them all."));
             };
-            match (tool.call)(&args) {
+            // a tool may read a file or walk a folder before its call: off the runtime
+            let prepare = tool.call;
+            let prepared = {
+                let args = args.clone();
+                tokio::task::spawn_blocking(move || prepare(&args)).await.unwrap_or_else(|error| Err(format!("{name} failed: {error}")))
+            };
+            match prepared {
                 Err(problem) => answer(problem, true),
                 Ok(Call { payload: Payload::Window { command, args, seconds }, .. }) => match ask_window(command, args, seconds).await {
                     Ok(result) => {
@@ -2022,7 +2047,10 @@ pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
                     Err(problem) => answer(problem, true),
                 },
                 Ok(call) if call.path == "composite:status" => tool_json(id, status_summary().await),
-                Ok(call) if call.path == "composite:wait" => tool_json(id, wait_for(&args).await),
+                Ok(call) if call.path == "composite:wait" => match wait_for(&args).await {
+                    Ok(state) => tool_json(id, state),
+                    Err(problem) => answer(problem, true),
+                },
                 Ok(call) if call.path == "composite:questions" => tool_json(id, wait_for_questions(&args).await),
                 Ok(call) if call.path == "composite:answer" => match answer_question(&args) {
                     Ok(text) => answer(text, false),
@@ -2084,7 +2112,7 @@ mod tests {
         std::fs::write(album.join("01. Song.flac"), b"x").unwrap();
         std::fs::write(album.join("01. Song.lrc"), b"x").unwrap();
         std::fs::write(album.join("cover.jpg"), b"x").unwrap();
-        let files = folder_files(&root.path().join("Artist")).unwrap();
+        let files = folder_files(&root.path().join("Artist"), song_file, "audio").unwrap();
         let names: Vec<&str> = files.iter().map(|(_, _, name)| name.as_str()).collect();
         assert_eq!(names, ["Artist/2020 - Album/01. Song.flac", "Artist/2020 - Album/01. Song.lrc"]);
     }
@@ -2119,9 +2147,39 @@ mod tests {
         for name in ["lora_install_catalog", "lora_import_files", "separator_runtime_install", "openrouter_catalog_refresh", "dataset_create"] {
             assert_eq!(annotations(name)["readOnlyHint"], false, "{name}");
         }
-        for name in ["lora_list", "training_status", "dataset_song_files", "ui_screenshot", "writing_guide"] {
+        for name in ["lora_list", "training_status", "dataset_song_files", "ui_screenshot", "writing_guide", "create_form_get", "song_defaults"] {
             assert_eq!(annotations(name)["readOnlyHint"], true, "{name}");
         }
+        for name in ["models_download", "lora_install_catalog", "training_pack_install", "openrouter_complete"] {
+            assert_eq!(annotations(name)["openWorldHint"], true, "{name}");
+        }
+        assert_eq!(annotations("training_checkpoint_install")["openWorldHint"], false);
+    }
+
+    #[test]
+    fn idle_waits_for_every_kind_of_work() {
+        let idle = json!({ "song_jobs": [], "covers_and_karaoke": [], "stems": null, "processing": { "done": true }, "preparation": null, "training": null });
+        assert!(busy(&idle).is_empty());
+        let mut splitting = idle.clone();
+        splitting["stems"] = json!({ "song_id": "s", "progress": 0.1, "done": false });
+        assert_eq!(busy(&splitting), ["stems"]);
+        let mut processing = idle.clone();
+        processing["processing"] = json!({ "done": false });
+        assert_eq!(busy(&processing), ["processing"]);
+    }
+
+    #[test]
+    fn a_dataset_folder_brings_its_json_and_wavs() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("set");
+        std::fs::create_dir_all(folder.join("audio")).unwrap();
+        std::fs::write(folder.join("dataset.json"), b"{}").unwrap();
+        std::fs::write(folder.join("audio").join("a.WAV"), b"x").unwrap();
+        std::fs::write(folder.join("audio").join("a.mp3"), b"x").unwrap();
+        let files = folder_files(&folder, dataset_file, "dataset.json or WAV files").unwrap();
+        let names: Vec<&str> = files.iter().map(|(_, _, name)| name.as_str()).collect();
+        assert_eq!(names, ["set/audio/a.WAV", "set/dataset.json"]);
+        assert!(folder_files(&folder.join("audio"), |_| false, "x").is_err(), "an empty pick is refused");
     }
 
     #[test]
