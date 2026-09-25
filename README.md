@@ -71,7 +71,8 @@ Code, save [docs/mcp-skill.md](docs/mcp-skill.md) as `~/.claude/skills/yue2-stud
   16/24/32-bit WAV. Prompts open and save as JSON or YAML in the engine's own request
   format, so they move freely between the studio, the yue2.cpp WebUI and `yue-synth`.
 - **A writing assistant** — a local Gemma model or OpenRouter writes the style and lyrics
-  from an idea and edits the score on request.
+  from an idea and edits the score on request; or pick your connected agent (MCP) and it
+  writes instead.
 - **Word-level karaoke** — enhanced LRC with a timestamp on every word, aligned by Parakeet
   or Whisper. Your lyrics are kept; only the timing is borrowed.
 - **Six stems on the GPU** — drums, bass, other, vocals, guitar and piano with HT-Demucs.
@@ -79,6 +80,9 @@ Code, save [docs/mcp-skill.md](docs/mcp-skill.md) as `~/.claude/skills/yue2-stud
   (34 instrument groups and drums) with MuScriptor on the GPU, through HOT-Step's native
   port. A piano roll fills in while it listens; play it against the original, mute or solo
   an instrument, save the .mid. Downloaded the first time it is used.
+- **Every result is a track** — stems, a processed take, a re-render and a cover land in the
+  library as tracks of their own, each marked with the one it was made from and keeping the
+  settings it was made with.
 - **LoRA** — LoRA and LoKr files for either half of the model, the composition or the
   sound, each with its own strength, picked in the create form. A catalogue of ready ones
   with their authors credited, and a search on Hugging Face that downloads what you pick.
@@ -121,6 +125,12 @@ Code, save [docs/mcp-skill.md](docs/mcp-skill.md) as `~/.claude/skills/yue2-stud
 | The score as sheet music and as ABC text — melody + chords, melody only, or none | A finished track — its lyrics and the score it was sung from, ready to reuse |
 | ![Cover mode](docs/screenshots/en-04-cover.png) | ![Models](docs/screenshots/en-05-models.png) |
 | Cover mode — pick a recording, SheetSage2 writes its melody down | Model sets — one quantisation per role, what is on disk, switch in one click |
+| ![Any track to MIDI](docs/screenshots/en-09-midi.png) | ![Training your own LoRA](docs/screenshots/en-08-training.png) |
+| Any track to MIDI — a piano roll of every instrument, played against the original, with mute and solo | Your own LoRA trained on the card — loss and drift as it learns, a checkpoint every 50 steps |
+| ![A dataset](docs/screenshots/en-07-dataset.png) | ![The LoRA catalogue](docs/screenshots/en-06-lora.png) |
+| A dataset of 61 songs — lyrics found in the databases players use, styles written by ear | The LoRA catalogue — styles, artists and sound, each credited to its author |
+| ![Audio processing](docs/screenshots/en-10-processing.png) | ![Agent over MCP](docs/screenshots/en-11-agent.png) |
+| Audio processing — noise reduction, the Spectral Lifter, a vocal naturaliser, VST3, mastering | An agent over MCP — the address and the lines to paste into Claude Code or any client |
 
 The same screens in the language you read: [Русский](https://timoncool.github.io/YuE2-Studio/ru.html),
 [中文](https://timoncool.github.io/YuE2-Studio/zh.html), [日本語](https://timoncool.github.io/YuE2-Studio/ja.html),

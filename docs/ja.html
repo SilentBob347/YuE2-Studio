@@ -160,7 +160,7 @@ footer a { color: var(--text); }
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio">GitHub のソース</a>
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio/blob/main/DONATE.md">プロジェクトを支援</a>
   </div>
-  <p class="note">Windows 10/11 x64 と VRAM 6 GB 以上の GPU：NVIDIA（GTX 16 / RTX 20 以降）は CUDA で動作。AMD と Intel の Vulkan は実験的です。モデルはスタジオ内から、あなたが決めたときにダウンロードされます。</p>
+  <p class="note">Windows 10/11 x64 と VRAM 6 GB 以上の GPU：NVIDIA（GTX 900 以降）は CUDA で動作。AMD と Intel の Vulkan は実験的です。モデルはスタジオ内から、あなたが決めたときにダウンロードされます。</p>
 
   <figure class="hero-shot">
     <img src="screenshots/ja-01-create.png" alt="曲を書く：スタイル、歌詞、110 のサンプルのひとつを読み込んだ状態。" loading="eager" />
@@ -183,7 +183,9 @@ footer a { color: var(--text); }
       <div class="card"><h3>自分だけの LoRA</h3><p>同じアーティストやスタイルの曲から、HOT-Step のトレーナーとレシピで LoRA を自分の GPU で学習。設定はすべて変更でき、データセットはこのスタジオと MiniMax Music3 Studio の間で移せます。</p></div>
       <div class="card"><h3>フォルダを落とすだけでデータセット</h3><p>フォルダを落とすと、歌詞はプレーヤーが使う歌詞データベース（LRCLIB、QQ Music、Kugou）から一字一句取り込み、どこにもない曲だけ Whisper が聞き取ります。MOSS-Music が各曲を聴き、アシスタントがスタイルを書きます。曲ごとに進行が見え、再起動しても止まったところから続きます。</p></div>
       <div class="card"><h3>音声処理</h3><p>ノイズ除去、Spectral Lifter、ボーカルの自然化、自分の VST3 プラグイン、リファレンスマスタリング。処理前後を聴き比べ、バージョンとして残すか破棄します。</p></div>
-      <div class="card"><h3>エージェントで操作（MCP）</h3><p>Claude Code、Claude Desktop、Cursor をつなぐと、エージェントがスタジオでできることをすべて行います。曲を書いて生成し、データセットを整えて学習し、カバーを描き、動画エディタでクリップを作り、曲を再生し、ウィンドウを見てボタンを押します。モデル向けの書き方のルールが付属するので、スタイルと歌詞はエージェント自身が書きます。</p></div>
+      <div class="card"><h3>エージェントで操作（MCP）</h3><p>Claude Code、Claude Desktop、Cursor をつなぐと、エージェントがスタジオでできることをすべて行います。曲を書いて生成し、データセットを整えて学習し、カバーを描き、動画エディタでクリップを作り、曲を再生し、ウィンドウを見てボタンを押します。モデル向けの書き方のルールが付属するので、スタイルと歌詞はエージェント自身が書きます。 作詞アシスタントに選べば、ローカルモデルの代わりにエージェントが書きます。</p></div>
+      <div class="card"><h3>どのトラックも MIDI に</h3><p>曲、ステム、処理済みテイクを、GPU 上の MuScriptor がマルチ楽器の MIDI（34 の楽器グループとドラム）に変換します。ピアノロールは聴き取りに合わせて埋まり、原曲と重ねて再生、楽器のミュートやソロ、.mid の保存ができます。初回使用時にダウンロードされます。</p></div>
+      <div class="card"><h3>結果はすべてトラックに</h3><p>ステム、処理済みテイク、再レンダー、カバーは、それぞれ独立したトラックとしてライブラリに入り、元の曲へのリンクと作成時の設定を保持します。</p></div>
     </div>
   </section>
 
@@ -215,6 +217,13 @@ footer a { color: var(--text); }
       <figure><img src="screenshots/ja-03-track.png" alt="完成したトラックと、その歌詞と歌のもとになった楽譜。そのまま再利用できます。" loading="lazy" /><figcaption>完成したトラックと、その歌詞と歌のもとになった楽譜。そのまま再利用できます。</figcaption></figure>
       <figure><img src="screenshots/ja-04-cover.png" alt="カバーモード：録音を選ぶと SheetSage2 がメロディを書き起こします。" loading="lazy" /><figcaption>カバーモード：録音を選ぶと SheetSage2 がメロディを書き起こします。</figcaption></figure>
       <figure><img src="screenshots/ja-05-models.png" alt="モデルセット：役割ごとの量子化、ディスク上のファイル、ワンクリックで切り替え。" loading="lazy" /><figcaption>モデルセット：役割ごとの量子化、ディスク上のファイル、ワンクリックで切り替え。</figcaption></figure>
+      <figure><img src="screenshots/ja-06-lora.png" alt="LoRA カタログ：スタイル、アーティスト、サウンド。作者を明記し、まとめてダウンロード。" loading="lazy" /><figcaption>LoRA カタログ：スタイル、アーティスト、サウンド。作者を明記し、まとめてダウンロード。</figcaption></figure>
+      <figure><img src="screenshots/ja-07-dataset.png" alt="61 曲のデータセット：歌詞とスタイルはスタジオが自動で見つけて書きました。" loading="lazy" /><figcaption>61 曲のデータセット：歌詞とスタイルはスタジオが自動で見つけて書きました。</figcaption></figure>
+      <figure><img src="screenshots/ja-08-training.png" alt="自分の LoRA を GPU で学習：学習中の損失とドリフト、50 ステップごとのチェックポイント、ワンクリックでライブラリへ。" loading="lazy" /><figcaption>自分の LoRA を GPU で学習：学習中の損失とドリフト、50 ステップごとのチェックポイント、ワンクリックでライブラリへ。</figcaption></figure>
+      <figure><img src="screenshots/ja-09-midi.png" alt="どのトラックも MIDI に：楽器ごとのピアノロール、原曲と重ねて再生、ミュートとソロ。" loading="lazy" /><figcaption>どのトラックも MIDI に：楽器ごとのピアノロール、原曲と重ねて再生、ミュートとソロ。</figcaption></figure>
+      <figure><img src="screenshots/ja-10-processing.png" alt="オーディオ処理：ノイズ除去、Spectral Lifter、ボーカルの自然化、VST3 プラグイン、リファレンスへのマスタリング。" loading="lazy" /><figcaption>オーディオ処理：ノイズ除去、Spectral Lifter、ボーカルの自然化、VST3 プラグイン、リファレンスへのマスタリング。</figcaption></figure>
+      <figure><img src="screenshots/ja-11-agent.png" alt="MCP でエージェントを接続：アドレスと、Claude Code などのクライアントに貼り付ける設定。" loading="lazy" /><figcaption>MCP でエージェントを接続：アドレスと、Claude Code などのクライアントに貼り付ける設定。</figcaption></figure>
+      <figure><img src="screenshots/ja-12-derived.png" alt="ツールで作ったトラックはライブラリに残り、元の曲にリンクします。" loading="lazy" /><figcaption>ツールで作ったトラックはライブラリに残り、元の曲にリンクします。</figcaption></figure>
     </div>
   </section>
 
@@ -261,6 +270,7 @@ footer a { color: var(--text); }
           <tr><td>LoRA 学習 — HOT-Step ace-train</td><td>NVIDIA RTX 30 以降、VRAM 11 GB</td><td>8 GB、任意</td></tr>
           <tr><td>曲を聴いて説明 — MOSS-Music-8B</td><td>VRAM 約 12 GB</td><td>10 GB、任意</td></tr>
           <tr><td>VST3 ホスト — HOT-Step</td><td>あなたのマシン、独立したプロセス</td><td>同梱</td></tr>
+          <tr><td>オーディオから MIDI — MuScriptor（HOT-Step ace-midi）</td><td>NVIDIA GTX 16 / RTX 20 以降</td><td>0.5–5.6 GB、任意</td></tr>
         </tbody>
       </table>
     </div>

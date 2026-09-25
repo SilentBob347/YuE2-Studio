@@ -160,7 +160,7 @@ footer a { color: var(--text); }
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio">GitHub 源代码</a>
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio/blob/main/DONATE.md">支持项目</a>
   </div>
-  <p class="note">Windows 10/11 x64，显存 6 GB 以上的显卡：NVIDIA（GTX 16 / RTX 20 或更新）使用 CUDA；AMD 和 Intel 通过 Vulkan 运行，属实验性质。模型在工作室内按你的决定下载。</p>
+  <p class="note">Windows 10/11 x64，显存 6 GB 以上的显卡：NVIDIA（GTX 900 或更新）使用 CUDA；AMD 和 Intel 通过 Vulkan 运行，属实验性质。模型在工作室内按你的决定下载。</p>
 
   <figure class="hero-shot">
     <img src="screenshots/zh-01-create.png" alt="创作歌曲：风格、歌词，已载入 110 个示例之一。" loading="eager" />
@@ -183,7 +183,9 @@ footer a { color: var(--text); }
       <div class="card"><h3>训练你自己的 LoRA</h3><p>用同一歌手或风格的歌曲，在你的显卡上以 HOT-Step 的训练器和配方训练 LoRA。每项设置都可修改，数据集可在本工作室与 MiniMax Music3 Studio 之间迁移。</p></div>
       <div class="card"><h3>拖入即成数据集</h3><p>拖入一个文件夹：歌词逐字取自播放器使用的歌词库（LRCLIB、QQ 音乐、酷狗），只有它们都没有的歌才由 Whisper 听写，MOSS-Music 聆听每首歌，助手写出风格。每首歌都显示进度，重启后从中断处继续。</p></div>
       <div class="card"><h3>音频处理</h3><p>降噪、Spectral Lifter、人声自然化、你自己的 VST3 插件，以及参考母带处理。对比处理前后，保存为版本或丢弃。</p></div>
-      <div class="card"><h3>由你的智能体操控（MCP）</h3><p>连接 Claude Code、Claude Desktop 或 Cursor，智能体就能做工作室能做的一切：写歌并生成、整理数据集并训练、绘制封面、在视频编辑器里剪辑 MV、播放歌曲——还能看到窗口并点击按钮。模型的写作规则随之提供，风格和歌词由智能体自己来写。</p></div>
+      <div class="card"><h3>由你的智能体操控（MCP）</h3><p>连接 Claude Code、Claude Desktop 或 Cursor，智能体就能做工作室能做的一切：写歌并生成、整理数据集并训练、绘制封面、在视频编辑器里剪辑 MV、播放歌曲——还能看到窗口并点击按钮。模型的写作规则随之提供，风格和歌词由智能体自己来写。把它选为写作助手，就由它代替本地模型写词。</p></div>
+      <div class="card"><h3>任意音轨转 MIDI</h3><p>歌曲、分轨或处理后的版本都能在你的显卡上由 MuScriptor 转为多乐器 MIDI——34 个乐器组加鼓。钢琴卷帘随识别实时填充，可与原曲对照播放、静音或独奏乐器并保存 .mid。首次使用时下载。</p></div>
+      <div class="card"><h3>每个结果都是音轨</h3><p>分轨、处理后的版本、重新渲染和翻唱都会作为独立音轨进入曲库，链接到原曲并保留生成时的设置。</p></div>
     </div>
   </section>
 
@@ -215,6 +217,13 @@ footer a { color: var(--text); }
       <figure><img src="screenshots/zh-03-track.png" alt="完成的曲目及其歌词和演唱所依据的乐谱，可直接再次使用。" loading="lazy" /><figcaption>完成的曲目及其歌词和演唱所依据的乐谱，可直接再次使用。</figcaption></figure>
       <figure><img src="screenshots/zh-04-cover.png" alt="翻唱模式：选择一段录音，SheetSage2 记下它的旋律。" loading="lazy" /><figcaption>翻唱模式：选择一段录音，SheetSage2 记下它的旋律。</figcaption></figure>
       <figure><img src="screenshots/zh-05-models.png" alt="模型组：每个角色一种量化，磁盘上已有的文件，一键切换。" loading="lazy" /><figcaption>模型组：每个角色一种量化，磁盘上已有的文件，一键切换。</figcaption></figure>
+      <figure><img src="screenshots/zh-06-lora.png" alt="LoRA 目录：风格、艺术家和音色，注明作者，一次下载。" loading="lazy" /><figcaption>LoRA 目录：风格、艺术家和音色，注明作者，一次下载。</figcaption></figure>
+      <figure><img src="screenshots/zh-07-dataset.png" alt="61 首歌的数据集：歌词和风格由工作室自动找到并写好。" loading="lazy" /><figcaption>61 首歌的数据集：歌词和风格由工作室自动找到并写好。</figcaption></figure>
+      <figure><img src="screenshots/zh-08-training.png" alt="在显卡上训练自己的 LoRA：训练中的损失与漂移，每 50 步一个检查点，一键加入库。" loading="lazy" /><figcaption>在显卡上训练自己的 LoRA：训练中的损失与漂移，每 50 步一个检查点，一键加入库。</figcaption></figure>
+      <figure><img src="screenshots/zh-09-midi.png" alt="任意音轨转 MIDI：按乐器显示的钢琴卷帘，可与原曲对照播放，支持静音和独奏。" loading="lazy" /><figcaption>任意音轨转 MIDI：按乐器显示的钢琴卷帘，可与原曲对照播放，支持静音和独奏。</figcaption></figure>
+      <figure><img src="screenshots/zh-10-processing.png" alt="音频处理：降噪、Spectral Lifter、人声自然化、VST3 插件和参考母带。" loading="lazy" /><figcaption>音频处理：降噪、Spectral Lifter、人声自然化、VST3 插件和参考母带。</figcaption></figure>
+      <figure><img src="screenshots/zh-11-agent.png" alt="通过 MCP 连接智能体：地址以及粘贴到 Claude Code 或其他客户端的配置。" loading="lazy" /><figcaption>通过 MCP 连接智能体：地址以及粘贴到 Claude Code 或其他客户端的配置。</figcaption></figure>
+      <figure><img src="screenshots/zh-12-derived.png" alt="工具生成的音轨保存在曲库中，并链接到原曲。" loading="lazy" /><figcaption>工具生成的音轨保存在曲库中，并链接到原曲。</figcaption></figure>
     </div>
   </section>
 
@@ -261,6 +270,7 @@ footer a { color: var(--text); }
           <tr><td>LoRA 训练 — HOT-Step ace-train</td><td>NVIDIA RTX 30 或更新，11 GB 显存</td><td>8 GB，可选</td></tr>
           <tr><td>按听觉描述歌曲 — MOSS-Music-8B</td><td>约 12 GB 显存</td><td>10 GB，可选</td></tr>
           <tr><td>VST3 宿主 — HOT-Step</td><td>你的电脑，独立进程</td><td>内置</td></tr>
+          <tr><td>音频转 MIDI — MuScriptor（HOT-Step ace-midi）</td><td>NVIDIA GTX 16 / RTX 20 或更新</td><td>0.5–5.6 GB，可选</td></tr>
         </tbody>
       </table>
     </div>

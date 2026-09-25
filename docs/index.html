@@ -160,7 +160,7 @@ footer a { color: var(--text); }
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio">Source on GitHub</a>
     <a class="btn" href="https://github.com/timoncool/YuE2-Studio/blob/main/DONATE.md">Support the project</a>
   </div>
-  <p class="note">Windows 10/11 x64 and a GPU with 6 GB of VRAM: NVIDIA (GTX 16 / RTX 20 or newer) on CUDA; AMD and Intel on Vulkan are experimental. The models are downloaded from inside the studio when you decide to.</p>
+  <p class="note">Windows 10/11 x64 and a GPU with 6 GB of VRAM: NVIDIA (GTX 900 or newer) on CUDA; AMD and Intel on Vulkan are experimental. The models are downloaded from inside the studio when you decide to.</p>
 
   <figure class="hero-shot">
     <img src="screenshots/en-01-create.png" alt="Writing a song: style, lyrics, one of the 110 examples loaded." loading="eager" />
@@ -183,7 +183,9 @@ footer a { color: var(--text); }
       <div class="card"><h3>Your own LoRA</h3><p>Songs of one artist or style become a LoRA on your card, with HOT-Step’s trainer and recipe. Every setting is editable, and datasets move between this studio and MiniMax Music3 Studio.</p></div>
       <div class="card"><h3>A dataset in one drop</h3><p>Drop a folder: the lyrics come word for word from the databases players use (LRCLIB, QQ Music, Kugou), Whisper hears only what none of them knows, MOSS-Music listens to every song and the assistant writes its style. Each song shows its progress, and a restart picks the work up where it stopped.</p></div>
       <div class="card"><h3>Audio processing</h3><p>Noise reduction, the Spectral Lifter, a vocal naturaliser, your own VST3 plugins and mastering to a reference. Compare before and after, keep it as a version or throw it away.</p></div>
-      <div class="card"><h3>Driven by your agent (MCP)</h3><p>Connect Claude Code, Claude Desktop or Cursor and the agent does everything the studio does: writes and makes songs, fills a dataset and trains, draws covers, cuts clips in the video editor, plays songs - and sees the window and presses its buttons. The model’s writing rules come with it, so the agent writes the styles and lyrics itself.</p></div>
+      <div class="card"><h3>Driven by your agent (MCP)</h3><p>Connect Claude Code, Claude Desktop or Cursor and the agent does everything the studio does: writes and makes songs, fills a dataset and trains, draws covers, cuts clips in the video editor, plays songs - and sees the window and presses its buttons. The model’s writing rules come with it, so the agent writes the styles and lyrics itself. Pick it as the writing assistant and it writes instead of the local model.</p></div>
+      <div class="card"><h3>Any track to MIDI</h3><p>A song, a stem or a processed take becomes multi-instrument MIDI - 34 instrument groups and drums - with MuScriptor on your GPU. A piano roll fills in as it listens; play it against the original, mute or solo an instrument, save the .mid. Downloaded the first time you use it.</p></div>
+      <div class="card"><h3>Every result is a track</h3><p>Stems, a processed take, a re-render and a cover land in the library as tracks of their own, each linked to the one it was made from and keeping the settings it was made with.</p></div>
     </div>
   </section>
 
@@ -215,6 +217,13 @@ footer a { color: var(--text); }
       <figure><img src="screenshots/en-03-track.png" alt="A finished track with its lyrics and the score it was sung from, ready to reuse." loading="lazy" /><figcaption>A finished track with its lyrics and the score it was sung from, ready to reuse.</figcaption></figure>
       <figure><img src="screenshots/en-04-cover.png" alt="Cover mode: pick a recording and SheetSage2 writes its melody down." loading="lazy" /><figcaption>Cover mode: pick a recording and SheetSage2 writes its melody down.</figcaption></figure>
       <figure><img src="screenshots/en-05-models.png" alt="Model sets: one quantisation per role, what is on disk, switching in one click." loading="lazy" /><figcaption>Model sets: one quantisation per role, what is on disk, switching in one click.</figcaption></figure>
+      <figure><img src="screenshots/en-06-lora.png" alt="The LoRA catalogue: styles, artists and sound, each credited to its author, downloaded in one pass." loading="lazy" /><figcaption>The LoRA catalogue: styles, artists and sound, each credited to its author, downloaded in one pass.</figcaption></figure>
+      <figure><img src="screenshots/en-07-dataset.png" alt="A dataset of 61 songs, each with its lyrics and style, found and written by the studio." loading="lazy" /><figcaption>A dataset of 61 songs, each with its lyrics and style, found and written by the studio.</figcaption></figure>
+      <figure><img src="screenshots/en-08-training.png" alt="Your own LoRA trained on the card: loss and drift as it learns, a checkpoint every 50 steps, one click into the library." loading="lazy" /><figcaption>Your own LoRA trained on the card: loss and drift as it learns, a checkpoint every 50 steps, one click into the library.</figcaption></figure>
+      <figure><img src="screenshots/en-09-midi.png" alt="Any track to MIDI: a piano roll of every instrument, played against the original, with mute and solo." loading="lazy" /><figcaption>Any track to MIDI: a piano roll of every instrument, played against the original, with mute and solo.</figcaption></figure>
+      <figure><img src="screenshots/en-10-processing.png" alt="Audio processing: noise reduction, the Spectral Lifter, a vocal naturaliser, VST3 plugins and mastering to a reference." loading="lazy" /><figcaption>Audio processing: noise reduction, the Spectral Lifter, a vocal naturaliser, VST3 plugins and mastering to a reference.</figcaption></figure>
+      <figure><img src="screenshots/en-11-agent.png" alt="Connect an agent over MCP: the address and the lines to paste into Claude Code or any other client." loading="lazy" /><figcaption>Connect an agent over MCP: the address and the lines to paste into Claude Code or any other client.</figcaption></figure>
+      <figure><img src="screenshots/en-12-derived.png" alt="Tracks made by tools stay in the library, each linked to the one it was made from." loading="lazy" /><figcaption>Tracks made by tools stay in the library, each linked to the one it was made from.</figcaption></figure>
     </div>
   </section>
 
@@ -261,6 +270,7 @@ footer a { color: var(--text); }
           <tr><td>LoRA trainer — HOT-Step ace-train</td><td>NVIDIA RTX 30 or newer, 11 GB of VRAM</td><td>8 GB, optional</td></tr>
           <tr><td>Describing songs by ear — MOSS-Music-8B</td><td>about 12 GB of VRAM</td><td>10 GB, optional</td></tr>
           <tr><td>VST3 host — HOT-Step</td><td>Your machine, a process of its own</td><td>bundled</td></tr>
+          <tr><td>Audio to MIDI — MuScriptor (HOT-Step ace-midi)</td><td>NVIDIA GTX 16 / RTX 20 or newer</td><td>0.5–5.6 GB, optional</td></tr>
         </tbody>
       </table>
     </div>
