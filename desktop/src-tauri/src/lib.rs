@@ -343,6 +343,10 @@ pub fn run() {
 
     configure_studio_runtime_paths();
 
+    // the service names the studio's version to agents, which only the shell knows
+    let context = tauri::generate_context!();
+    music_server::set_studio_version(context.package_info().version.to_string());
+
     if let Err(error) = start_service() {
         eprintln!("failed to start the studio service: {error}");
     }
@@ -352,7 +356,6 @@ pub fn run() {
     // plugin refuses to initialise without that section and would take the
     // whole window down with it, so a development build simply runs without an
     // updater instead of crashing at launch.
-    let context = tauri::generate_context!();
     let updater_configured = context
         .config()
         .plugins

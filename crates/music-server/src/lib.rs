@@ -3635,6 +3635,18 @@ fn default_studio_settings_path() -> PathBuf {
 
 /// Single per-user directory for every piece of Studio runtime data: settings,
 /// library, media and locally stored provider credentials.
+static STUDIO_VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The studio's own version, set by the desktop shell before the service
+/// starts; a service run on its own is a development build of its crate.
+pub fn set_studio_version(version: String) {
+    let _ = STUDIO_VERSION.set(version);
+}
+
+pub(crate) fn studio_version() -> &'static str {
+    STUDIO_VERSION.get().map(String::as_str).unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
 pub fn studio_data_root() -> Option<PathBuf> {
     if let Some(root) = env::var_os("YUE_STUDIO_DATA_ROOT") {
         return Some(PathBuf::from(root));
@@ -5108,6 +5120,10 @@ async fn transcribe_to_midi(state: &AppState, size: &'static midi::Size, audio: 
     }
     if !status.success() || !events.finished {
         let _ = std::fs::remove_file(&partial);
+        // Windows' "a DLL was not found": the CUDA 13 runtime it imports
+        if status.code() == Some(-1073741515) {
+            anyhow::bail!("the transcriber could not load the CUDA 13 libraries it needs: it runs on an NVIDIA card from the GTX 16 and RTX 20 series on with driver 580 or newer, once the music engine has started on it and fetched them");
+        }
         let said = said.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).iter().cloned().collect::<Vec<_>>().join("\n");
         anyhow::bail!("the transcriber stopped with {status}: {said}");
     }

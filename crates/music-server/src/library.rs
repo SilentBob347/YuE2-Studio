@@ -209,27 +209,6 @@ impl Library {
  /// it the one that plays. The original's file is remembered on the first
  /// version, so a track can always go back to what it was generated as. Kept in
  /// the metadata, like the karaoke timings, so no migration is needed.
- pub fn add_song_version(&self,id:&str,filename:&str,label:&str,settings:serde_json::Value)->Result<Option<Song>>{
-  let Some(mut song)=self.get_song(id)? else{return Ok(None)};
-  let path=self.media_file(filename).with_context(||format!("version file {filename} is not in the media folder"))?;
-  let mut metadata=match song.metadata.take(){serde_json::Value::Object(map)=>map,_=>serde_json::Map::new()};
-  if !metadata.contains_key("original_audio_path"){
-   metadata.insert("original_audio_path".into(),song.audio_path.clone().map(serde_json::Value::String).unwrap_or(serde_json::Value::Null));
-  }
-  let version_id=uuid::Uuid::now_v7().to_string();
-  let entry=serde_json::json!({"id":version_id,"label":label,"file":filename,"created_at":now(),"settings":settings});
-  match metadata.get_mut("audio_versions").and_then(|v|v.as_array_mut()){
-   Some(list)=>list.push(entry),
-   None=>{metadata.insert("audio_versions".into(),serde_json::Value::Array(vec![entry]));}
-  }
-  metadata.insert("active_version".into(),serde_json::Value::String(version_id));
-  song.metadata=serde_json::Value::Object(metadata);
-  song.audio_path=Some(path.to_string_lossy().into_owned());
-  song.updated_at=now();
-  self.save_song(&song)?;
-  Ok(Some(song))
- }
- /// Plays the original (`"original"`) or one of the versions.
  pub fn select_song_version(&self,id:&str,version:&str)->Result<Option<Song>>{
   let Some(mut song)=self.get_song(id)? else{return Ok(None)};
   let original=song.metadata.get("original_audio_path").and_then(|v|v.as_str()).map(str::to_owned);

@@ -1882,7 +1882,7 @@ const HEADER_MISMATCH: i64 = -32020;
 const UNSUPPORTED_VERSION: i64 = -32022;
 
 fn server_info() -> Value {
-    json!({ "name": env!("CARGO_PKG_NAME"), "title": STUDIO, "version": env!("CARGO_PKG_VERSION") })
+    json!({ "name": env!("CARGO_PKG_NAME"), "title": STUDIO, "version": crate::studio_version() })
 }
 
 fn supported_versions() -> Vec<&'static str> {
