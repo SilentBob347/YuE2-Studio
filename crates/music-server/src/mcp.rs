@@ -456,6 +456,21 @@ pub async fn window_result(headers: HeaderMap, Json(answer): Json<WindowAnswer>)
     }
 }
 
+/// Tells every open window that something changed behind it, so the screens
+/// showing songs, jobs, LoRA and settings read them again: an agent's call, or
+/// background work finishing after the call that started it returned.
+pub fn announce(what: &str) {
+    let _ = bridge().commands.send(json!({ "changed": what }).to_string());
+}
+
+/// An agent's call that changes something reaches the windows. The window
+/// never calls the MCP server itself, so each such notice is an agent's doing.
+fn announce_change(tool: &str) {
+    if annotations(tool)["readOnlyHint"].as_bool() == Some(false) {
+        announce(tool);
+    }
+}
+
 async fn ask_window(command: &str, args: Value, seconds: u64) -> Result<Value, String> {
     let Some(window) = open_windows().last().copied() else {
         return Err("The studio's window is not open. Open YuE2 Studio and call the tool again; everything else works without it.".into());
@@ -2121,10 +2136,13 @@ pub async fn handle(headers: HeaderMap, body: axum::body::Bytes) -> Response {
                     Err(problem) => answer(problem, true),
                 },
                 Ok(call) => match call_route(call).await {
-                    Ok((status, text)) if status.is_success() => match serde_json::from_str::<Value>(&text) {
-                        Ok(value) => tool_json(id, shape(name, &args, value)),
-                        Err(_) => answer(text, false),
-                    },
+                    Ok((status, text)) if status.is_success() => {
+                        announce_change(name);
+                        match serde_json::from_str::<Value>(&text) {
+                            Ok(value) => tool_json(id, shape(name, &args, value)),
+                            Err(_) => answer(text, false),
+                        }
+                    }
                     Ok((_, text)) => answer(text, true),
                     Err(problem) => answer(problem, true),
                 },
@@ -2140,6 +2158,19 @@ const INSTRUCTIONS: &str = "You drive YuE2 Studio on this computer. Every tool r
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_change_reaches_the_windows_and_a_read_does_not() {
+        let mut windows = bridge().commands.subscribe();
+        announce_change("library_songs_list");
+        announce_change("song_create");
+        let mut notices = Vec::new();
+        while let Ok(message) = windows.try_recv() {
+            notices.push(serde_json::from_str::<Value>(&message).unwrap());
+        }
+        assert!(notices.contains(&json!({ "changed": "song_create" })));
+        assert!(!notices.contains(&json!({ "changed": "library_songs_list" })));
+    }
 
     #[test]
     fn every_tool_has_a_unique_name_and_an_object_schema() {

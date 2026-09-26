@@ -399,6 +399,7 @@ impl AdapterLibrary {
                 eprintln!("[ERROR] LoRA download: {error:#}");
             }
             library.installing_now().clear();
+            crate::mcp::announce("lora_installed");
         });
         Ok(())
     }
