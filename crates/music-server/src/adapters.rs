@@ -527,6 +527,11 @@ impl AdapterLibrary {
         fs::remove_dir_all(&folder).with_context(|| format!("remove {}", folder.display()))
     }
 
+    /// The word that switches an installed adapter on, when it has one.
+    pub fn trigger_of(&self, id: &str) -> Option<String> {
+        self.read_meta(id).and_then(|meta| meta.trigger).filter(|trigger| !trigger.trim().is_empty())
+    }
+
     pub fn exists(&self, id: &str) -> bool {
         self.read_meta(id).is_some_and(|meta| meta.engine == self.engine)
     }
