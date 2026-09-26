@@ -73,6 +73,10 @@ pub fn write_mp3_tags(path: &Path, tags: &TrackTags) -> anyhow::Result<()> {
 /// the descriptors are walked until one can stand as a genre. Nothing plausible
 /// leaves the field empty, which every player handles and a wrong genre does not.
 pub fn genre_from_caption(caption: &str) -> Option<String> {
+    // a prose description names its music in its first words
+    if let Some(subject) = crate::auto_title::subject(caption) {
+        return Some(subject);
+    }
     caption
         .split(['.', '\n', ','])
         .map(str::trim)
@@ -213,6 +217,12 @@ mod tests {
             "Melodic Death Metal / Gothenburg Sound. Global Emotional Progression: cold."
         );
         assert_eq!(genre_from_caption(caption).as_deref(), Some("Melodic Death Metal / Gothenburg Sound"));
+    }
+
+    #[test]
+    fn a_planned_description_gives_its_subject_as_the_genre() {
+        let caption = "A classic lo-fi hip-hop instrumental built on a dusty, sampled drum break. A clean, jazzy electric guitar plays a motif.";
+        assert_eq!(genre_from_caption(caption).as_deref(), Some("Classic lo-fi hip-hop instrumental"));
     }
 
     #[test]
