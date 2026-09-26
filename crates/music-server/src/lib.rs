@@ -1448,6 +1448,8 @@ async fn list_adapters(State(state): State<AppState>) -> Json<Value> {
         "slots": music_engine::yue_server::ADAPTER_SLOTS,
         "installed": state.adapters.installed(views.as_ref()),
         "catalog": state.adapters.offered(),
+        // one size of the model: nothing for an adapter to be the wrong size for
+        "model": Value::Null,
         "engine_checked": views.is_some(),
         "download": state.adapters.downloader().active_for(adapters::SCOPE).await,
         "installing": state.adapters.installing(),
@@ -2375,7 +2377,7 @@ async fn install_training_checkpoint(
     let trigger = Some(run.trigger.clone());
     let meta = state
         .adapters
-        .import_trained(&name, trigger, &checkpoint.files, adapters::Origin::Trained { run: id.clone(), step })
+        .import_trained(&name, trigger, None, &checkpoint.files, adapters::Origin::Trained { run: id.clone(), step })
         .map_err(training_error)?;
     state.training.mark_installed(&id, step).map_err(training_error)?;
     Ok(Json(meta))

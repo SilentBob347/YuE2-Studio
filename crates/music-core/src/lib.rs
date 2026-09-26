@@ -1,3 +1,4 @@
+pub mod adapter_weights;
 pub mod process;
 
 use serde::{Deserialize, Serialize};
