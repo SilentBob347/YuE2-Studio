@@ -180,6 +180,9 @@ impl SamplingPreset {
 /// out are the engine's protocol defaults.
 #[derive(Debug, Clone, Default, Deserialize)]
 struct CreateMusicJobRequest {
+    /// The window's own mark for this request, handed back on the job so the
+    /// window knows the job as its own before the response reaches it.
+    client_ref: Option<String>,
     /// Comma-separated style tags, verbatim under `[Tags]`.
     #[serde(default)]
     style: String,
@@ -273,6 +276,9 @@ struct MusicJob {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     derived: Option<Value>,
     id: String,
+    /// The mark the submitting window gave the request; absent for an agent's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_ref: Option<String>,
     engine_id: String,
     /// What the assistant said this track's cover should show, if anything.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -362,6 +368,8 @@ struct ReplayMusicJobRequest {
     mp3_bitrate: Option<u32>,
     /// A title for the re-render; the source track's own name otherwise.
     title: Option<String>,
+    /// The window's own mark, as on a new song.
+    client_ref: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -5753,6 +5761,7 @@ async fn create_music_job(
             let job = MusicJob {
                 derived,
                 id: remote.id,
+                client_ref: request.client_ref.clone(),
                 engine_id,
                 cover_prompt: request.cover_prompt.clone(),
                 title: Some(titled(&request)),
@@ -5817,6 +5826,7 @@ async fn replay_music_job(
         derived: None,
         cover_prompt: None,
         id: remote.id,
+        client_ref: request.client_ref.clone(),
         engine_id: PRIMARY_MUSIC_ENGINE_ID.into(),
         title,
         status: MusicJobStatus::Queued,
@@ -6637,6 +6647,7 @@ fn queued_not_configured_job(request: CreateMusicJobRequest, engine_id: String) 
         derived: None,
         cover_prompt: None,
         id: format!("unconfigured-{}", uuid_suffix()),
+        client_ref: request.client_ref.clone(),
         engine_id,
         title: request.title.clone(),
         status: MusicJobStatus::Queued,
@@ -6658,6 +6669,7 @@ fn failed_request_job(request: CreateMusicJobRequest, engine_id: String, error: 
         cover_prompt: None,
         title: request.title.clone(),
         id: format!("rejected-{}", uuid_suffix()),
+        client_ref: request.client_ref.clone(),
         engine_id,
         status: MusicJobStatus::Failed,
         dispatch: MusicJobDispatch::NotConfigured,
@@ -6716,6 +6728,17 @@ fn api_error(status: StatusCode, error: String) -> (StatusCode, Json<ApiError>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_mark_comes_back_on_the_job() {
+        let request: CreateMusicJobRequest = serde_json::from_value(serde_json::json!({ "style": "synth-pop", "lyrics": "[verse]", "client_ref": "temp_1" })).unwrap();
+        let job = failed_request_job(request, "engine".into(), "x".into());
+        assert_eq!(serde_json::to_value(&job).unwrap()["client_ref"], "temp_1");
+
+        let agent: CreateMusicJobRequest = serde_json::from_value(serde_json::json!({ "style": "synth-pop", "lyrics": "[verse]" })).unwrap();
+        let job = failed_request_job(agent, "engine".into(), "x".into());
+        assert!(serde_json::to_value(&job).unwrap().get("client_ref").is_none());
+    }
 
     #[test]
     fn models_are_found_in_subfolders_but_not_hidden_ones() {
@@ -6821,6 +6844,7 @@ mod tests {
 
     fn sample_request() -> CreateMusicJobRequest {
         CreateMusicJobRequest {
+            client_ref: None,
             style: "warm piano pop, female voice, 88 BPM".into(),
             lyrics: "[Verse]\r\none line".into(),
             ..CreateMusicJobRequest::default()
@@ -6843,6 +6867,7 @@ mod tests {
         let mut scales = std::collections::BTreeMap::new();
         scales.insert("ar".to_string(), 0.75);
         let request = CreateMusicJobRequest {
+            client_ref: None,
             adapters: vec![AdapterUse { id: "yue2-instrumental".into(), scales }],
             ..sample_request()
         };
@@ -6852,11 +6877,11 @@ mod tests {
 
         let mut unknown = std::collections::BTreeMap::new();
         unknown.insert("dit".to_string(), 1.0);
-        let refused = CreateMusicJobRequest { adapters: vec![AdapterUse { id: "x".into(), scales: unknown }], ..sample_request() };
+        let refused = CreateMusicJobRequest { client_ref: None, adapters: vec![AdapterUse { id: "x".into(), scales: unknown }], ..sample_request() };
         assert!(yue_request_from(&refused, 1).unwrap_err().contains("unknown slot"));
         let mut huge = std::collections::BTreeMap::new();
         huge.insert("nar".to_string(), 40.0);
-        let refused = CreateMusicJobRequest { adapters: vec![AdapterUse { id: "x".into(), scales: huge }], ..sample_request() };
+        let refused = CreateMusicJobRequest { client_ref: None, adapters: vec![AdapterUse { id: "x".into(), scales: huge }], ..sample_request() };
         assert!(yue_request_from(&refused, 1).is_err());
     }
 
@@ -6874,6 +6899,7 @@ mod tests {
     #[test]
     fn every_set_field_reaches_the_engine_under_its_own_name() {
         let request = CreateMusicJobRequest {
+            client_ref: None,
             abc: Some("X:1\nK:C\nC".into()),
             cot: Some("melody".into()),
             duration_seconds: Some(95.0),
@@ -6910,16 +6936,16 @@ mod tests {
     #[test]
     fn requests_the_engine_would_refuse_are_refused_first_with_a_reason() {
         let cases: Vec<(CreateMusicJobRequest, &str)> = vec![
-            (CreateMusicJobRequest { style: " ".into(), lyrics: String::new(), ..CreateMusicJobRequest::default() }, "style or lyrics"),
-            (CreateMusicJobRequest { cot: Some("half".into()), ..sample_request() }, "cot"),
-            (CreateMusicJobRequest { lm_batch_size: Some(2), ..sample_request() }, "lm_batch_size"),
-            (CreateMusicJobRequest { synth_batch_size: Some(10), ..sample_request() }, "synth_batch_size"),
-            (CreateMusicJobRequest { output_format: Some("flac".into()), ..sample_request() }, "output_format"),
-            (CreateMusicJobRequest { duration_seconds: Some(400.0), ..sample_request() }, "duration"),
-            (CreateMusicJobRequest { semantic_tokens: Some("1,2,x".into()), ..sample_request() }, "semantic_tokens"),
-            (CreateMusicJobRequest { semantic_tokens: Some("1,40000".into()), ..sample_request() }, "semantic_tokens"),
-            (CreateMusicJobRequest { abc_sampling: Some(SamplingPreset { top_p: Some(1.5), ..SamplingPreset::default() }), ..sample_request() }, "top_p"),
-            (CreateMusicJobRequest { semantic_sampling: Some(SamplingPreset { min_tokens: Some(10), max_tokens: Some(5), ..SamplingPreset::default() }), ..sample_request() }, "min_tokens"),
+            (CreateMusicJobRequest { client_ref: None, style: " ".into(), lyrics: String::new(), ..CreateMusicJobRequest::default() }, "style or lyrics"),
+            (CreateMusicJobRequest { client_ref: None, cot: Some("half".into()), ..sample_request() }, "cot"),
+            (CreateMusicJobRequest { client_ref: None, lm_batch_size: Some(2), ..sample_request() }, "lm_batch_size"),
+            (CreateMusicJobRequest { client_ref: None, synth_batch_size: Some(10), ..sample_request() }, "synth_batch_size"),
+            (CreateMusicJobRequest { client_ref: None, output_format: Some("flac".into()), ..sample_request() }, "output_format"),
+            (CreateMusicJobRequest { client_ref: None, duration_seconds: Some(400.0), ..sample_request() }, "duration"),
+            (CreateMusicJobRequest { client_ref: None, semantic_tokens: Some("1,2,x".into()), ..sample_request() }, "semantic_tokens"),
+            (CreateMusicJobRequest { client_ref: None, semantic_tokens: Some("1,40000".into()), ..sample_request() }, "semantic_tokens"),
+            (CreateMusicJobRequest { client_ref: None, abc_sampling: Some(SamplingPreset { top_p: Some(1.5), ..SamplingPreset::default() }), ..sample_request() }, "top_p"),
+            (CreateMusicJobRequest { client_ref: None, semantic_sampling: Some(SamplingPreset { min_tokens: Some(10), max_tokens: Some(5), ..SamplingPreset::default() }), ..sample_request() }, "min_tokens"),
         ];
         for (request, expected) in cases {
             let error = yue_request_from(&request, 1).expect_err(expected);
@@ -6929,7 +6955,7 @@ mod tests {
 
     #[test]
     fn codes_alone_are_a_valid_request() {
-        let request = CreateMusicJobRequest { semantic_tokens: Some("12, 8433 ,22418".into()), ..CreateMusicJobRequest::default() };
+        let request = CreateMusicJobRequest { client_ref: None, semantic_tokens: Some("12, 8433 ,22418".into()), ..CreateMusicJobRequest::default() };
         let body = yue_request_from(&request, 1).unwrap();
         assert_eq!(body["semantic_tokens"], "12, 8433 ,22418");
     }
@@ -7031,12 +7057,12 @@ mod tests {
     }
 
     fn replay_overrides() -> ReplayMusicJobRequest {
-        ReplayMusicJobRequest { song_id: None, replay_request: None, steps: None, seed: None, synth_batch_size: None, output_format: None, peak_clip: None, mp3_bitrate: None, title: None }
+        ReplayMusicJobRequest { client_ref: None, song_id: None, replay_request: None, steps: None, seed: None, synth_batch_size: None, output_format: None, peak_clip: None, mp3_bitrate: None, title: None }
     }
 
     #[test]
     fn a_rerender_keeps_the_music_and_changes_only_the_acoustic_side() {
-        let request = ReplayMusicJobRequest { steps: Some(48), seed: Some(9), synth_batch_size: Some(2), output_format: Some("wav24".into()), mp3_bitrate: Some(192), ..replay_overrides() };
+        let request = ReplayMusicJobRequest { client_ref: None, steps: Some(48), seed: Some(9), synth_batch_size: Some(2), output_format: Some("wav24".into()), mp3_bitrate: Some(192), ..replay_overrides() };
         let replay = serde_json::json!({"style":"piano pop","lyrics":"[Verse] hi","abc":"X:1\nK:C\n","semantic_tokens":"1,2,3","lm_seed":123,"seed":1,"steps":32,"cot":"full"});
         let prepared = prepare_replay_synthesis(replay, &request).unwrap();
         assert_eq!(prepared["semantic_tokens"], "1,2,3");

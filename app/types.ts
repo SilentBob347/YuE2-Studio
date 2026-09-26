@@ -129,6 +129,8 @@ export interface YueJobSong {
 
 export interface YueJob {
   id: string;
+  /** The mark this window gave the request; an agent's job has none. */
+  client_ref?: string;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
   phase: string;
   message: string;
