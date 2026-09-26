@@ -253,8 +253,8 @@ impl ModelManager {
             profile_id: selection.profile_id.clone(),
             component_ids: selection.components.iter().map(|component| component.id.into()).collect(),
             status: DownloadStatus::Downloading,
-            downloaded_bytes: selection.already_present_bytes,
-            total_bytes: selection.total_bytes,
+            downloaded_bytes: 0,
+            total_bytes: selection.total_bytes.saturating_sub(selection.already_present_bytes),
             error: None,
         };
         state.active = Some(job.clone());
@@ -404,7 +404,8 @@ impl ModelManager {
             .iter()
             .filter(|component| published_component(&self.root.join(component.filename), component))
             .map(|component| component.bytes)
-            .sum();
+            .sum::<u64>()
+            .saturating_sub(selection.already_present_bytes);
         let mut state = self.state.write().await;
         if let Some(job) = &mut state.active {
             job.downloaded_bytes = published.min(job.total_bytes);
