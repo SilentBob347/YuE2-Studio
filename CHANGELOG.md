@@ -3,6 +3,22 @@
 What changed, newest first. Dates are release dates; the studio is versioned by its
 Windows build.
 
+## 2026-09-26 — 2.1.2
+
+### Fixed
+
+- **Songs and LoRA an agent makes appear in the window at once.** A song an agent started
+  over MCP only showed after a reload, and so did a LoRA it installed: the service now tells
+  the window when an agent changes something, and the window reads its songs, jobs, LoRA and
+  settings again. Songs the window sends itself are told apart by a mark on the request.
+- **Deleting a song removes its files.** The song left the library but its audio, stems and
+  cover stayed on disk: the paths were compared as written, and one side was written with
+  `\\?\`.
+- **Titles for songs without one.** A prose description is named after what it describes,
+  and a LoRA's trigger word is never the title.
+- **Song counts** take the form each language asks for: 2 песни, 13 песен, 21 песня.
+- **A model download** counts only what comes down, not the files of the set already on disk.
+
 ## 2026-09-25 — 2.1.1
 
 ### Fixed
